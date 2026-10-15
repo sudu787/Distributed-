@@ -25,3 +25,7 @@ export 'src/participant/playback_engine.dart';
 export 'src/participant/participant_session.dart';
 export 'src/simulation/sim_audio_backend.dart';
 export 'src/simulation/scenario.dart';
+export 'src/distribution/track_hasher.dart';
+export 'src/distribution/file_server.dart';
+export 'src/distribution/track_downloader.dart';
+export 'src/discovery/udp_discovery.dart';

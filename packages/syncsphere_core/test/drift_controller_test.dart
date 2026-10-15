@@ -55,13 +55,13 @@ void main() {
       feed(c, 20, i * 500);
     }
     expect(c.mode, CorrectionMode.rateCorrecting);
-    // Between exit (4 ms) and enter (12 ms): remain correcting.
+    // Between exit (3 ms) and enter (8 ms): remain correcting.
     for (var i = 3; i < 8; i++) {
-      feed(c, 8, i * 500);
+      feed(c, 5, i * 500);
     }
     expect(c.mode, CorrectionMode.rateCorrecting);
     for (var i = 8; i < 13; i++) {
-      feed(c, 2, i * 500);
+      feed(c, 1, i * 500);
     }
     expect(c.mode, CorrectionMode.inSync);
     expect(c.rate, 1.0);
@@ -93,7 +93,7 @@ void main() {
   test('single outlier does not trigger seek (median filter)', () {
     final c = DriftController(cfg, rateSupported: true);
     for (var i = 0; i < 5; i++) {
-      feed(c, 2, i * 500);
+      feed(c, 1, i * 500);
     }
     expect(feed(c, 5000, 3000).resync, isFalse);
     expect(feed(c, 2, 3500).resync, isFalse);

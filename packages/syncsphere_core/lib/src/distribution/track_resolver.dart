@@ -51,7 +51,7 @@ abstract class TrackResolver {
 /// modelling download/IO time. Used by tests and the simulator.
 class StaticTrackResolver extends TrackResolver {
   final Map<String, Uri> local;
-  final Duration Function(TrackInfo t)? fetchDelay;
+  final Duration Function(TrackInfo track)? fetchDelay;
   final Set<String> fetchable;
   final Set<String> _fetched = {};
 
@@ -61,25 +61,25 @@ class StaticTrackResolver extends TrackResolver {
   void setTransferContext(TransferContext? ctx) {}
 
   @override
-  Future<TrackAvailability> availability(TrackInfo t) async =>
-      local.containsKey(t.id) || _fetched.contains(t.id)
+  Future<TrackAvailability> availability(TrackInfo track) async =>
+      local.containsKey(track.id) || _fetched.contains(track.id)
           ? TrackAvailability.available
           : TrackAvailability.missing;
 
   @override
-  Future<TrackSource> resolve(TrackInfo t, DistributionMode mode) async {
-    final uri = local[t.id];
+  Future<TrackSource> resolve(TrackInfo track, DistributionMode mode) async {
+    final uri = local[track.id];
     if (uri != null && mode != DistributionMode.lanOnly) {
-      return TrackSource(uri: uri, trackId: t.id);
+      return TrackSource(uri: uri, trackId: track.id);
     }
-    if (mode == DistributionMode.localOnly || !fetchable.contains(t.id)) {
-      throw TrackUnavailableException('missing_track', 'no local copy of ${t.title}');
+    if (mode == DistributionMode.localOnly || !fetchable.contains(track.id)) {
+      throw TrackUnavailableException('missing_track', 'no local copy of ${track.title}');
     }
-    if (!_fetched.contains(t.id)) {
-      final d = fetchDelay?.call(t);
+    if (!_fetched.contains(track.id)) {
+      final d = fetchDelay?.call(track);
       if (d != null) await Future<void>.delayed(d);
-      _fetched.add(t.id);
+      _fetched.add(track.id);
     }
-    return TrackSource(uri: Uri.parse('cache:///${t.id}'), trackId: t.id);
+    return TrackSource(uri: Uri.parse('cache:///${track.id}'), trackId: track.id);
   }
 }

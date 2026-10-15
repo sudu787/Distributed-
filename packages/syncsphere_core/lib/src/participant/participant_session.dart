@@ -398,7 +398,9 @@ class ParticipantSession implements ClockSource {
     final proof = _roomKey!.clientProof(options.deviceId, _clientNonce!, c.serverNonce);
     _send(AuthMsg(proof: proof, resumeSession: _sessionId));
     final keys = _roomKey!.sessionKeys(options.deviceId, _clientNonce!, c.serverNonce);
-    _codec!.activate(sendKey: keys.clientToServer, recvKey: keys.serverToClient);
+    _codec!
+      ..activate(sendKey: keys.clientToServer, recvKey: keys.serverToClient)
+      ..allowPlainReject = true;
     _hs = _Hs.awaitWelcome;
   }
 
@@ -412,6 +414,7 @@ class ParticipantSession implements ClockSource {
       return;
     }
     _handshakeTimer?.cancel();
+    _codec!.allowPlainReject = false;
     _hs = _Hs.active;
     _hadJoinedThisLink = true;
     if (_sessionId != null) reconnectCount++;

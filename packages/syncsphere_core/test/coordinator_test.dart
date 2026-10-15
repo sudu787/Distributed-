@@ -10,6 +10,8 @@ class RawClient {
   final FrameCodec codec = FrameCodec();
   final List<Message> received = [];
   final List<ProtocolException> errors = [];
+  // Test helper; the connection is torn down with the fake network.
+  // ignore: cancel_subscriptions
   late final StreamSubscription<String> sub;
   bool closed = false;
 

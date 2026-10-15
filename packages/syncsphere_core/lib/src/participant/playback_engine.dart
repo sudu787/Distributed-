@@ -108,6 +108,7 @@ class PlaybackEngine {
   int? _lastPositionUs;
   bool _buffering = false;
   String _playlistSignature = '';
+  final Map<String, TrackAvailability> _reportedAvailability = {};
   int _lastReportAtUs = 0;
   bool _disposed = false;
 
@@ -178,6 +179,7 @@ class PlaybackEngine {
       log.warn('engine.offline', 'coordinator unreachable; continuing on last known timeline');
     } else if (_disconnectedAtUs != null) {
       _awaitingRejoin = true;
+      _playlistSignature = ''; // re-report availability on the next state
       _readySentGen = null; // coordinator lost our readiness with the link
       _preparingPendingGen = null;
     }
@@ -317,6 +319,7 @@ class PlaybackEngine {
     _standby = seg;
     try {
       final src = await resolver.resolve(track, s.distribution);
+      _markAvailable(track.id);
       if (!_stillRelevant(p.generation)) {
         if (identical(_standby, seg)) _standby = null;
         return;
@@ -399,6 +402,7 @@ class PlaybackEngine {
         final seg = _Segment(++_segSeq, tl.generation, tl.trackId!, pos, SegmentStatus.preparing, isResync: resync);
         final t0 = clock.nowMicros();
         final src = await resolver.resolve(track, s.distribution);
+        _markAvailable(track.id);
         if (_state?.timeline.generation != tl.generation) return;
         if (!resync) _standby = seg;
         await backend.prepare(segmentId: seg.id, source: src, positionUs: pos);
@@ -639,6 +643,9 @@ class PlaybackEngine {
         entries.add(TrackAvailabilityEntry(t.id, TrackAvailability.unknown));
       }
     }
+    for (final e in entries) {
+      _reportedAvailability[e.trackId] = e.availability;
+    }
     if (_connected) send(AvailabilityMsg(entries));
     // Prefetch the track after the current one so track changes do not wait
     // for a download.
@@ -647,6 +654,16 @@ class PlaybackEngine {
       unawaited(resolver.prefetch(s.playlist[idx + 1], s.distribution).catchError((Object e) {
         log.debug('engine.prefetch', 'prefetch failed: $e');
       }));
+    }
+  }
+
+  /// Tells the coordinator a track became playable here (e.g. after a LAN
+  /// download), so the room screen's availability stays accurate.
+  void _markAvailable(String trackId) {
+    if (_reportedAvailability[trackId] == TrackAvailability.available) return;
+    _reportedAvailability[trackId] = TrackAvailability.available;
+    if (_connected) {
+      send(AvailabilityMsg([TrackAvailabilityEntry(trackId, TrackAvailability.available)]));
     }
   }
 

@@ -37,6 +37,12 @@ class FrameCodec {
 
   bool get isAuthenticated => _sendKey != null && _recvKey != null;
 
+  /// Client side, between sending `auth` and receiving `welcome`: the
+  /// coordinator answers a failed authentication with an *unauthenticated*
+  /// `reject` (it has no session key for a client that failed to prove the
+  /// room key). Only `reject` is accepted this way, nothing else.
+  bool allowPlainReject = false;
+
   /// Activates per-message authentication for both directions.
   void activate({required Uint8List sendKey, required Uint8List recvKey}) {
     _sendKey = sendKey;
@@ -72,7 +78,12 @@ class FrameCodec {
     final tag = frame.substring(0, dot);
     final json = frame.substring(dot + 1);
 
-    final key = _recvKey;
+    var key = _recvKey;
+    var plainReject = false;
+    if (key != null && tag == '-' && allowPlainReject) {
+      plainReject = true;
+      key = null;
+    }
     if (key != null) {
       if (!constantTimeEquals(tag, macTag(key, utf8.encode(json)))) {
         throw const ProtocolException('bad_mac', 'frame authentication failed');
@@ -103,6 +114,9 @@ class FrameCodec {
     }
     if (key == null && !kHandshakeTypes.contains(type)) {
       throw ProtocolException('unauthenticated', '$type before authentication');
+    }
+    if (plainReject && type != RejectMsg.kType) {
+      throw const ProtocolException('bad_mac', 'only reject may be unauthenticated here');
     }
     final body = r.map('b');
     final msg = Message.parse(type, body, limits: limits);
