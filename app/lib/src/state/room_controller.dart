@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:syncsphere_audio/syncsphere_audio.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
 import '../data/models.dart';
@@ -253,6 +255,80 @@ class RoomController extends Notifier<RoomViewState> {
 
   /// Last calibration measured by this device's microphone.
   CalibrationOutcome? get lastCalibration => _svc.session?.calibrationListener?.lastOutcome;
+
+  /// A JSON report of this device's sync state and recent events, for
+  /// troubleshooting. Contains no join key and no audio.
+  String diagnosticsReport({int maxEvents = 300}) {
+    final s = _svc.session;
+    final id = ref.read(identityProvider);
+    final c = s?.estimate;
+    final e = s?.engine.status;
+    final backend = s?.backend;
+    final cal = lastCalibration;
+    final report = <String, Object?>{
+      'kind': 'syncsphere-diagnostics-v1',
+      'generatedAt': DateTime.now().toIso8601String(),
+      'device': {
+        'id': id.deviceId,
+        'name': id.displayName,
+        'savedOutputCalibrationUs': id.outputCalibrationUs,
+        'savedStartLatencyUs': id.startLatencyUs,
+        if (backend is Media3AudioBackend) 'audio': backend.deviceInfo,
+        if (backend is Media3AudioBackend) 'bridgeUncertaintyUs': backend.bridge.estimate?.uncertaintyMicros.round(),
+      },
+      'session': {
+        'phase': s?.phase.name,
+        'role': s?.role?.name,
+        'isHost': state.isHost,
+        'rttP95Us': s?.rttP95Us,
+      },
+      if (c != null)
+        'clock': {
+          'offsetUs': c.offsetMicros.round(),
+          'uncertaintyUs': c.uncertaintyMicros.round(),
+          'skewPpm': double.parse(c.skewPpm.toStringAsFixed(2)),
+          'samplesUsed': c.samplesUsed,
+          'samplesInWindow': c.samplesInWindow,
+          'minDelayUs': c.minDelayMicros,
+          'method': c.method,
+        },
+      if (s != null && e != null)
+        'engine': {
+          'mode': e.mode.name,
+          'lastErrorUs': e.lastErrorUs,
+          'rate': e.rate,
+          'startLatencyUs': e.startLatencyUs,
+          'outputCalibrationUs': s.engine.outputCalibrationUs,
+          'playerState': e.playerState,
+          'resyncs': s.engine.drift.seekCount,
+          'rateChanges': s.engine.drift.rateChangeCount,
+          if (e.lastError != null) 'lastError': e.lastError,
+        },
+      if (cal != null)
+        'lastCalibration': [
+          for (final d in cal.devices)
+            {
+              'device': d.deviceId,
+              'clicksHeard': d.arrivalsBySlot.length,
+              'clicksExpected': d.expectedClicks,
+              'arrivalsUs': {for (final a in d.arrivalsBySlot.entries) '${a.key}': a.value},
+              'localCorrectionUs': d.correctionUs,
+            }
+        ],
+      if (state.room != null) 'room': state.room!.toJson(),
+      if (state.diagnostics != null) 'roomDiagnostics': state.diagnostics!.toBody(),
+      'events': [for (final ev in _svc.log.recent(limit: maxEvents, minLevel: EventLevel.debug)) ev.toJson()],
+    };
+    return const JsonEncoder.withIndent(' ').convert(_jsonSafe(report));
+  }
+
+  static Object? _jsonSafe(Object? v) => switch (v) {
+        null || bool() || String() => v,
+        final num n => n.isFinite ? n : null,
+        final Map<Object?, Object?> m => {for (final e in m.entries) '${e.key}': _jsonSafe(e.value)},
+        final Iterable<Object?> l => [for (final x in l) _jsonSafe(x)],
+        _ => v.toString(),
+      };
 
   /// Join link for this room (host only; contains the join key).
   Future<JoinLink?> joinLink() async {

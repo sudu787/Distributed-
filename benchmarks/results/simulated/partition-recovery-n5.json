@@ -25,7 +25,7 @@
       "p95": 12.51,
       "p99": 27.35,
       "max": 27.38,
-      "mean": 9.32
+      "mean": 9.29
     },
     "interDeviceSpreadMs_steady": {
       "n": 2267,
@@ -33,23 +33,23 @@
       "p95": 10.27,
       "p99": 16.43,
       "max": 23.83,
-      "mean": 8.85
+      "mean": 8.81
     },
     "pairwiseErrorMs": {
       "n": 23280,
-      "median": 3.74,
+      "median": 3.66,
       "p95": 9.34,
       "p99": 16.95,
       "max": 27.38,
-      "mean": 4.4
+      "mean": 4.34
     },
     "absErrorVsTimelineMs": {
       "n": 11640,
-      "median": 2.38,
+      "median": 2.34,
       "p95": 7.83,
       "p99": 11.3,
       "max": 16.09,
-      "mean": 2.82
+      "mean": 2.79
     },
     "startSkewMs": {
       "n": 1,
@@ -81,7 +81,7 @@
       "p95": 8.63,
       "p99": 8.71,
       "max": 8.72,
-      "mean": 7.86
+      "mean": 7.79
     },
     "commandToAudibleLatencyMs": {
       "n": 1,
@@ -93,19 +93,19 @@
     },
     "clockOffsetErrorUs": {
       "n": 480,
-      "median": 568.0,
-      "p95": 1454.0,
-      "p99": 1912.0,
+      "median": 574.0,
+      "p95": 1373.0,
+      "p99": 1829.0,
       "max": 2124.0,
-      "mean": 636.0
+      "mean": 629.0
     },
     "clockUncertaintyUs": {
       "n": 480,
-      "median": 4204.0,
-      "p95": 5092.0,
-      "p99": 5502.0,
-      "max": 5962.0,
-      "mean": 4283.0
+      "median": 4208.0,
+      "p95": 5050.0,
+      "p99": 5608.0,
+      "max": 5998.0,
+      "mean": 4285.0
     },
     "clockUncertaintyCoverage": 1.0,
     "recoveryAfterPartitionMs": {
@@ -118,16 +118,16 @@
     },
     "unrecoveredDevices": [],
     "resyncSeeks": 0,
-    "rateChanges": 18,
+    "rateChanges": 17,
     "bufferingStalls": 0,
     "playCalls": 5,
     "networkFrames": 3291,
-    "networkBytes": 806613,
-    "networkBytesPerDevicePerSecond": 1344,
+    "networkBytes": 806719,
+    "networkBytesPerDevicePerSecond": 1345,
     "failedSessions": [],
     "killedDevices": [],
     "failureReasons": {},
     "coordinatorWarnings": 3
   },
-  "wallClockMs": 298
+  "wallClockMs": 265
 }

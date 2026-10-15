@@ -202,7 +202,7 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 | | `maxSkewPpm`, `residualSkewPpm`, `minSkewSpanMs`, `minSkewSamples`, `probeTimeoutMs` | 200, 10, 20000, 10, 2000 |
 | scheduler | `minLeadMs`, `maxLeadMs`, `rttMultiplier`, `safetyMarginMs` | 250, 3000, 1.5, 120 |
 | | `readinessTimeoutMs`, `lateJoinLeadMs`, `minScheduleAheadMs` | 8000, 400, 40 |
-| drift | `reportIntervalActiveMs` / `reportIntervalIdleMs`, `settleTimeMs`, `medianWindow` | 500 / 2000, 1200, 5 |
+| drift | `reportIntervalActiveMs` / `reportIntervalIdleMs`, `settleTimeMs`, `latencyLearnDelayMs`, `medianWindow` | 500 / 2000, 1200, 2500, 5 |
 | | `rateEnterThresholdUs` / `rateExitThresholdUs` | 8000 / 3000 |
 | | `seekThresholdUs`, `seekThresholdNoRateUs`, `seekConfirmations`, `seekCooldownMs` | 250000, 45000, 2, 5000 |
 | | `correctionHorizonMs`, `maxRateDelta`, `minRateStep` | 4000, 0.015, 0.0005 |

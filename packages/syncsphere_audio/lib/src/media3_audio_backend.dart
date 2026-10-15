@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
@@ -142,6 +143,48 @@ class Media3AudioBackend implements AudioBackend {
 
   /// Notification button presses ("play", "pause", "next", "previous").
   Stream<String> get notificationCommands => _commands.stream;
+
+  /// Converter for [ConvertingTrackResolver]: decodes MP3 / ADTS AAC files
+  /// into PCM WAV copies under [dir] (sample-exact seeking), keeping at most
+  /// [maxCacheBytes] of copies (least recently used are deleted first).
+  SourceConverter exactSeekConverter(Directory dir, {int maxCacheBytes = 2 * 1024 * 1024 * 1024}) =>
+      (track, src) async {
+        if (src.uri.scheme != 'file') return null;
+        if (!needsExactSeekCopy(await readFileHead(File.fromUri(src.uri)))) return null;
+        final out = File('${dir.path}/${track.id}.wav');
+        if (await out.exists()) {
+          await out.setLastModified(DateTime.now());
+          return out.uri;
+        }
+        await dir.create(recursive: true);
+        await _evict(dir, maxCacheBytes);
+        try {
+          final info = await api.exactCopy(src.uri.toString(), out.path);
+          log?.info('track.decoded', 'decoded "${track.title}" to PCM for exact seeking',
+              {'decoder': info['decoder'], 'sampleRate': info['sampleRate'], 'channels': info['channels']});
+        } on PlatformException catch (e) {
+          throw StateError(e.message ?? e.code);
+        }
+        return out.uri;
+      };
+
+  static Future<void> _evict(Directory dir, int maxBytes) async {
+    final files = <File, FileStat>{};
+    await for (final e in dir.list()) {
+      if (e is File && e.path.endsWith('.wav')) files[e] = await e.stat();
+    }
+    var total = files.values.fold<int>(0, (a, s) => a + s.size);
+    final oldest = files.keys.toList()..sort((a, b) => files[a]!.modified.compareTo(files[b]!.modified));
+    for (final f in oldest) {
+      if (total <= maxBytes) break;
+      total -= files[f]!.size;
+      try {
+        await f.delete();
+      } on FileSystemException {
+        // In use or already gone.
+      }
+    }
+  }
 
   /// Microphone recorder for acoustic calibration, sharing this backend's
   /// clock bridge.

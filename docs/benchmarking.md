@@ -58,10 +58,10 @@ Highlights (SIMULATED):
 - Start skew grows with device count (p50 ≈ 8–17 ms with 2–3 devices, ≈ 21–32 ms with 10). It is dominated by the
   modelled per-start latency jitter of the audio pipeline, not by the network. Rate correction then pulls devices
   together within seconds, which is why steady-state spread is lower than start skew.
-- Without drift correction, spread reaches 149 ms after 60 min. With correction, p95 is 6.6 ms.
+- Without drift correction, spread reaches 148 ms after 60 min. With correction, p95 is 7.0 ms.
 - An uncalibrated Bluetooth device sits ~185 ms behind acoustically while software reports it in sync. A calibration
   offset fixes this (spread ≈ 4 ms).
-- Listening-spot calibration: spread at the listener drops from 191 ms to 2.0 ms median (p95 25 ms, all from the first
+- Listening-spot calibration: spread at the listener drops from 192 ms to 4.6 ms median (p95 22 ms, mostly from the first
   ~10 s after music resumes). The devices' *output* spread rises to ~19 ms, which is intended: nearer speakers are
   delayed by their distance difference.
 - A channel-role switch costs a short blip (≤25 ms max in `channel-role-switch-n3`), then rate correction recovers.

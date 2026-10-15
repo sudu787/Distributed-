@@ -22,92 +22,92 @@
   },
   "metrics": {
     "interDeviceSpreadMs_all": {
-      "n": 2182,
-      "median": 6.17,
-      "p95": 16.71,
-      "p99": 17.75,
-      "max": 17.81,
-      "mean": 6.98
+      "n": 2184,
+      "median": 6.02,
+      "p95": 17.39,
+      "p99": 18.27,
+      "max": 18.32,
+      "mean": 6.79
     },
     "interDeviceSpreadMs_steady": {
-      "n": 1939,
-      "median": 6.02,
-      "p95": 9.56,
-      "p99": 14.35,
-      "max": 16.03,
-      "mean": 6.33
+      "n": 1940,
+      "median": 5.93,
+      "p95": 9.9,
+      "p99": 14.92,
+      "max": 16.69,
+      "mean": 6.16
     },
     "pairwiseErrorMs": {
-      "n": 6546,
-      "median": 4.68,
-      "p95": 10.18,
-      "p99": 17.24,
-      "max": 17.81,
-      "mean": 4.65
+      "n": 6552,
+      "median": 4.52,
+      "p95": 10.49,
+      "p99": 17.78,
+      "max": 18.32,
+      "mean": 4.52
     },
     "absErrorVsTimelineMs": {
-      "n": 6547,
-      "median": 1.67,
-      "p95": 6.9,
-      "p99": 10.06,
-      "max": 11.33,
-      "mean": 2.9
+      "n": 6552,
+      "median": 1.84,
+      "p95": 6.7,
+      "p99": 11.33,
+      "max": 11.35,
+      "mean": 3.18
     },
     "startSkewMs": {
       "n": 4,
-      "median": 12.59,
-      "p95": 17.73,
-      "p99": 17.79,
-      "max": 17.81,
-      "mean": 12.32
+      "median": 12.28,
+      "p95": 18.25,
+      "p99": 18.31,
+      "max": 18.33,
+      "mean": 11.9
     },
     "startErrorMs": {
       "n": 12,
-      "median": 5.18,
-      "p95": 10.61,
-      "p99": 11.17,
-      "max": 11.31,
-      "mean": 5.11
+      "median": 5.58,
+      "p95": 11.32,
+      "p99": 11.33,
+      "max": 11.33,
+      "mean": 5.33
     },
     "driftSpreadFirstMinuteMs": {
       "n": 968,
-      "median": 6.06,
-      "p95": 8.01,
+      "median": 6.05,
+      "p95": 6.96,
       "p99": 9.73,
       "max": 10.71,
-      "mean": 6.03
+      "mean": 6.14
     },
     "driftSpreadLastMinuteMs": {
-      "n": 1185,
-      "median": 6.06,
-      "p95": 15.62,
-      "p99": 17.24,
-      "max": 17.27,
-      "mean": 6.86
+      "n": 1187,
+      "median": 5.74,
+      "p95": 16.95,
+      "p99": 18.29,
+      "max": 18.32,
+      "mean": 6.46
     },
     "commandToAudibleLatencyMs": {
       "n": 5,
-      "median": 400.0,
+      "median": 340.0,
       "p95": 612.0,
       "p99": 618.4,
       "max": 620.0,
-      "mean": 392.0
+      "mean": 364.0
     },
     "clockOffsetErrorUs": {
       "n": 240,
-      "median": 602.0,
-      "p95": 1315.0,
-      "p99": 2180.0,
-      "max": 2408.0,
-      "mean": 643.0
+      "median": 545.0,
+      "p95": 1299.0,
+      "p99": 2173.0,
+      "max": 2392.0,
+      "mean": 601.0
     },
     "clockUncertaintyUs": {
       "n": 240,
-      "median": 4326.0,
-      "p95": 5048.0,
-      "p99": 5348.0,
+      "median": 4372.0,
+      "p95": 5148.0,
+      "p99": 5377.0,
       "max": 5595.0,
-      "mean": 4380.0
+      "mean": 4420.0
     },
     "clockUncertaintyCoverage": 1.0,
     "recoveryAfterPartitionMs": {
@@ -118,13 +118,13 @@
     "rateChanges": 16,
     "bufferingStalls": 0,
     "playCalls": 12,
-    "networkFrames": 1974,
-    "networkBytes": 382741,
-    "networkBytesPerDevicePerSecond": 1063,
+    "networkFrames": 1975,
+    "networkBytes": 382982,
+    "networkBytesPerDevicePerSecond": 1064,
     "failedSessions": [],
     "killedDevices": [],
     "failureReasons": {},
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 111
+  "wallClockMs": 183
 }

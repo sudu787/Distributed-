@@ -127,9 +127,10 @@ class SyncAudioEngine(
     }
 
     private fun buildPlayer(): ExoPlayer {
-        // Accurate seeking matters more than seek speed for synchronized
-        // playback: VBR MP3 without a seek table would otherwise land at an
-        // estimated (wrong) byte offset while reporting the requested time.
+        // Index seeking only helps VBR MP3 *without* a seek table; files with
+        // a Xing table of contents still seek approximately. The Dart side
+        // therefore plays exact PCM copies of MP3/ADTS files
+        // (TrackTranscoder / ConvertingTrackResolver).
         val extractors = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)

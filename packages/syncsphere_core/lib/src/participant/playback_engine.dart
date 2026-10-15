@@ -43,6 +43,27 @@ class _Segment {
   bool firstMeasurementDone = false;
   final bool isResync;
 
+  /// Position gained (+) or lost (−) through playback-rate corrections
+  /// since the start, so start-latency learning can subtract it.
+  double rateCorrectionUs = 0;
+  double _rate = 1.0;
+  int? _rateSinceUs;
+
+  void noteRate(int nowUs, double rate) {
+    rateCorrectionAt(nowUs);
+    _rate = rate;
+    _rateSinceUs = nowUs;
+  }
+
+  double rateCorrectionAt(int nowUs) {
+    final since = _rateSinceUs;
+    if (since != null && nowUs > since) {
+      rateCorrectionUs += (_rate - 1.0) * (nowUs - since);
+      _rateSinceUs = nowUs;
+    }
+    return rateCorrectionUs;
+  }
+
   _Segment(this.id, this.generation, this.trackId, this.positionUs, this.status, {this.isResync = false});
 }
 
@@ -553,15 +574,17 @@ class PlaybackEngine {
     final error = rendered - expected;
     _lastErrorUs = error;
 
-    if (!a.firstMeasurementDone) {
+    final learnAt = (a.targetOutLocalUs ?? now) + config.drift.latencyLearnDelay.inMicroseconds;
+    if (!a.firstMeasurementDone && now >= learnAt) {
       a.firstMeasurementDone = true;
-      _learnStartLatency(a, error);
+      _learnStartLatency(a, error - a.rateCorrectionAt(sample.atLocalUs).round());
     }
 
     final unc = est.uncertaintyAt(now);
     final d = _drift.onMeasurement(errorUs: error.toDouble(), uncertaintyUs: unc, nowUs: now);
     if (d.newRate != null) {
       log.debug('drift.rate', 'rate → ${d.newRate!.toStringAsFixed(4)} (error ${(d.filteredErrorUs / 1000).toStringAsFixed(1)} ms)');
+      a.noteRate(now, d.newRate!);
       unawaited(backend.setRate(d.newRate!).catchError((Object e) => _fail('setRate failed: $e')));
     }
     if (d.resync) {

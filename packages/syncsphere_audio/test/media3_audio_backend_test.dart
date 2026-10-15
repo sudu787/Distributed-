@@ -95,6 +95,13 @@ class FakeNative implements NativeAudioApi {
   Future<void> stopService() async => calls['stopService'] = [];
 
   @override
+  Future<Map<String, Object?>> exactCopy(String uri, String outPath) async {
+    calls['exactCopy'] = [uri, outPath];
+    File(outPath).writeAsBytesSync(List.filled(100, 0));
+    return {'path': outPath, 'sampleRate': 44100, 'channels': 2, 'durationUs': 1000, 'decoder': 'c2.android.mp3.decoder'};
+  }
+
+  @override
   Stream<Map<String, Object?>> get events => ev.stream;
 }
 
@@ -206,5 +213,31 @@ void main() {
     await bg.stop();
     expect(native.calls['stopService'], isEmpty);
     expect(bg.running, isFalse);
+  });
+
+  test('exact-seek converter decodes MP3 only, caches, and evicts old copies', () async {
+    final native = FakeNative(ManualClock(0), 0);
+    final b = Media3AudioBackend(api: native, clock: ManualClock(0));
+    final dir = await Directory.systemTemp.createTemp('ss-pcm');
+    final mp3 = File('${dir.path}/song.mp3')..writeAsBytesSync([0x49, 0x44, 0x33, 4, 0, 0]);
+    final flac = File('${dir.path}/song.flac')..writeAsBytesSync('fLaC'.codeUnits);
+    final cache = Directory('${dir.path}/pcm');
+    final old = File('${cache.path}/${'0' * 64}.wav')
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List.filled(150, 0));
+    old.setLastModifiedSync(DateTime(2020));
+    final convert = b.exactSeekConverter(cache, maxCacheBytes: 120);
+    final t = TrackInfo(id: 'a' * 64, title: 'Song', durationUs: 1000, sizeBytes: 6);
+
+    final out = await convert(t, TrackSource(uri: mp3.uri, trackId: t.id));
+    expect(out!.path, endsWith('${'a' * 64}.wav'));
+    expect(native.calls['exactCopy']![0], mp3.uri.toString());
+    expect(old.existsSync(), isFalse, reason: 'over the cache cap: oldest copy evicted');
+
+    native.calls.remove('exactCopy');
+    expect((await convert(t, TrackSource(uri: mp3.uri, trackId: t.id)))!.path, out.path);
+    expect(native.calls['exactCopy'], isNull, reason: 'cached copy reused');
+    expect(await convert(t, TrackSource(uri: flac.uri, trackId: t.id)), isNull, reason: 'FLAC seeks exactly');
+    await dir.delete(recursive: true);
   });
 }

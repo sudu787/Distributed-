@@ -34,6 +34,9 @@ typedef BackendFactory = Future<AudioBackend> Function(EventLog log);
 /// Microphone access for acoustic calibration, if the backend has one.
 typedef RecorderFactory = CalibrationRecorder? Function(AudioBackend backend);
 
+/// Exact-seek conversion (see `ConvertingTrackResolver`), if the backend has one.
+typedef ConverterFactory = SourceConverter? Function(AudioBackend backend);
+
 /// Derives the room key off the UI isolate (PBKDF2 is intentionally slow).
 Future<RoomKey> deriveRoomKeyInIsolate(String roomId, String joinKey, int iterations) =>
     Isolate.run(() => RoomKey.derive(roomId: roomId, joinKey: joinKey, iterations: iterations));
@@ -68,6 +71,7 @@ class RoomService {
   final Future<RoomKey> Function(String, String, int) keyDeriver;
   final int kdfIterations;
   final RecorderFactory? recorderFor;
+  final ConverterFactory? converterFor;
 
   final EventLog log;
   RoomCoordinator? coordinator;
@@ -94,6 +98,7 @@ class RoomService {
     this.keyDeriver = deriveRoomKeyInIsolate,
     this.kdfIterations = kDefaultKdfIterations,
     this.recorderFor,
+    this.converterFor,
     EventLog? log,
   })  : clock = clock ?? SystemMonotonicClock.instance,
         log = log ?? EventLog(clock: clock ?? SystemMonotonicClock.instance, source: 'room', capacity: 3000);
@@ -278,6 +283,14 @@ class RoomService {
     final library = await store.libraryTracks();
     _downloader = TrackDownloader(log: log);
     final backend = await backendFactory(log);
+    TrackResolver resolver = LibraryTrackResolver(
+      library: {for (final t in library) t.id: File(t.path)},
+      cache: TrackCache(Directory('${cacheDir.path}/tracks')),
+      downloader: _downloader!,
+      log: log,
+    );
+    final convert = converterFor?.call(backend);
+    if (convert != null) resolver = ConvertingTrackResolver(inner: resolver, convert: convert, log: log);
     final s = ParticipantSession(
       options: ParticipantOptions(
         deviceId: identity.deviceId,
@@ -300,17 +313,24 @@ class RoomService {
       connector: webSocketConnector(host, port),
       clock: clock,
       backend: backend,
-      resolver: LibraryTrackResolver(
-        library: {for (final t in library) t.id: File(t.path)},
-        cache: TrackCache(Directory('${cacheDir.path}/tracks')),
-        downloader: _downloader!,
-        log: log,
-      ),
+      resolver: resolver,
       log: log,
     );
     session = s;
     await s.start();
     await hooks.enterRoom(s.state?.roomName ?? 'SyncSphere');
+    final warmer = resolver is ConvertingTrackResolver ? resolver : null;
+    if (warmer != null) {
+      // Decode playlist tracks already on this device ahead of time, so the
+      // first play or seek does not wait for it.
+      String? warmed;
+      _subs.add(s.stateStream.listen((r) {
+        final sig = r.playlist.map((t) => t.id).join(',');
+        if (sig == warmed) return;
+        warmed = sig;
+        unawaited(warmer.warm(r.playlist, r.distribution));
+      }));
+    }
     _subs
       ..add(s.stateStream.listen(_updateNowPlaying))
       ..add(hooks.commands.listen(_onExternalCommand));

@@ -36,6 +36,7 @@ import io.flutter.plugin.common.PluginRegistry
  *   requestPermission {name} ("microphone" | "notifications") → Boolean
  *   recordMic {startAtNanos, durationMs, sampleRate} → {path, sampleRate, firstSampleNanos, timestampSource}
  *   startService {title, text, playing}, updateService {…}, stopService
+ *   exactCopy {uri, out} → {path, sampleRate, channels, durationUs, decoder} (decode to PCM WAV)
  * Event channel `dev.syncsphere/audio_events`: {kind, segment, atNanos, message};
  * notification buttons arrive as {kind: "command", message: play|pause|next|previous}.
  */
@@ -180,6 +181,18 @@ class SyncsphereAudioPlugin :
                     val svc = PlaybackService.instance
                     svc?.update(call.str("title"), call.str("text"), call.argument<Boolean>("playing") ?: false)
                     result.success(svc != null)
+                }
+                "exactCopy" -> {
+                    val uri = call.argument<String>("uri") ?: throw IllegalArgumentException("uri missing")
+                    val out = call.argument<String>("out") ?: throw IllegalArgumentException("out missing")
+                    Thread {
+                        try {
+                            val info = TrackTranscoder.toWav(context, uri, java.io.File(out))
+                            main.post { result.success(info) }
+                        } catch (e: Exception) {
+                            main.post { result.error("transcode_failed", e.message ?: e.javaClass.simpleName, null) }
+                        }
+                    }.apply { name = "SyncSphereTranscode" }.start()
                 }
                 "stopService" -> {
                     PlaybackService.stop(context)

@@ -32,6 +32,11 @@
 
 ## Playback
 
+- **Phones drift apart after pause/resume, seeking or a late join (often with MP3s).** Older builds seeked VBR MP3
+  approximately; current builds decode MP3/AAC to an exact copy first (event `track.exact` / `track.decoded` in
+  Diagnostics). If you see "seeks may be inexact", decoding failed on that phone: send the diagnostics report.
+- **Reporting a sync problem.** On every phone open Diagnostics, tap the copy icon (top right) and send the reports
+  together with what you heard (which phone was early/late, by roughly how much, after what action).
 - **One phone is audibly late but diagnostics say "in sync".** It is probably Bluetooth or a speaker with DSP latency;
   software cannot see that delay. On the room screen, stand where you listen and tap **Calibrate to this spot**. You
   can also measure it externally (docs/benchmarking.md §2) and enter the delay under Diagnostics →

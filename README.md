@@ -37,10 +37,12 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   - an explicit "room needs to be recreated" when no successor is available
 - **Audio distribution:** tracks are identified by SHA-256. Either every phone has the file ("matching local files"),
   or the host serves it over HTTP with `Range` resume, per-session signed URLs, verification and an LRU cache.
+- **Exact seeking for MP3/AAC:** each phone decodes MP3 and raw AAC files once into a cached PCM copy, because
+  ExoPlayer seeks VBR MP3 only approximately (up to hundreds of ms) while reporting the requested position.
 - **Listening-spot calibration:** "Calibrate to this spot" makes every phone click in turn, records them with this
   phone's microphone, and shifts each device so the sound lines up *where you are*, including Bluetooth and speaker
-  delays software cannot see. Simulated (4 phones at 0.3–7 m, one on Bluetooth): spread at the listener 191 ms →
-  2 ms median (p95 25 ms, from the first ~10 s while devices re-converge). Not yet run on phones.
+  delays software cannot see. Simulated (4 phones at 0.3–7 m, one on Bluetooth): spread at the listener 192 ms →
+  4.6 ms median (p95 22 ms, mostly the first seconds while devices re-converge). Not yet run on phones.
 - **Experimental channel roles:** each phone can play stereo, left, right or a mono mix (Media3 channel mixing).
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Background playback:** a foreground media service with a notification (room name, track, previous/play/next)
@@ -52,8 +54,8 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
 - **Benchmarks:** a deterministic simulated suite (2/3/5/10 devices × 5 network models, faults, drift, heterogeneous
   devices, Bluetooth), plus stdlib-only Python tools for raw-data analysis and acoustic measurement on real phones.
 
-Simulated highlights: steady-state inter-device spread p95 of 5–21 ms across the matrix, and 60-minute drift held to
-6.6 ms p95 versus 149 ms uncorrected. These come from modelled devices and networks, not hardware; see
+Simulated highlights: steady-state inter-device spread p95 of 5–20 ms across the matrix, and 60-minute drift held to
+7.0 ms p95 versus 148 ms uncorrected. These come from modelled devices and networks, not hardware; see
 [benchmarks/results/simulated/summary.md](benchmarks/results/simulated/summary.md).
 
 ## Repository layout

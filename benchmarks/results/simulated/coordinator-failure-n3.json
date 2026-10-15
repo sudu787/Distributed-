@@ -92,19 +92,19 @@
     },
     "clockOffsetErrorUs": {
       "n": 60,
-      "median": 391.0,
-      "p95": 947.0,
+      "median": 392.0,
+      "p95": 951.0,
       "p99": 1138.0,
       "max": 1183.0,
-      "mean": 432.0
+      "mean": 424.0
     },
     "clockUncertaintyUs": {
       "n": 60,
-      "median": 3067.0,
-      "p95": 3667.0,
-      "p99": 3897.0,
-      "max": 3971.0,
-      "mean": 3018.0
+      "median": 3083.0,
+      "p95": 3708.0,
+      "p99": 3982.0,
+      "max": 4100.0,
+      "mean": 3040.0
     },
     "clockUncertaintyCoverage": 1.0,
     "recoveryAfterPartitionMs": {
@@ -116,7 +116,7 @@
     "bufferingStalls": 0,
     "playCalls": 3,
     "networkFrames": 496,
-    "networkBytes": 105888,
+    "networkBytes": 105966,
     "networkBytesPerDevicePerSecond": 98,
     "failedSessions": [
       "device-1",
@@ -131,5 +131,5 @@
     },
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 65
+  "wallClockMs": 62
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
@@ -20,7 +21,17 @@ class DiagnosticsScreen extends ConsumerWidget {
     final diags = s.diagnostics?.participants ?? const <ParticipantDiagnostics>[];
     final t = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Diagnostics')),
+      appBar: AppBar(title: const Text('Diagnostics'), actions: [
+        IconButton(
+          tooltip: 'Copy diagnostics report',
+          icon: const Icon(Icons.copy_all),
+          onPressed: () {
+            final text = ref.read(roomControllerProvider.notifier).diagnosticsReport();
+            Clipboard.setData(ClipboardData(text: text));
+            showMessage(context, 'Diagnostics report copied (${(text.length / 1024).ceil()} KB). Paste it where you report the issue.');
+          },
+        ),
+      ]),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
@@ -33,7 +44,8 @@ class DiagnosticsScreen extends ConsumerWidget {
                 'All timing values are software estimates: clock offsets come from network round trips '
                 '(bounded by half the round-trip time, because one-way delays are unknown), and playback '
                 'errors come from the audio framework\'s reported position. None of them measures when sound '
-                'actually leaves a speaker. Acoustic alignment needs an external microphone (docs/benchmarking.md).',
+                'actually leaves a speaker; "Calibrate to this spot" on the room screen measures that with a '
+                'microphone. Reporting a problem? Tap the copy icon above on every phone and send the reports.',
                 style: t.bodySmall,
               ),
             ),

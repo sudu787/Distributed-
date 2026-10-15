@@ -19,6 +19,7 @@ export 'src/coordinator/lead_time.dart';
 export 'src/coordinator/membership.dart';
 export 'src/coordinator/room_coordinator.dart';
 export 'src/audio/audio_backend.dart';
+export 'src/distribution/exact_seek.dart';
 export 'src/distribution/track_resolver.dart';
 export 'src/participant/drift_controller.dart';
 export 'src/participant/playback_engine.dart';

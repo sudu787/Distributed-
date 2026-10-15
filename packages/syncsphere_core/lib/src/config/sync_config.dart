@@ -174,6 +174,13 @@ class DriftConfig {
   /// the audio pipeline (and its timestamps) settle.
   final Duration settleTime;
 
+  /// The start latency is learned from the first measurement at least this
+  /// long after a start (longer than [settleTime]): ExoPlayer reports a
+  /// head-position estimate until AudioTrack timestamps advance and then
+  /// smooths the jump at ≤10 % of elapsed time, which on real devices takes
+  /// 1.5–2.5 s. Rate corrections applied in between are subtracted.
+  final Duration latencyLearnDelay;
+
   /// Number of measurements combined by the median filter.
   final int medianWindow;
 
@@ -209,6 +216,7 @@ class DriftConfig {
     this.reportIntervalActive = const Duration(milliseconds: 500),
     this.reportIntervalIdle = const Duration(seconds: 2),
     this.settleTime = const Duration(milliseconds: 1200),
+    this.latencyLearnDelay = const Duration(milliseconds: 2500),
     this.medianWindow = 5,
     this.rateEnterThreshold = const Duration(milliseconds: 8),
     this.rateExitThreshold = const Duration(milliseconds: 3),
@@ -225,6 +233,7 @@ class DriftConfig {
         'reportIntervalActiveMs': reportIntervalActive.inMilliseconds,
         'reportIntervalIdleMs': reportIntervalIdle.inMilliseconds,
         'settleTimeMs': settleTime.inMilliseconds,
+        'latencyLearnDelayMs': latencyLearnDelay.inMilliseconds,
         'medianWindow': medianWindow,
         'rateEnterThresholdUs': rateEnterThreshold.inMicroseconds,
         'rateExitThresholdUs': rateExitThreshold.inMicroseconds,
@@ -249,6 +258,7 @@ class DriftConfig {
       reportIntervalIdle:
           _ms(j['reportIntervalIdleMs'], d.reportIntervalIdle, 50, 60000),
       settleTime: _ms(j['settleTimeMs'], d.settleTime, 0, 60000),
+      latencyLearnDelay: _ms(j['latencyLearnDelayMs'], d.latencyLearnDelay, 0, 60000),
       medianWindow: _int(j['medianWindow'], d.medianWindow, 1, 64),
       rateEnterThreshold: enter,
       rateExitThreshold: exit,

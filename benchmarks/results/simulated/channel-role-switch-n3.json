@@ -21,35 +21,35 @@
   "metrics": {
     "interDeviceSpreadMs_all": {
       "n": 1129,
-      "median": 7.54,
+      "median": 7.03,
       "p95": 26.18,
       "p99": 28.46,
       "max": 28.47,
-      "mean": 9.1
+      "mean": 8.74
     },
     "interDeviceSpreadMs_steady": {
       "n": 1068,
-      "median": 7.49,
+      "median": 6.98,
       "p95": 11.89,
       "p99": 21.16,
       "max": 24.91,
-      "mean": 8.03
+      "mean": 7.65
     },
     "pairwiseErrorMs": {
       "n": 3381,
-      "median": 6.8,
+      "median": 6.31,
       "p95": 15.19,
       "p99": 28.43,
       "max": 28.47,
-      "mean": 6.07
+      "mean": 5.83
     },
     "absErrorVsTimelineMs": {
       "n": 3384,
-      "median": 4.18,
+      "median": 2.3,
       "p95": 8.49,
       "p99": 17.85,
       "max": 17.92,
-      "mean": 4.07
+      "mean": 3.72
     },
     "startSkewMs": {
       "n": 1,
@@ -69,19 +69,19 @@
     },
     "driftSpreadFirstMinuteMs": {
       "n": 1028,
-      "median": 7.46,
+      "median": 6.95,
       "p95": 9.26,
       "p99": 12.12,
       "max": 13.16,
-      "mean": 7.63
+      "mean": 7.24
     },
     "driftSpreadLastMinuteMs": {
       "n": 1129,
-      "median": 7.54,
+      "median": 7.03,
       "p95": 26.18,
       "p99": 28.46,
       "max": 28.47,
-      "mean": 9.1
+      "mean": 8.74
     },
     "commandToAudibleLatencyMs": {
       "n": 1,
@@ -93,19 +93,19 @@
     },
     "clockOffsetErrorUs": {
       "n": 120,
-      "median": 238.0,
-      "p95": 931.0,
-      "p99": 1163.0,
+      "median": 260.0,
+      "p95": 762.0,
+      "p99": 1091.0,
       "max": 1183.0,
-      "mean": 306.0
+      "mean": 329.0
     },
     "clockUncertaintyUs": {
       "n": 120,
-      "median": 2830.0,
-      "p95": 3575.0,
-      "p99": 3831.0,
-      "max": 3971.0,
-      "mean": 2864.0
+      "median": 2884.0,
+      "p95": 3648.0,
+      "p99": 3890.0,
+      "max": 4100.0,
+      "mean": 2916.0
     },
     "clockUncertaintyCoverage": 1.0,
     "recoveryAfterPartitionMs": {
@@ -121,13 +121,13 @@
     "rateChanges": 13,
     "bufferingStalls": 0,
     "playCalls": 5,
-    "networkFrames": 889,
-    "networkBytes": 186785,
-    "networkBytesPerDevicePerSecond": 1038,
+    "networkFrames": 885,
+    "networkBytes": 186452,
+    "networkBytesPerDevicePerSecond": 1036,
     "failedSessions": [],
     "killedDevices": [],
     "failureReasons": {},
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 106
+  "wallClockMs": 67
 }

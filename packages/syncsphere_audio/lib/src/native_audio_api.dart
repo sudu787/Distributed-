@@ -36,6 +36,10 @@ abstract class NativeAudioApi {
   Future<bool> updateService(String title, String text, bool playing);
   Future<void> stopService();
 
+  /// Decodes [uri] into a 16-bit PCM WAV at [outPath] (sample-exact
+  /// seeking). Returns {path, sampleRate, channels, durationUs, decoder}.
+  Future<Map<String, Object?>> exactCopy(String uri, String outPath);
+
   Stream<Map<String, Object?>> get events;
 }
 
@@ -113,6 +117,10 @@ class MethodChannelAudioApi implements NativeAudioApi {
 
   @override
   Future<void> stopService() => _channel.invokeMethod<void>('stopService');
+
+  @override
+  Future<Map<String, Object?>> exactCopy(String uri, String outPath) async =>
+      (await _channel.invokeMapMethod<String, Object?>('exactCopy', {'uri': uri, 'out': outPath}))!;
 
   @override
   Stream<Map<String, Object?>> get events => _eventStream ??= _events

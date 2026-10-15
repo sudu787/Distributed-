@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
@@ -203,5 +205,23 @@ void main() {
     await tester.tap(find.widgetWithText(CheckedPopupMenuItem<Object>, 'Left channel (experimental)'));
     await tester.pumpAndSettle();
     expect(ctl.sent, [ControlAction.setChannelRole]);
+  });
+
+  testWidgets('diagnostics copies a JSON report', (tester) async {
+    _phone(tester);
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await tester.pumpWidget(_wrap(const DiagnosticsScreen(), _overrides(_roomState())));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Copy diagnostics report'));
+    await tester.pump();
+    final report = jsonDecode(copied!) as Map<String, Object?>;
+    expect(report['kind'], 'syncsphere-diagnostics-v1');
+    expect((report['room'] as Map)['name'], isNotNull);
+    expect(copied, isNot(contains('ABCD2345')), reason: 'no join key in reports');
   });
 }

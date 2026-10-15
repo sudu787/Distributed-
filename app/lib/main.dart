@@ -44,6 +44,8 @@ Future<void> main() async {
     log: log,
     hooks: hooks ?? const NoopPlatformHooks(),
     recorderFor: (b) => b is Media3AudioBackend ? b.calibrationRecorder() : null,
+    // VBR MP3 seeks are approximate in ExoPlayer; play exact PCM copies.
+    converterFor: (b) => b is Media3AudioBackend ? b.exactSeekConverter(Directory(p.join(cache.path, 'pcm'))) : null,
     backendFactory: (log) async {
       if (native == null) {
         // Desktop/dev builds: follow the timeline without rendering audio.

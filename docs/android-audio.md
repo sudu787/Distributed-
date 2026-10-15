@@ -62,6 +62,22 @@ measurements from [benchmarking.md](benchmarking.md).
 5. **OEM battery optimizations** can still throttle the app with the screen off, even with the foreground service
    below. Some vendors (aggressive "app killers") need the app exempted from battery optimization by hand.
 
+## Seeking accuracy and exact-seek copies
+
+ExoPlayer seeks VBR MP3 through the Xing table of contents: 100 entries, each quantized to 1/256 of the file size.
+On a 4-minute song one entry step is about 0.4 % of the file, so a seek can land **hundreds of milliseconds** from the
+requested time while the player reports exactly the requested time. `FLAG_ENABLE_INDEX_SEEKING` does not help: Media3
+uses the index only when the file has no usable seek table. Each phone lands differently, so every resume, seek,
+late join or resync can put the room out of sync by an amount that no position report reveals. Acoustic calibration
+cannot fix it either, because it changes with every seek. Raw ADTS AAC has no index at all.
+
+So each phone decodes MP3 and ADTS files once (`TrackTranscoder.kt`, `MediaExtractor` + `MediaCodec`, preferring the
+platform software decoder so every phone produces identical samples) into a 16-bit PCM WAV under the app cache
+(`pcm/`, least-recently-used copies evicted above 2 GB), and plays that copy. WAV seeking is computed from the byte
+offset and is sample-exact. Playlist tracks already on the phone are decoded in the background when a room starts
+(roughly 1–4 s per song; not yet measured on phones). If decoding fails, the original file is played and a warning
+is logged. FLAC, MP4/M4A and Ogg seek exactly from their own indexes and are played as they are.
+
 ## Background playback
 
 While in a room the plugin runs `PlaybackService`, a foreground service of type `mediaPlayback` with an ongoing
