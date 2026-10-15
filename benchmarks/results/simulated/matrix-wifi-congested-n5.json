@@ -1,0 +1,129 @@
+{
+  "environment": "SIMULATED (virtual time; modelled clocks, network and audio devices; not hardware)",
+  "scenario": {
+    "name": "matrix-wifi-congested-n5",
+    "participants": 5,
+    "network": "wifi-congested",
+    "durationS": 120,
+    "actions": [
+      "3000ms:play",
+      "40000ms:pause",
+      "46000ms:play",
+      "70000ms:seek(180s)",
+      "95000ms:next"
+    ],
+    "profiles": [
+      "flagship",
+      "midrange"
+    ],
+    "clockSkewPpmRange": 50.0,
+    "audioPpmRange": 30.0,
+    "seed": 47
+  },
+  "metrics": {
+    "interDeviceSpreadMs_all": {
+      "n": 2161,
+      "median": 11.36,
+      "p95": 23.37,
+      "p99": 43.1,
+      "max": 43.11,
+      "mean": 12.67
+    },
+    "interDeviceSpreadMs_steady": {
+      "n": 1917,
+      "median": 11.32,
+      "p95": 16.95,
+      "p99": 32.72,
+      "max": 40.4,
+      "mean": 11.08
+    },
+    "pairwiseErrorMs": {
+      "n": 21599,
+      "median": 4.77,
+      "p95": 17.17,
+      "p99": 31.23,
+      "max": 43.11,
+      "mean": 6.48
+    },
+    "absErrorVsTimelineMs": {
+      "n": 10802,
+      "median": 3.38,
+      "p95": 10.89,
+      "p99": 32.43,
+      "max": 33.71,
+      "mean": 4.82
+    },
+    "startSkewMs": {
+      "n": 4,
+      "median": 20.65,
+      "p95": 39.87,
+      "p99": 42.46,
+      "max": 43.11,
+      "mean": 25.47
+    },
+    "startErrorMs": {
+      "n": 20,
+      "median": 7.85,
+      "p95": 32.79,
+      "p99": 33.53,
+      "max": 33.71,
+      "mean": 9.49
+    },
+    "driftSpreadFirstMinuteMs": {
+      "n": 962,
+      "median": 6.69,
+      "p95": 17.53,
+      "p99": 22.97,
+      "max": 25.53,
+      "mean": 9.41
+    },
+    "driftSpreadLastMinuteMs": {
+      "n": 1177,
+      "median": 13.06,
+      "p95": 19.84,
+      "p99": 21.49,
+      "max": 21.5,
+      "mean": 12.9
+    },
+    "commandToAudibleLatencyMs": {
+      "n": 5,
+      "median": 560.0,
+      "p95": 1016.0,
+      "p99": 1035.2,
+      "max": 1040.0,
+      "mean": 620.0
+    },
+    "clockOffsetErrorUs": {
+      "n": 480,
+      "median": 3613.0,
+      "p95": 6658.0,
+      "p99": 11390.0,
+      "max": 20015.0,
+      "mean": 3738.0
+    },
+    "clockUncertaintyUs": {
+      "n": 480,
+      "median": 10743.0,
+      "p95": 13071.0,
+      "p99": 19563.0,
+      "max": 28307.0,
+      "mean": 10999.0
+    },
+    "clockUncertaintyCoverage": 1.0,
+    "recoveryAfterPartitionMs": {
+      "n": 0
+    },
+    "unrecoveredDevices": [],
+    "resyncSeeks": 0,
+    "rateChanges": 63,
+    "bufferingStalls": 0,
+    "playCalls": 20,
+    "networkFrames": 3464,
+    "networkBytes": 867885,
+    "networkBytesPerDevicePerSecond": 1446,
+    "failedSessions": [],
+    "failureReasons": {},
+    "coordinatorWarnings": 0
+  },
+  "wallClockMs": 209
+}

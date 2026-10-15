@@ -1,0 +1,58 @@
+# Threat model, security design and limitations
+
+## Assets and trust assumptions
+
+- **Assets:** control of playback in a room, the room's membership, the audio files offered by the host, and the
+  devices' availability (battery, CPU, network).
+- **Trusted:** the host device and the people the host gives the join key to.
+- **Untrusted:** every other device on the same Wi-Fi or hotspot, including other guests' devices that never received
+  the key. A café or office Wi-Fi is assumed hostile; a home network is assumed curious.
+
+## Adversaries and what stops them
+
+| Adversary | Capability | Defense | Residual risk |
+|---|---|---|---|
+| Curious LAN neighbor | Sees beacons, connects to the port | Joining requires the join key (HMAC challenge-response). Wrong keys are rate-limited (5/min per address). Beacons carry no secrets. | Learns that a room exists and its name |
+| Prankster sending control frames | Crafts WebSocket frames | Every frame after the handshake carries an HMAC with per-session, per-direction keys. Unauthenticated control frames close the link. Role checks are enforced by the coordinator. | None known |
+| Replay attacker | Records and resends frames | Per-direction sequence numbers. Fresh nonces in every session → new keys. Reflection fails because the two directions use different keys. | None known |
+| Passive sniffer (WPA2-PSK insider or open network) | Reads all traffic | — | **No confidentiality**: control messages and track downloads are readable, so the music being played and the playlist are visible. A captured handshake allows *offline* guessing of the join key. PBKDF2 (60k iterations) multiplies the cost by ~6×10⁴, but an 8-character key (40 bits) is still brute-forceable with GPUs. Use a long key (26 characters = 130 bits) on hostile networks ([roadmap](roadmap.md)). |
+| Rogue coordinator (spoofed beacon) | Lures clients into connecting | Mutual authentication: the coordinator must prove the key (`serverProof`, plus MAC'd frames). Clients pin the room id from discovery. | A rogue server receives the client's proof and can attempt offline guessing (same as the sniffer case) |
+| Downloader without membership | Requests `/tracks/<id>` | Per-session HMAC token bound to the path and an expiry in coordinator time. Only playlist tracks the host serves are reachable. The URL contains no filesystem path. | A member can download every served playlist track, which is the feature |
+| Resource exhaustion | Floods connections, huge frames, many downloads | Max 32 pending handshakes, 5 s handshake timeout, 256 KiB frame limit (checked after receipt; WebSocket compression disabled), malformed-message budget, participant cap (16), transfer concurrency (2 per session, 8 total), 512 MiB file cap, bounded caches and logs | A determined LAN attacker can still saturate Wi-Fi airtime; no software defense exists for that |
+| Malformed or hostile input | Invalid JSON, wrong types, out-of-range values, malicious config | Strict `Reader` validation with typed errors. Config values are clamped (a malicious `maxRateDelta` cannot exceed 25 %). Fuzz-style tests check that malformed input never throws anything except `ProtocolException`. | Bugs in the JSON/WebSocket stack of the Dart VM |
+
+## Why not TLS yet
+
+TLS on a LAN needs certificate trust. A self-signed certificate would require pinning its fingerprint, transferred
+out-of-band (a QR code). That fits the roadmap together with a PAKE (for example SPAKE2/CPace), which removes offline
+guessing entirely and works with short typed keys. Until then, the protocol aims for **authentication and integrity**,
+explicitly **not confidentiality**. The UI says to share the key only with people in the room.
+
+## Privacy
+
+- Device ids are random per installation, not hardware identifiers.
+- No data leaves the local network and nothing is sent to any server. There is no analytics.
+- Event logs stay on the device.
+
+## Legal
+
+SyncSphere only plays files the user imported. Hosts must only distribute audio they are authorized to share; the
+"create room" dialog says so. There is no integration with commercial streaming services.
+
+## Limitations (functional)
+
+1. **Coordinator failover is not implemented.** If the host disappears, participants keep playing the last timeline,
+   retry with bounded backoff for ~3–4 minutes, then report "the room may need to be recreated". The succession
+   design is in [roadmap.md](roadmap.md).
+2. **No real-device measurements yet** (see [benchmarking.md](benchmarking.md)). All quantitative claims are simulated
+   or unit-tested.
+3. **The Android native code has only been compiled and unit-tested in CI**, not exercised on hardware.
+4. **Foreground only.** The screen is kept on in a room; background playback with a media notification is a roadmap
+   item.
+5. **Android only.** The core is platform-independent, but there is no iOS audio backend.
+6. **Discovery** fails under AP client isolation and on networks that filter broadcasts; use manual address entry.
+7. **Acoustic alignment** depends on per-device output latency the OS does not report. A calibration offset exists,
+   but measuring it needs a microphone and is manual.
+8. **Room size** is capped at 16 by default (configurable to 256). Simulation covers 10.
+9. **Seeks are audible** on devices without rate control when drift exceeds 45 ms.
+10. **Clock uncertainty is conservative.** The UI shows a bound (often ±2–3 ms), not the typical error.
