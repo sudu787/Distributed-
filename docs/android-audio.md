@@ -52,7 +52,7 @@ measurements from [benchmarking.md](benchmarking.md).
 
 1. **Bluetooth and some USB/HDMI outputs** add latency that `AudioTrack` timestamps may not include (often 100–250 ms
    for A2DP, varying by codec and device). Software alignment cannot see it. The app warns when a Bluetooth output is
-   present; **Calibrate to this spot** (room screen) measures it with a microphone, and a manual per-device offset is
+   present; **Calibrate to this spot** (Speakers tab) measures it with a microphone, and a manual per-device offset is
    still available. Simulation shows a ~185 ms error without calibration and ~4 ms with it.
 2. **Phone speaker DSP** (loudness, virtualizers) can add a few ms that differs between models. This also needs
    acoustic calibration.

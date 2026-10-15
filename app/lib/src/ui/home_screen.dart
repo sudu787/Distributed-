@@ -13,7 +13,7 @@ import 'format.dart';
 import 'scan_screen.dart';
 import 'widgets.dart';
 
-/// Screen 1: create/join/discover rooms, manage the local library.
+/// Start screen: host or join a party, nearby parties, and this phone's music.
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -30,7 +30,7 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('SyncSphere'),
         actions: [
           IconButton(
-            tooltip: 'Device name',
+            tooltip: 'Phone name',
             icon: const Icon(Icons.badge_outlined),
             onPressed: () => _editName(context, ref),
           ),
@@ -41,22 +41,35 @@ class HomeScreen extends ConsumerWidget {
         child: Stack(
           children: [
             RefreshIndicator(
-              onRefresh: () async {
-                ref.invalidate(networkSummaryProvider);
-                ref.invalidate(roomHistoryProvider);
-              },
+              onRefresh: () async => ref.invalidate(networkSummaryProvider),
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 32),
                 children: const [
-                  _ConnectionCard(),
-                  _PrimaryActions(),
+                  _NetworkBanner(),
+                  _MainActions(),
                   _NearbyRooms(),
                   _LibrarySection(),
-                  _RecentRooms(),
                 ],
               ),
             ),
-            if (starting) const LinearProgressIndicator(),
+            if (starting)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Color(0x33000000),
+                  child: Center(
+                    child: Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                          SizedBox(width: 16),
+                          Text('Connecting…'),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -69,8 +82,13 @@ class HomeScreen extends ConsumerWidget {
     final name = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Device name'),
-        content: TextField(controller: ctl, maxLength: 40, autofocus: true),
+        title: const Text('Phone name'),
+        content: TextField(
+          controller: ctl,
+          maxLength: 40,
+          autofocus: true,
+          decoration: const InputDecoration(helperText: 'Shown to others in the party'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, ctl.text.trim()), child: const Text('Save')),
@@ -83,172 +101,184 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _ConnectionCard extends ConsumerWidget {
-  const _ConnectionCard();
+/// Only shown when something is wrong with the network.
+class _NetworkBanner extends ConsumerWidget {
+  const _NetworkBanner();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final net = ref.watch(networkSummaryProvider);
-    final id = ref.watch(identityProvider);
+    final ok = net.maybeWhen(data: (n) => n.hasLan, orElse: () => true);
     final cs = Theme.of(context).colorScheme;
+    if (ok) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+        child: Text('Play music on several phones at once, perfectly together. All phones must be on the same '
+            'Wi-Fi or one phone\'s hotspot. No internet needed.', style: Theme.of(context).textTheme.bodyMedium),
+      );
+    }
     return Card(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('This device: ${id.displayName}', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            net.when(
-              data: (n) => StatusChip(n.label, n.hasLan ? Icons.wifi : Icons.wifi_off,
-                  color: n.hasLan ? cs.primary : cs.error),
-              loading: () => const StatusChip('Checking network…', Icons.wifi_find),
-              error: (e, _) => StatusChip('Network unavailable', Icons.wifi_off, color: cs.error),
-            ),
-            const SizedBox(height: 8),
-            Text('Works offline on the same Wi-Fi or a phone hotspot. No internet needed.',
-                style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      color: cs.errorContainer,
+      child: ListTile(
+        leading: Icon(Icons.wifi_off, color: cs.onErrorContainer),
+        title: Text('Not connected to Wi-Fi', style: TextStyle(color: cs.onErrorContainer)),
+        subtitle: Text('Join the same Wi-Fi as the others, or turn on a hotspot on one phone.',
+            style: TextStyle(color: cs.onErrorContainer)),
       ),
     );
   }
 }
 
-class _PrimaryActions extends ConsumerWidget {
-  const _PrimaryActions();
+class _MainActions extends ConsumerWidget {
+  const _MainActions();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(children: [
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                icon: const Icon(Icons.add_circle_outline),
-                label: const Text('Create room'),
-                onPressed: () => _create(context, ref),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.login),
-                label: const Text('Join by address'),
-                onPressed: () => _joinManual(context, ref),
-              ),
-            ),
-          ],
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Row(children: [
+        Expanded(
+          child: _BigAction(
+            icon: Icons.celebration_outlined,
+            title: 'Host a party',
+            subtitle: 'Play your music',
+            filled: true,
+            onTap: () => _create(context, ref),
+          ),
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan invite QR code'),
-            onPressed: () => _scan(context, ref),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _BigAction(
+            icon: Icons.qr_code_scanner,
+            title: 'Join a party',
+            subtitle: 'Scan the host\'s code',
+            onTap: () => _join(context, ref),
           ),
         ),
       ]),
     );
   }
 
-  Future<void> _scan(BuildContext context, WidgetRef ref) async {
-    final link = await Navigator.of(context).push<JoinLink>(MaterialPageRoute(builder: (_) => const ScanScreen()));
-    if (link != null) await ref.read(roomControllerProvider.notifier).joinWithLink(link);
-  }
-
   Future<void> _create(BuildContext context, WidgetRef ref) async {
     final id = ref.read(identityProvider);
-    final nameCtl = TextEditingController(text: "${id.displayName}'s room");
+    final nameCtl = TextEditingController(text: "${id.displayName}'s party");
     var mode = DistributionMode.auto;
     var open = false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setState) => AlertDialog(
-          title: const Text('Create room'),
+          title: const Text('Host a party'),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: nameCtl, decoration: const InputDecoration(labelText: 'Room name'), maxLength: 40),
-              DropdownButtonFormField<DistributionMode>(
-                initialValue: mode,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Audio source'),
-                items: [
-                  for (final m in DistributionMode.values)
-                    DropdownMenuItem(value: m, child: Text(distributionLabel(m), overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (m) => setState(() => mode = m ?? mode),
-              ),
+              TextField(controller: nameCtl, decoration: const InputDecoration(labelText: 'Party name'), maxLength: 40),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Everyone can control playback'),
-                subtitle: const Text('Otherwise only you (and devices you promote) can.'),
+                title: const Text('Everyone can control the music'),
+                subtitle: const Text('Otherwise only you can play, pause and skip.'),
                 value: open,
                 onChanged: (v) => setState(() => open = v),
               ),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Advanced'),
+                children: [
+                  DropdownButtonFormField<DistributionMode>(
+                    initialValue: mode,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Where guests get the songs'),
+                    items: [
+                      for (final m in DistributionMode.values)
+                        DropdownMenuItem(value: m, child: Text(distributionLabel(m), overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: (m) => setState(() => mode = m ?? mode),
+                  ),
+                ],
+              ),
               const SizedBox(height: 4),
-              Text('Only share music you are authorized to share.', style: Theme.of(c).textTheme.bodySmall),
+              Text('Guests get the songs from your phone automatically. Only share music you are allowed to share.',
+                  style: Theme.of(c).textTheme.bodySmall),
             ]),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Create')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
           ],
         ),
       ),
     );
     if (ok != true) return;
     await ref.read(roomControllerProvider.notifier).host(
-          roomName: nameCtl.text.trim().isEmpty ? 'SyncSphere room' : nameCtl.text.trim(),
+          roomName: nameCtl.text.trim().isEmpty ? 'SyncSphere party' : nameCtl.text.trim(),
           distribution: mode,
           openControl: open,
         );
   }
 
+  Future<void> _join(BuildContext context, WidgetRef ref) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.qr_code_scanner),
+            title: const Text('Scan QR code'),
+            subtitle: const Text('The host taps the QR icon in their party'),
+            onTap: () => Navigator.pop(c, 'scan'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.content_paste),
+            title: const Text('Paste invite link'),
+            onTap: () => Navigator.pop(c, 'paste'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.keyboard_outlined),
+            title: const Text('Enter address and code'),
+            onTap: () => Navigator.pop(c, 'manual'),
+          ),
+        ]),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    final ctl = ref.read(roomControllerProvider.notifier);
+    switch (choice) {
+      case 'scan':
+        final link = await Navigator.of(context).push<JoinLink>(MaterialPageRoute(builder: (_) => const ScanScreen()));
+        if (link != null) await ctl.joinWithLink(link);
+      case 'paste':
+        final clip = await Clipboard.getData(Clipboard.kTextPlain);
+        final link = JoinLink.tryParse(clip?.text ?? '');
+        if (link == null) {
+          if (context.mounted) showMessage(context, 'Copy the invite link first (host: QR icon → Copy link).', error: true);
+          return;
+        }
+        await ctl.joinWithLink(link);
+      case 'manual':
+        if (context.mounted) await _joinManual(context, ref);
+    }
+  }
+
   Future<void> _joinManual(BuildContext context, WidgetRef ref) async {
     final host = TextEditingController();
-    final port = TextEditingController(text: '$kDefaultRoomPort');
     final key = TextEditingController();
-    JoinLink? pasted;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Join room'),
+        title: const Text('Join a party'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.content_paste),
-              label: const Text('Paste invite link'),
-              onPressed: () async {
-                final clip = await Clipboard.getData(Clipboard.kTextPlain);
-                final link = JoinLink.tryParse(clip?.text ?? '');
-                if (!c.mounted) return;
-                if (link == null) {
-                  showMessage(c, 'The clipboard does not contain a SyncSphere invite link.', error: true);
-                  return;
-                }
-                host.text = link.hosts.first;
-                port.text = '${link.port}';
-                key.text = formatJoinKey(link.joinKey);
-                pasted = link;
-              },
-            ),
-          ),
           TextField(
               controller: host,
+              autofocus: true,
               decoration: const InputDecoration(labelText: 'Host address', hintText: '192.168.1.20'),
               keyboardType: TextInputType.url),
-          TextField(controller: port, decoration: const InputDecoration(labelText: 'Port'), keyboardType: TextInputType.number),
           TextField(
               controller: key,
-              decoration: const InputDecoration(labelText: 'Join key', hintText: 'ABCD-EFGH'),
+              decoration: const InputDecoration(labelText: 'Code', hintText: 'ABCD-EFGH'),
               textCapitalization: TextCapitalization.characters),
+          const SizedBox(height: 8),
+          Text('Both are shown on the host phone under the QR icon.', style: Theme.of(c).textTheme.bodySmall),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
@@ -257,21 +287,51 @@ class _PrimaryActions extends ConsumerWidget {
       ),
     );
     if (ok != true) return;
-    final link = pasted;
-    if (link != null &&
-        host.text.trim() == link.hosts.first &&
-        port.text.trim() == '${link.port}' &&
-        normalizeJoinKey(key.text) == link.joinKey) {
-      // Unedited paste: try every address in the link.
-      await ref.read(roomControllerProvider.notifier).joinWithLink(link);
+    // "192.168.1.20:47801" is accepted too.
+    var address = host.text.trim();
+    var port = kDefaultRoomPort;
+    final i = address.lastIndexOf(':');
+    if (i > 0 && int.tryParse(address.substring(i + 1)) != null) {
+      port = int.parse(address.substring(i + 1));
+      address = address.substring(0, i);
+    }
+    if (address.isEmpty || port <= 0 || port > 65535 || key.text.trim().isEmpty) {
+      if (context.mounted) showMessage(context, 'Enter the host address and the code.', error: true);
       return;
     }
-    final p = int.tryParse(port.text.trim());
-    if (host.text.trim().isEmpty || p == null || p <= 0 || p > 65535 || key.text.trim().isEmpty) {
-      if (context.mounted) showMessage(context, 'Enter a host, a valid port and the join key.', error: true);
-      return;
-    }
-    await ref.read(roomControllerProvider.notifier).join(host: host.text.trim(), port: p, joinKey: key.text.trim());
+    await ref.read(roomControllerProvider.notifier).join(host: address, port: port, joinKey: key.text.trim());
+  }
+}
+
+class _BigAction extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool filled;
+  final VoidCallback onTap;
+  const _BigAction({required this.icon, required this.title, required this.subtitle, required this.onTap, this.filled = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final fg = filled ? cs.onPrimary : cs.onSecondaryContainer;
+    return Material(
+      color: filled ? cs.primary : cs.secondaryContainer,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, size: 36, color: fg),
+            const SizedBox(height: 12),
+            Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w600)),
+            Text(subtitle, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: fg)),
+          ]),
+        ),
+      ),
+    );
   }
 }
 
@@ -281,30 +341,20 @@ class _NearbyRooms extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final rooms = ref.watch(discoveryProvider);
+    final list = rooms.maybeWhen(data: (l) => l, orElse: () => const <RoomBeacon>[]);
+    if (list.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader('Nearby rooms'),
-        rooms.when(
-          data: (list) => list.isEmpty
-              ? const ListTile(
-                  leading: Icon(Icons.radar),
-                  title: Text('Looking for rooms on this network…'),
-                  subtitle: Text('If none appear, the network may block broadcasts. Use "Join by address".'),
-                )
-              : Column(children: [
-                  for (final r in list)
-                    ListTile(
-                      leading: const Icon(Icons.speaker_group_outlined),
-                      title: Text(r.roomName),
-                      subtitle: Text('Room ${r.roomId} · ${r.host}:${r.port} · ${r.participants} device(s)'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _join(context, ref, r),
-                    ),
-                ]),
-          loading: () => const ListTile(title: Text('Starting discovery…')),
-          error: (e, _) => ListTile(leading: const Icon(Icons.error_outline), title: Text('$e')),
-        ),
+        const SectionHeader('Parties nearby'),
+        for (final r in list)
+          ListTile(
+            leading: const Icon(Icons.speaker_group_outlined),
+            title: Text(r.roomName),
+            subtitle: Text('${r.participants} phone${r.participants == 1 ? '' : 's'} · ${r.host}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _join(context, ref, r),
+          ),
       ],
     );
   }
@@ -318,7 +368,7 @@ class _NearbyRooms extends ConsumerWidget {
         content: TextField(
           controller: key,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Join key shown on the host'),
+          decoration: const InputDecoration(labelText: 'Code shown on the host', hintText: 'ABCD-EFGH'),
           textCapitalization: TextCapitalization.characters,
         ),
         actions: [
@@ -344,10 +394,10 @@ class _LibrarySection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SectionHeader(
-          'Your library',
+          'My music',
           trailing: TextButton.icon(
-            icon: const Icon(Icons.library_add_outlined),
-            label: const Text('Import'),
+            icon: const Icon(Icons.add),
+            label: const Text('Add'),
             onPressed: () => _import(context, ref),
           ),
         ),
@@ -355,8 +405,8 @@ class _LibrarySection extends ConsumerWidget {
           data: (tracks) => tracks.isEmpty
               ? const ListTile(
                   leading: Icon(Icons.library_music_outlined),
-                  title: Text('No tracks yet'),
-                  subtitle: Text('Import audio files. Devices match tracks by content (SHA-256), not by name.'),
+                  title: Text('No songs yet'),
+                  subtitle: Text('Hosts: tap Add to pick songs from this phone. Guests don\'t need any music.'),
                 )
               : Column(children: [
                   for (final t in tracks)
@@ -364,64 +414,31 @@ class _LibrarySection extends ConsumerWidget {
                       dense: true,
                       leading: const Icon(Icons.music_note_outlined),
                       title: Text(t.title, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(
-                          '${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)} · ${t.id.substring(0, 8)}…'),
+                      subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
                       trailing: IconButton(
-                        tooltip: 'Remove from library',
+                        tooltip: 'Remove',
                         icon: const Icon(Icons.delete_outline),
                         onPressed: () => ref.read(libraryProvider.notifier).remove(t),
                       ),
                     ),
                 ]),
           loading: () => const Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator()),
-          error: (e, _) => ListTile(leading: const Icon(Icons.error_outline), title: Text('Library error: $e')),
+          error: (e, _) => ListTile(leading: const Icon(Icons.error_outline), title: Text('Could not load your music: $e')),
         ),
       ],
     );
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
-    final picked = await FilePicker.pickFiles(type: FileType.audio, dialogTitle: 'Import audio');
+    final picked = await FilePicker.pickFiles(type: FileType.audio, dialogTitle: 'Add songs');
     final files = [for (final f in picked) if (f.path != null) File(f.path!)];
     if (files.isEmpty) return;
     final errors = await ref.read(libraryProvider.notifier).importFiles(files);
     if (!context.mounted) return;
     if (errors.isEmpty) {
-      showMessage(context, 'Imported ${files.length} track(s).');
+      showMessage(context, 'Added ${files.length} song${files.length == 1 ? '' : 's'}.');
     } else {
-      showMessage(context, 'Some files failed: ${errors.join('; ')}', error: true);
+      showMessage(context, 'Some files could not be added: ${errors.join('; ')}', error: true);
     }
-  }
-}
-
-class _RecentRooms extends ConsumerWidget {
-  const _RecentRooms();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hist = ref.watch(roomHistoryProvider);
-    return hist.maybeWhen(
-      data: (list) => list.isEmpty
-          ? const SizedBox.shrink()
-          : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              const SectionHeader('Recent rooms'),
-              for (final h in list.take(5))
-                ListTile(
-                  dense: true,
-                  leading: Icon(h.hosted ? Icons.cell_tower : Icons.history),
-                  title: Text(h.roomName),
-                  subtitle: Text('${h.hosted ? 'Hosted' : 'Joined ${h.host}:${h.port}'} · ${_ago(h.at)}'),
-                ),
-            ]),
-      orElse: () => const SizedBox.shrink(),
-    );
-  }
-
-  static String _ago(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return 'just now';
-    if (d.inHours < 1) return '${d.inMinutes} min ago';
-    if (d.inDays < 1) return '${d.inHours} h ago';
-    return '${d.inDays} d ago';
   }
 }

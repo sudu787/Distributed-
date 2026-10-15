@@ -65,7 +65,7 @@ class _ScanScreenState extends State<ScanScreen> {
             color: Colors.black54,
             padding: const EdgeInsets.all(16),
             child: Text(
-              _hint ?? 'Point the camera at the QR code on the host\'s screen (Room → Invite with QR code).',
+              _hint ?? 'Point the camera at the QR code on the host\'s phone (QR icon at the top of their party).',
               textAlign: TextAlign.center,
               style: t.bodyMedium?.copyWith(color: Colors.white),
             ),

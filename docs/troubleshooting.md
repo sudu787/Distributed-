@@ -6,8 +6,8 @@
    guests must be on the host's hotspot.
 2. **Client isolation.** Guest networks, hotels, cafés and many corporate APs block device-to-device traffic. Discovery
    *and* joining fail. Use a phone hotspot instead.
-3. **Broadcast filtered.** Some APs drop broadcast or multicast even without isolation. Use **Join by address**: on the
-   host's room screen, read the IP and port (default 47800), then enter it with the join key.
+3. **Broadcast filtered.** Some APs drop broadcast or multicast even without isolation. Use **Join a party → Enter address
+   and code**: the host's QR icon shows the address and code.
 4. **Android multicast filtering.** The app holds a `MulticastLock` while in a room, but discovery on the home screen
    may still miss beacons on some OEM builds. Pull to refresh, or join by address.
 5. **Hotspot subnets.** Beacons go to `255.255.255.255` and to each interface's `/24` broadcast address. Hotspots with
@@ -18,7 +18,7 @@
 ## Joining fails
 
 - **The invite QR code does not open the app from the camera.** Some camera apps ignore custom `syncsphere://` links.
-  Use **Scan invite QR code** in SyncSphere, or copy the link and use **Join by address → Paste invite link**.
+  Use **Join a party → Scan QR code** in SyncSphere, or copy the link and use **Join a party → Paste invite link**.
 - **Joining from a QR code fails with "unreachable".** The link lists every address of the host; all were tried.
   The phones are probably on different networks (guest Wi-Fi isolation, or one on mobile data).
 
@@ -38,9 +38,9 @@
 - **Reporting a sync problem.** On every phone open Diagnostics, tap the copy icon (top right) and send the reports
   together with what you heard (which phone was early/late, by roughly how much, after what action).
 - **One phone is audibly late but diagnostics say "in sync".** It is probably Bluetooth or a speaker with DSP latency;
-  software cannot see that delay. On the room screen, stand where you listen and tap **Calibrate to this spot**. You
-  can also measure it externally (docs/benchmarking.md §2) and enter the delay under Diagnostics →
-  *Acoustic calibration offset*.
+  software cannot see that delay. On the **Speakers** tab, stand where you listen and tap **Calibrate to this spot**,
+  then fine-tune by ear: tap the phone → **Timing** (+ plays earlier, − later). You can also measure the delay
+  externally (docs/benchmarking.md §2) and enter it there.
 - **Calibration says a device was not heard.** Its volume was too low, it is too far away, or the room was noisy.
   Raise that device's volume, move closer, and retry. Phones without an unprocessed microphone source apply noise
   suppression that can swallow quiet clicks.

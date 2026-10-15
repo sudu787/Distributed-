@@ -109,46 +109,102 @@ void _phone(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('home screen shows actions, nearby rooms and empty library', (tester) async {
+  testWidgets('home screen: host/join actions, nearby parties, empty library', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_wrap(const HomeScreen(), _overrides(const RoomViewState())));
     await tester.pumpAndSettle();
-    expect(find.text('Create room'), findsOneWidget);
-    expect(find.text('Join by address'), findsOneWidget);
+    expect(find.text('Host a party'), findsOneWidget);
+    expect(find.text('Join a party'), findsOneWidget);
     expect(find.text('Garden party'), findsOneWidget);
-    expect(find.textContaining('192.168.1.20'), findsOneWidget);
-    expect(find.text('No tracks yet'), findsOneWidget);
+    expect(find.text('No songs yet'), findsOneWidget);
+    await tester.tap(find.text('Join a party'));
+    await tester.pumpAndSettle();
+    expect(find.text('Scan QR code'), findsOneWidget);
+    expect(find.text('Enter address and code'), findsOneWidget);
   });
 
-  testWidgets('room screen shows key, devices with health and availability', (tester) async {
+  testWidgets('room: three tabs with player, queue and speakers', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
     await tester.pump();
-    expect(find.text('ABCD-2345'), findsOneWidget);
-    expect(find.text('K7Q2M9'), findsOneWidget);
-    expect(find.textContaining('Kitchen'), findsOneWidget);
-    expect(find.textContaining('downloading'), findsOneWidget);
-    expect(find.textContaining('(est.)'), findsWidgets);
+    expect(find.text('Living room'), findsOneWidget);
+    expect(find.textContaining('2 phones · In sync'), findsOneWidget);
+    expect(find.text('Blue Hour'), findsOneWidget); // Playing tab
+
+    await tester.tap(find.text('Queue'));
+    await tester.pump();
     expect(find.text('Blue Hour'), findsOneWidget);
     expect(find.text('1/2'), findsOneWidget);
+
+    await tester.tap(find.text('Speakers'));
+    await tester.pump();
+    expect(find.textContaining('Kitchen'), findsOneWidget);
+    expect(find.textContaining('downloading song'), findsOneWidget);
+    expect(find.text('Calibrate to this spot'), findsOneWidget);
+    expect(find.textContaining('cannot record audio'), findsOneWidget);
+  });
+
+  testWidgets('host invite shows QR code and typed code', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Invite'));
+    await tester.pumpAndSettle();
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.text('ABCD-2345'), findsOneWidget);
+    expect(find.textContaining('Anyone with this code can join'), findsOneWidget);
+  });
+
+  testWidgets('device sheet: channel and timing fine-tune for another phone', (tester) async {
+    _phone(tester);
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
+    await tester.pump();
+    await tester.tap(find.text('Speakers'));
+    await tester.pump();
+    await tester.tap(find.text('Kitchen'));
+    await tester.pumpAndSettle();
+    expect(find.text('No adjustment'), findsOneWidget);
+    await tester.tap(find.text('Left'));
+    await tester.tap(find.byTooltip('Play 5 ms earlier'));
+    await tester.pump();
+    expect(ctl.sent, [ControlAction.setChannelRole, ControlAction.setCalibration]);
   });
 
   testWidgets('player sends controls when allowed', (tester) async {
     _phone(tester);
     final ctl = _FakeRoomController(_roomState());
-    await tester.pumpWidget(_wrap(const PlayerScreen(), _overrides(_roomState(), controller: ctl)));
+    await tester.pumpWidget(_wrap(const Scaffold(body: NowPlayingView()), _overrides(_roomState(), controller: ctl)));
     await tester.pump();
     expect(find.text('Blue Hour'), findsOneWidget);
     expect(find.text('1:05'), findsOneWidget); // expected position 65 s
     await tester.tap(find.byTooltip('Pause'));
+    await tester.tap(find.byTooltip('Shuffle off'));
+    await tester.tap(find.byTooltip('Repeat off'));
     await tester.pump();
-    expect(ctl.sent, [ControlAction.pause]);
+    expect(ctl.sent, [ControlAction.pause, ControlAction.setShuffle, ControlAction.setRepeat]);
+  });
+
+  testWidgets('player: "sounds early or late" opens this phone\'s timing', (tester) async {
+    _phone(tester);
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const Scaffold(body: NowPlayingView()), _overrides(_roomState(), controller: ctl)));
+    await tester.pump();
+    await tester.tap(find.text('This phone sounds early or late?'));
+    await tester.pumpAndSettle();
+    expect(find.text('My Phone (this phone)'), findsOneWidget);
+    await tester.tap(find.byTooltip('Play 5 ms later'));
+    await tester.pumpAndSettle();
+    // Saved for this phone (sent to the room too when connected).
+    final container = ProviderScope.containerOf(tester.element(find.byType(NowPlayingView)));
+    expect(container.read(identityProvider).outputCalibrationUs, -5000);
   });
 
   testWidgets('player disables controls for listeners', (tester) async {
     _phone(tester);
     final listener = _FakeRoomController(_roomState(role: ParticipantRole.listener));
-    await tester.pumpWidget(_wrap(const PlayerScreen(), _overrides(_roomState(role: ParticipantRole.listener), controller: listener)));
+    await tester.pumpWidget(_wrap(const Scaffold(body: NowPlayingView()),
+        _overrides(_roomState(role: ParticipantRole.listener), controller: listener)));
     await tester.pump();
     await tester.tap(find.byTooltip('Pause'));
     await tester.pump();
@@ -158,7 +214,7 @@ void main() {
 
   testWidgets('player shows reconnecting state when the coordinator is lost', (tester) async {
     _phone(tester);
-    await tester.pumpWidget(_wrap(const PlayerScreen(), _overrides(_roomState(live: false))));
+    await tester.pumpWidget(_wrap(const Scaffold(body: NowPlayingView()), _overrides(_roomState(live: false))));
     await tester.pump();
     expect(find.textContaining('Reconnecting'), findsOneWidget);
     expect(find.textContaining('disabled while disconnected'), findsOneWidget);
@@ -172,39 +228,6 @@ void main() {
     expect(find.text('dev-other'), findsOneWidget);
     expect(find.textContaining('-14.8 ms (est.)'), findsOneWidget);
     expect(find.textContaining('adjusting rate'), findsWidgets);
-  });
-
-  testWidgets('player toggles shuffle and cycles repeat', (tester) async {
-    _phone(tester);
-    final ctl = _FakeRoomController(_roomState());
-    await tester.pumpWidget(_wrap(const PlayerScreen(), _overrides(_roomState(), controller: ctl)));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Shuffle off'));
-    await tester.tap(find.byTooltip('Repeat off'));
-    await tester.pump();
-    expect(ctl.sent, [ControlAction.setShuffle, ControlAction.setRepeat]);
-  });
-
-  testWidgets('room screen: invite QR, calibration card and channel roles', (tester) async {
-    _phone(tester);
-    final ctl = _FakeRoomController(_roomState());
-    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
-    await tester.pump();
-    expect(find.text('Calibrate to this spot'), findsOneWidget);
-    expect(find.textContaining('cannot record audio'), findsOneWidget);
-
-    await tester.tap(find.text('Invite with QR code'));
-    await tester.pumpAndSettle();
-    expect(find.byType(QrImageView), findsOneWidget);
-    expect(find.textContaining('contains the join key'), findsOneWidget);
-    await tester.tap(find.text('Done'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Device options').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<Object>, 'Left channel (experimental)'));
-    await tester.pumpAndSettle();
-    expect(ctl.sent, [ControlAction.setChannelRole]);
   });
 
   testWidgets('diagnostics copies a JSON report', (tester) async {

@@ -239,6 +239,17 @@ class RoomController extends Notifier<RoomViewState> {
     if (err != null) s.engine.outputCalibrationUs = outputCalibrationUs;
   }
 
+  /// Manual timing fine-tune for any device (own device always; others
+  /// need control rights). Positive = that device plays earlier.
+  Future<String?> setDeviceOffset(String deviceId, int offsetUs) async {
+    final v = offsetUs.clamp(-kMaxCalibrationUs, kMaxCalibrationUs);
+    if (deviceId == ref.read(identityProvider).deviceId) {
+      await setCalibration(v);
+      return null;
+    }
+    return control(ControlAction.setCalibration, targetDevice: deviceId, offsetUs: v);
+  }
+
   Future<String?> setRepeat(PlaylistRepeat mode) => control(ControlAction.setRepeat, mode: mode.name);
 
   Future<String?> setShuffle(bool on) => control(ControlAction.setShuffle, value: on ? 1 : 0);

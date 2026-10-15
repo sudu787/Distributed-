@@ -77,3 +77,21 @@ String channelLabel(ChannelRole c) => switch (c) {
       ChannelRole.right => 'Right channel (experimental)',
       ChannelRole.mono => 'Mono mix',
     };
+
+/// Room-wide sync summary from the coordinator's diagnostics (estimate).
+(SyncHealth, String) roomSyncSummary(int? maxPairwiseErrorUs, {required bool live, required bool playing}) {
+  if (!live) return (SyncHealth.poor, 'Reconnecting…');
+  if (!playing) return (SyncHealth.unknown, 'Ready');
+  if (maxPairwiseErrorUs == null) return (SyncHealth.unknown, 'Syncing…');
+  final a = maxPairwiseErrorUs.abs();
+  if (a < 20000) return (SyncHealth.good, 'In sync');
+  if (a < 50000) return (SyncHealth.fair, 'Almost in sync');
+  return (SyncHealth.poor, 'Out of sync – correcting');
+}
+
+/// Human wording for an output offset: positive plays earlier.
+String offsetLabel(int? offsetUs) {
+  final ms = ((offsetUs ?? 0) / 1000).round();
+  if (ms == 0) return 'No adjustment';
+  return ms > 0 ? 'Plays $ms ms earlier' : 'Plays ${-ms} ms later';
+}

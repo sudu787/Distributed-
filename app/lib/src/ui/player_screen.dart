@@ -7,17 +7,18 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
+import 'room_screen.dart' show DeviceSettingsSheet;
 import 'widgets.dart';
 
-/// Screen 3: the shared player.
-class PlayerScreen extends ConsumerStatefulWidget {
-  const PlayerScreen({super.key});
+/// Playing tab: what is playing and the shared controls.
+class NowPlayingView extends ConsumerStatefulWidget {
+  const NowPlayingView({super.key});
 
   @override
-  ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
+  ConsumerState<NowPlayingView> createState() => _NowPlayingViewState();
 }
 
-class _PlayerScreenState extends ConsumerState<PlayerScreen> {
+class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
   Timer? _tick;
   double? _dragPos;
 
@@ -37,12 +38,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     super.dispose();
   }
 
-  Future<void> _ctl(ControlAction a, {int? positionUs, double? value, String? targetDevice}) async {
-    final err = await ref
-        .read(roomControllerProvider.notifier)
-        .control(a, positionUs: positionUs, value: value, targetDevice: targetDevice);
-    if (err != null && mounted) showMessage(context, err, error: true);
-  }
+  Future<void> _ctl(ControlAction a, {int? positionUs, double? value, String? targetDevice}) =>
+      _result(ref.read(roomControllerProvider.notifier).control(a, positionUs: positionUs, value: value, targetDevice: targetDevice));
 
   Future<void> _result(Future<String?> f) async {
     final err = await f;
@@ -52,11 +49,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(roomControllerProvider);
-    if (s.status == RoomStatus.none) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
-      });
-    }
     final room = s.room;
     final t = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
@@ -66,121 +58,126 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final pos = ref.read(roomControllerProvider.notifier).expectedPositionUs() ?? 0;
     final dur = track?.durationUs;
     final playing = (tl?.isPlaying ?? false) || (pending?.autoPlay ?? false);
-    final me = room?.participant(ref.watch(identityProvider).deviceId);
+    final myId = ref.watch(identityProvider).deviceId;
+    final me = room?.participant(myId);
     final canControl = s.canControl;
+    final ctl = ref.read(roomControllerProvider.notifier);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Now playing')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            AspectRatio(
-              aspectRatio: 1.4,
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
-                  gradient: LinearGradient(
-                    colors: [cs.primaryContainer, cs.tertiaryContainer],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Icon(Icons.music_note, size: 96, color: cs.onPrimaryContainer),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      children: [
+        AspectRatio(
+          aspectRatio: 1.6,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              gradient: LinearGradient(
+                colors: [cs.primaryContainer, cs.tertiaryContainer],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-            const SizedBox(height: 20),
-            Text(track?.title ?? 'Nothing selected', style: t.headlineSmall, textAlign: TextAlign.center),
-            Text(track?.artist ?? (track == null ? 'Pick a track in the room playlist' : 'Unknown artist'),
-                style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant), textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Center(child: _StatusLine(s: s, positionUs: pos)),
-            const SizedBox(height: 8),
-            Slider(
-              value: (_dragPos ?? pos.toDouble()).clamp(0, (dur ?? 1).toDouble()),
-              max: (dur ?? 1).toDouble(),
-              onChanged: canControl && dur != null ? (v) => setState(() => _dragPos = v) : null,
-              onChangeEnd: canControl && dur != null
-                  ? (v) {
-                      setState(() => _dragPos = null);
-                      _ctl(ControlAction.seek, positionUs: v.round());
-                    }
-                  : null,
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text(fmtClock(_dragPos?.round() ?? pos), style: t.bodySmall),
-                Text(fmtClock(dur), style: t.bodySmall),
-              ]),
-            ),
-            const SizedBox(height: 8),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              IconButton(
-                tooltip: room?.shuffle ?? false ? 'Shuffle on' : 'Shuffle off',
-                isSelected: room?.shuffle ?? false,
-                icon: const Icon(Icons.shuffle_rounded),
-                selectedIcon: Icon(Icons.shuffle_on_rounded, color: cs.primary),
-                onPressed: canControl ? () => _result(ref.read(roomControllerProvider.notifier).setShuffle(!(room?.shuffle ?? false))) : null,
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                iconSize: 40,
-                tooltip: 'Previous',
-                icon: const Icon(Icons.skip_previous_rounded),
-                onPressed: canControl ? () => _ctl(ControlAction.previous) : null,
-              ),
-              const SizedBox(width: 16),
-              IconButton.filled(
-                iconSize: 56,
-                tooltip: playing ? 'Pause' : 'Play',
-                icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
-                onPressed: canControl ? () => _ctl(playing ? ControlAction.pause : ControlAction.play) : null,
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                iconSize: 40,
-                tooltip: 'Next',
-                icon: const Icon(Icons.skip_next_rounded),
-                onPressed: canControl ? () => _ctl(ControlAction.next) : null,
-              ),
-              const SizedBox(width: 4),
-              _RepeatButton(
-                mode: room?.repeat ?? PlaylistRepeat.off,
-                onPressed: canControl
-                    ? (next) => _result(ref.read(roomControllerProvider.notifier).setRepeat(next))
-                    : null,
-              ),
-            ]),
-            if (!canControl)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  s.isLive ? 'You are a listener. The host controls playback.' : 'Controls are disabled while disconnected.',
-                  textAlign: TextAlign.center,
-                  style: t.bodySmall,
-                ),
-              ),
-            const SizedBox(height: 16),
-            _VolumeRow(
-              label: 'Room volume',
-              icon: Icons.speaker_group_outlined,
-              value: room?.masterVolume ?? 1,
-              onChanged: canControl ? (v) => _ctl(ControlAction.masterVolume, value: v) : null,
-            ),
-            _VolumeRow(
-              label: 'This device',
-              icon: Icons.smartphone,
-              value: me?.volume ?? 1,
-              onChanged: s.isLive && me != null
-                  ? (v) => _ctl(ControlAction.deviceVolume, value: v, targetDevice: me.deviceId)
-                  : null,
-            ),
-            const SizedBox(height: 12),
-            _SyncCard(s: s),
-          ],
+            child: Icon(Icons.music_note, size: 88, color: cs.onPrimaryContainer),
+          ),
         ),
-      ),
+        const SizedBox(height: 20),
+        Text(track?.title ?? 'Nothing playing', style: t.headlineSmall, textAlign: TextAlign.center),
+        Text(track?.artist ?? (track == null ? 'Pick a song in the Queue tab' : 'Unknown artist'),
+            style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        Center(child: _StatusLine(s: s, positionUs: pos)),
+        const SizedBox(height: 4),
+        Slider(
+          value: (_dragPos ?? pos.toDouble()).clamp(0, (dur ?? 1).toDouble()),
+          max: (dur ?? 1).toDouble(),
+          onChanged: canControl && dur != null ? (v) => setState(() => _dragPos = v) : null,
+          onChangeEnd: canControl && dur != null
+              ? (v) {
+                  setState(() => _dragPos = null);
+                  _ctl(ControlAction.seek, positionUs: v.round());
+                }
+              : null,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(fmtClock(_dragPos?.round() ?? pos), style: t.bodySmall),
+            Text(fmtClock(dur), style: t.bodySmall),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(
+            tooltip: room?.shuffle ?? false ? 'Shuffle on' : 'Shuffle off',
+            isSelected: room?.shuffle ?? false,
+            icon: const Icon(Icons.shuffle_rounded),
+            selectedIcon: Icon(Icons.shuffle_on_rounded, color: cs.primary),
+            onPressed: canControl ? () => _result(ctl.setShuffle(!(room?.shuffle ?? false))) : null,
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            iconSize: 40,
+            tooltip: 'Previous',
+            icon: const Icon(Icons.skip_previous_rounded),
+            onPressed: canControl ? () => _ctl(ControlAction.previous) : null,
+          ),
+          const SizedBox(width: 12),
+          IconButton.filled(
+            iconSize: 56,
+            tooltip: playing ? 'Pause' : 'Play',
+            icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+            onPressed: canControl ? () => _ctl(playing ? ControlAction.pause : ControlAction.play) : null,
+          ),
+          const SizedBox(width: 12),
+          IconButton(
+            iconSize: 40,
+            tooltip: 'Next',
+            icon: const Icon(Icons.skip_next_rounded),
+            onPressed: canControl ? () => _ctl(ControlAction.next) : null,
+          ),
+          const SizedBox(width: 4),
+          _RepeatButton(
+            mode: room?.repeat ?? PlaylistRepeat.off,
+            onPressed: canControl ? (next) => _result(ctl.setRepeat(next)) : null,
+          ),
+        ]),
+        if (!canControl)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              s.isLive ? 'You are a listener. The host controls the music.' : 'Controls are disabled while disconnected.',
+              textAlign: TextAlign.center,
+              style: t.bodySmall,
+            ),
+          ),
+        const SizedBox(height: 16),
+        _VolumeRow(
+          label: 'Everyone',
+          icon: Icons.speaker_group_outlined,
+          value: room?.masterVolume ?? 1,
+          onChanged: canControl ? (v) => _ctl(ControlAction.masterVolume, value: v) : null,
+        ),
+        _VolumeRow(
+          label: 'This phone',
+          icon: Icons.smartphone,
+          value: me?.volume ?? 1,
+          onChanged: s.isLive && me != null ? (v) => _ctl(ControlAction.deviceVolume, value: v, targetDevice: myId) : null,
+        ),
+        const SizedBox(height: 8),
+        if (s.isLive && me != null)
+          Center(
+            child: TextButton.icon(
+              icon: const Icon(Icons.tune),
+              label: const Text('This phone sounds early or late?'),
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                showDragHandle: true,
+                builder: (_) => DeviceSettingsSheet(deviceId: myId),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -196,11 +193,11 @@ class _StatusLine extends StatelessWidget {
     final room = s.room;
     final e = s.engine;
     if (!s.isLive) {
-      return StatusChip('Reconnecting — playing on last known timeline', Icons.sync_problem, color: const Color(0xFFD99A1E));
+      return StatusChip('Reconnecting… music keeps playing', Icons.sync_problem, color: const Color(0xFFD99A1E));
     }
     if (room == null) return const SizedBox.shrink();
-    if (room.calibration != null) return const StatusChip('Calibrating to a listening spot…', Icons.hearing);
-    if (room.pending != null) return const StatusChip('Preparing on all devices…', Icons.downloading);
+    if (room.calibration != null) return const StatusChip('Calibrating…', Icons.hearing);
+    if (room.pending != null) return const StatusChip('Getting every phone ready…', Icons.downloading);
     final tl = room.timeline;
     if (e?.buffering ?? false) return StatusChip('Buffering', Icons.hourglass_bottom, color: cs.error);
     switch (tl.status) {
@@ -212,10 +209,8 @@ class _StatusLine extends StatelessWidget {
         if (positionUs <= tl.anchorPositionUs && e?.activeGeneration != tl.generation) {
           return const StatusChip('Starting together…', Icons.timer_outlined);
         }
-        final mode = e?.mode ?? CorrectionMode.waiting;
-        final h = healthOf(e?.lastErrorUs, mode);
-        final err = e?.lastErrorUs == null ? '' : ' · ${fmtMs(e!.lastErrorUs, signed: true)} (est.)';
-        return StatusChip('Playing · ${modeLabel(mode)}$err', Icons.graphic_eq, color: healthColor(h, cs));
+        final (h, label) = roomSyncSummary(s.diagnostics?.maxPairwiseErrorUs, live: true, playing: true);
+        return StatusChip(label, Icons.graphic_eq, color: healthColor(h, cs));
     }
   }
 }
@@ -258,23 +253,23 @@ class _VolumeRow extends StatelessWidget {
       Icon(icon, size: 20),
       const SizedBox(width: 8),
       SizedBox(width: 92, child: Text(label)),
-      Expanded(child: _DebouncedSlider(value: value, onChanged: onChanged)),
+      Expanded(child: DebouncedSlider(value: value, onChanged: onChanged)),
     ]);
   }
 }
 
 /// Sends a value only when the drag ends, to avoid flooding the room with
 /// state versions while the user drags.
-class _DebouncedSlider extends StatefulWidget {
+class DebouncedSlider extends StatefulWidget {
   final double value;
   final ValueChanged<double>? onChanged;
-  const _DebouncedSlider({required this.value, required this.onChanged});
+  const DebouncedSlider({super.key, required this.value, required this.onChanged});
 
   @override
-  State<_DebouncedSlider> createState() => _DebouncedSliderState();
+  State<DebouncedSlider> createState() => _DebouncedSliderState();
 }
 
-class _DebouncedSliderState extends State<_DebouncedSlider> {
+class _DebouncedSliderState extends State<DebouncedSlider> {
   double? _drag;
 
   @override
@@ -288,34 +283,4 @@ class _DebouncedSliderState extends State<_DebouncedSlider> {
                 widget.onChanged!(v);
               },
       );
-}
-
-class _SyncCard extends StatelessWidget {
-  final RoomViewState s;
-  const _SyncCard({required this.s});
-
-  @override
-  Widget build(BuildContext context) {
-    final e = s.engine;
-    final c = s.clock;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Synchronization', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          InfoRow('This device vs. timeline', fmtMs(e?.lastErrorUs, signed: true), estimate: true),
-          InfoRow('Room spread', fmtMs(s.diagnostics?.maxPairwiseErrorUs), estimate: true),
-          InfoRow('Correction', e == null ? '—' : '${modeLabel(e.mode)} · rate ${e.rate.toStringAsFixed(4)}'),
-          InfoRow('Clock uncertainty', fmtMs(c?.uncertaintyMicros), estimate: true),
-          const SizedBox(height: 6),
-          Text(
-            'Software estimates from network timing and the player\'s reported position. '
-            'They cannot see Bluetooth or speaker delays; see Diagnostics.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ]),
-      ),
-    );
-  }
 }

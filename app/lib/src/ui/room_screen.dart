@@ -4,68 +4,101 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
-import '../services/network_info.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'diagnostics_screen.dart';
 import 'format.dart';
 import 'player_screen.dart';
+import 'queue_view.dart';
 import 'widgets.dart';
 
-/// Screen 2: room overview — code/key, coordinator status, devices and
-/// their sync health, playlist and track availability.
-class RoomScreen extends ConsumerWidget {
+/// The room: three tabs (Playing, Queue, Speakers). Technical details live
+/// behind the ⋮ menu (Diagnostics).
+class RoomScreen extends ConsumerStatefulWidget {
   const RoomScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RoomScreen> createState() => _RoomScreenState();
+}
+
+class _RoomScreenState extends ConsumerState<RoomScreen> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
     final s = ref.watch(roomControllerProvider);
     final room = s.room;
+    final connected = room?.participants.where((p) => p.connection != ConnectionStatus.disconnected).length ?? 0;
+    final playing = room?.timeline.isPlaying ?? false;
+    final (health, label) = roomSyncSummary(s.diagnostics?.maxPairwiseErrorUs, live: s.isLive, playing: playing);
     return Scaffold(
       appBar: AppBar(
-        title: Text(room?.roomName ?? s.info?.roomName ?? 'Room'),
+        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(room?.roomName ?? s.info?.roomName ?? 'Room', overflow: TextOverflow.ellipsis),
+          Row(children: [
+            HealthDot(health, size: 8),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text('$connected phone${connected == 1 ? '' : 's'} · $label',
+                  style: Theme.of(context).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+        ]),
         actions: [
-          IconButton(
-            tooltip: 'Diagnostics',
-            icon: const Icon(Icons.monitor_heart_outlined),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiagnosticsScreen())),
-          ),
-          IconButton(
-            tooltip: s.isHost ? 'Close room' : 'Leave room',
-            icon: const Icon(Icons.logout),
-            onPressed: () => _leave(context, ref, s.isHost),
+          if (s.isHost)
+            IconButton(
+              tooltip: 'Invite',
+              icon: const Icon(Icons.qr_code_2),
+              onPressed: () => showInvite(context, ref),
+            ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (v) {
+              if (v == 'diag') {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DiagnosticsScreen()));
+              } else if (v == 'leave') {
+                _leave(context, s.isHost);
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'diag', child: ListTile(leading: Icon(Icons.monitor_heart_outlined), title: Text('Diagnostics'))),
+              PopupMenuItem(
+                value: 'leave',
+                child: ListTile(leading: const Icon(Icons.logout), title: Text(s.isHost ? 'End party' : 'Leave party')),
+              ),
+            ],
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.graphic_eq),
-        label: const Text('Player'),
-        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlayerScreen())),
-      ),
       body: room == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.only(bottom: 96),
-              children: [
-                _RoomHeader(s),
-                _ListeningSpot(s),
-                _Devices(s),
-                _Playlist(s),
-              ],
-            ),
+          : switch (_tab) {
+              0 => const NowPlayingView(),
+              1 => const QueueView(),
+              _ => const SpeakersView(),
+            },
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
+          NavigationDestination(icon: Icon(Icons.queue_music_outlined), selectedIcon: Icon(Icons.queue_music), label: 'Queue'),
+          NavigationDestination(icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
+        ],
+      ),
     );
   }
 
-  Future<void> _leave(BuildContext context, WidgetRef ref, bool host) async {
+  Future<void> _leave(BuildContext context, bool host) async {
     if (host) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
-          title: const Text('Close the room?'),
-          content: const Text('This device is the room coordinator. Leaving closes the room for everyone.'),
+          title: const Text('End the party?'),
+          content: const Text('This phone runs the party. Leaving stops the music on every phone.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Stay')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Close room')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('End party')),
           ],
         ),
       );
@@ -75,68 +108,221 @@ class RoomScreen extends ConsumerWidget {
   }
 }
 
-class _RoomHeader extends ConsumerWidget {
-  final RoomViewState s;
-  const _RoomHeader(this.s);
+/// QR code, typed code and address in one place (host only).
+Future<void> showInvite(BuildContext context, WidgetRef ref) async {
+  final info = ref.read(roomControllerProvider).info;
+  final link = await ref.read(roomControllerProvider.notifier).joinLink();
+  if (!context.mounted || info == null) return;
+  final key = info.joinKey == null ? null : formatJoinKey(info.joinKey!);
+  final t = Theme.of(context).textTheme;
+  await showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('Invite friends'),
+      content: SizedBox(
+        width: 300,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (link != null) ...[
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(8),
+                child: QrImageView(data: link.toString(), size: 220, backgroundColor: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              const Text('On the other phone: SyncSphere → Join → Scan QR code.', textAlign: TextAlign.center),
+            ] else
+              const Text('Connect to Wi-Fi or turn on a hotspot to show a QR code.', textAlign: TextAlign.center),
+            if (key != null) ...[
+              const Divider(height: 24),
+              Text('Or type this code', style: t.labelLarge),
+              SelectableText(key, style: t.headlineSmall?.copyWith(fontFamily: 'monospace', letterSpacing: 2)),
+              if (link != null) Text('Address ${link.hosts.first} · port ${link.port}', style: t.bodySmall),
+            ],
+            const SizedBox(height: 8),
+            Text('Anyone with this code can join. Share it only with people here.', style: t.bodySmall, textAlign: TextAlign.center),
+          ]),
+        ),
+      ),
+      actions: [
+        if (link != null)
+          TextButton.icon(
+            icon: const Icon(Icons.link),
+            label: const Text('Copy link'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: link.toString()));
+              showMessage(context, 'Invite link copied');
+            },
+          ),
+        FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Done')),
+      ],
+    ),
+  );
+}
+
+/// Speakers tab: who is connected, listening-spot calibration and per-phone
+/// settings (volume, timing, channel).
+class SpeakersView extends ConsumerWidget {
+  const SpeakersView({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cs = Theme.of(context).colorScheme;
+    final s = ref.watch(roomControllerProvider);
+    final room = s.room!;
+    final me = ref.watch(identityProvider).deviceId;
+    final diag = {for (final d in s.diagnostics?.participants ?? const <ParticipantDiagnostics>[]) d.deviceId: d};
+    final others = room.participants.where((p) => p.deviceId != me && p.connection != ConnectionStatus.disconnected).length;
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        if (s.isHost && others == 0) const _InviteBanner(),
+        const _ListeningSpot(),
+        const SectionHeader('Phones'),
+        for (final p in room.participants)
+          _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text(
+            'Tap a phone to change its volume, timing or channel. If one phone sounds early or late, '
+            'try "Calibrate to this spot" first, then fine-tune by ear.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InviteBanner extends ConsumerWidget {
+  const _InviteBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Card(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        color: Theme.of(context).colorScheme.primaryContainer,
+        child: ListTile(
+          leading: const Icon(Icons.group_add),
+          title: const Text('Invite friends'),
+          subtitle: const Text('Show a QR code for the other phones to scan.'),
+          trailing: FilledButton(onPressed: () => showInvite(context, ref), child: const Text('Invite')),
+        ),
+      );
+}
+
+class _DeviceTile extends ConsumerWidget {
+  final ParticipantSummary p;
+  final ParticipantDiagnostics? d;
+  final bool isMe;
+  const _DeviceTile({required this.p, required this.d, required this.isMe});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(roomControllerProvider);
+    final h = healthOf(d?.errorUs, d?.mode ?? CorrectionMode.idle, connection: p.connection);
+    final parts = <String>[
+      if (p.role == ParticipantRole.host) 'Host',
+      switch (p.connection) {
+        ConnectionStatus.connected => switch (p.currentTrack) {
+            TrackAvailability.fetching => 'downloading song…',
+            TrackAvailability.missing => 'missing song',
+            TrackAvailability.mismatch => 'different file',
+            _ => switch (h) {
+                SyncHealth.good => 'in sync',
+                SyncHealth.fair => 'almost in sync',
+                SyncHealth.poor => 'catching up',
+                SyncHealth.unknown => 'connected',
+              },
+          },
+        ConnectionStatus.suspect => 'not responding',
+        ConnectionStatus.disconnected => 'disconnected',
+      },
+      if (p.channel != ChannelRole.stereo) channelLabel(p.channel).replaceAll(' (experimental)', ''),
+      if ((p.calibrationUs ?? 0) != 0) offsetLabel(p.calibrationUs).toLowerCase(),
+    ];
+    final canEdit = s.isLive && (isMe || s.canControl);
+    return ListTile(
+      leading: Stack(clipBehavior: Clip.none, children: [
+        Icon(isMe ? Icons.smartphone : Icons.phone_android,
+            color: p.connection == ConnectionStatus.disconnected ? Theme.of(context).disabledColor : null),
+        Positioned(right: -2, bottom: -2, child: HealthDot(h)),
+      ]),
+      title: Text('${p.displayName}${isMe ? ' (this phone)' : ''}'),
+      subtitle: Text(parts.join(' · ')),
+      trailing: canEdit ? const Icon(Icons.tune) : null,
+      onTap: canEdit
+          ? () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                showDragHandle: true,
+                builder: (_) => DeviceSettingsSheet(deviceId: p.deviceId),
+              )
+          : null,
+    );
+  }
+}
+
+/// Per-phone settings: volume, timing fine-tune, channel and (host) role.
+class DeviceSettingsSheet extends ConsumerWidget {
+  final String deviceId;
+  const DeviceSettingsSheet({super.key, required this.deviceId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(roomControllerProvider);
+    final p = s.room?.participant(deviceId);
+    if (p == null) return const SizedBox(height: 120, child: Center(child: Text('This phone left the party.')));
+    final ctl = ref.read(roomControllerProvider.notifier);
+    final isMe = deviceId == ref.watch(identityProvider).deviceId;
     final t = Theme.of(context).textTheme;
-    final info = s.info!;
-    final (label, icon, color) = switch (s.phase) {
-      SessionPhase.joined when s.coordinatorSuspect => ('Coordinator not responding…', Icons.hourglass_top, const Color(0xFFD99A1E)),
-      SessionPhase.joined => (info.isHost ? 'Coordinator: this device' : 'Connected to coordinator', Icons.check_circle_outline, const Color(0xFF2E9E5B)),
-      SessionPhase.syncing => ('Synchronizing clocks…', Icons.sync, cs.primary),
-      SessionPhase.reconnecting || SessionPhase.connecting || SessionPhase.authenticating =>
-        ('Reconnecting — playing on last known timeline', Icons.sync_problem, const Color(0xFFD99A1E)),
-      SessionPhase.failed => (s.error ?? 'Disconnected', Icons.error_outline, cs.error),
-      _ => ('—', Icons.help_outline, cs.outline),
-    };
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    Future<void> run(Future<String?> f) async {
+      final err = await f;
+      if (err != null && context.mounted) showMessage(context, err, error: true);
+    }
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          StatusChip(label, icon, color: color),
-          const SizedBox(height: 12),
-          InfoRow('Room code', info.roomId),
-          InfoRow('Audio source', distributionLabel(s.room!.distribution)),
-          if (s.role != null) InfoRow('Your role', roleLabel(s.role!)),
-          if (info.isHost && info.joinKey != null) ...[
-            const Divider(height: 24),
-            Text('Join key', style: t.labelLarge),
-            const SizedBox(height: 4),
-            Row(children: [
-              Expanded(
-                child: SelectableText(formatJoinKey(info.joinKey!),
-                    style: t.headlineMedium?.copyWith(fontFamily: 'monospace', letterSpacing: 2)),
-              ),
-              IconButton(
-                tooltip: 'Copy join key',
-                icon: const Icon(Icons.copy),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: formatJoinKey(info.joinKey!)));
-                  showMessage(context, 'Join key copied');
-                },
-              ),
-            ]),
-            FutureBuilder<NetworkSummary>(
-              future: readNetworkSummary(),
-              builder: (c, snap) => Text(
-                snap.hasData && snap.data!.hasLan
-                    ? 'Others can find this room nearby, or join by address ${snap.data!.ipv4.join(' / ')} port ${info.port}.'
-                    : 'Port ${info.port}',
-                style: t.bodySmall,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text('Share the key only with people in the room. Anyone with it can join.', style: t.bodySmall),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.qr_code_2),
-              label: const Text('Invite with QR code'),
-              onPressed: () => _showInvite(context, ref),
+          Text(isMe ? '${p.displayName} (this phone)' : p.displayName, style: t.titleLarge),
+          const SizedBox(height: 16),
+          Text('Volume', style: t.titleSmall),
+          DebouncedSlider(
+            value: p.volume,
+            onChanged: (v) => run(ctl.control(ControlAction.deviceVolume, value: v, targetDevice: deviceId)),
+          ),
+          const SizedBox(height: 8),
+          Text('Timing', style: t.titleSmall),
+          TimingFineTune(
+            offsetUs: p.calibrationUs ?? 0,
+            onChanged: (us) => run(ctl.setDeviceOffset(deviceId, us)),
+          ),
+          const SizedBox(height: 16),
+          Text('Channel', style: t.titleSmall),
+          const SizedBox(height: 6),
+          SegmentedButton<ChannelRole>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: ChannelRole.stereo, label: Text('Stereo')),
+              ButtonSegment(value: ChannelRole.left, label: Text('Left')),
+              ButtonSegment(value: ChannelRole.right, label: Text('Right')),
+              ButtonSegment(value: ChannelRole.mono, label: Text('Mono')),
+            ],
+            selected: {p.channel},
+            onSelectionChanged: (v) => run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId)),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Left/Right is experimental: put two phones apart for a stereo effect.', style: t.bodySmall),
+          ),
+          if (s.role == ParticipantRole.host && p.role != ParticipantRole.host) ...[
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Can control the music'),
+              subtitle: const Text('Play, pause, skip and change the queue'),
+              value: p.role == ParticipantRole.controller,
+              onChanged: (v) => run(ctl.control(ControlAction.setRole,
+                  targetDevice: deviceId, role: v ? ParticipantRole.controller : ParticipantRole.listener)),
             ),
           ],
         ]),
@@ -145,55 +331,68 @@ class _RoomHeader extends ConsumerWidget {
   }
 }
 
-Future<void> _showInvite(BuildContext context, WidgetRef ref) async {
-  final link = await ref.read(roomControllerProvider.notifier).joinLink();
-  if (!context.mounted) return;
-  if (link == null) {
-    showMessage(context, 'No local network address to share. Connect to Wi-Fi or start a hotspot.', error: true);
-    return;
-  }
-  final text = link.toString();
-  await showDialog<void>(
-    context: context,
-    builder: (c) => AlertDialog(
-      title: const Text('Join this room'),
-      content: SizedBox(
-        width: 280,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(8),
-            child: QrImageView(data: text, size: 240, backgroundColor: Colors.white),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Scan with SyncSphere (Join → Scan QR) or the phone camera. '
-            'The code contains the join key: show it only to people in the room.',
-            textAlign: TextAlign.center,
-          ),
-        ]),
-      ),
-      actions: [
-        TextButton.icon(
-          icon: const Icon(Icons.link),
-          label: const Text('Copy link'),
-          onPressed: () {
-            Clipboard.setData(ClipboardData(text: text));
-            showMessage(context, 'Join link copied');
-          },
-        ),
-        FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Done')),
-      ],
-    ),
-  );
+/// Manual timing adjustment: −/+ 5 ms steps and a ±500 ms slider.
+/// Positive offsets make the phone play earlier.
+class TimingFineTune extends StatefulWidget {
+  final int offsetUs;
+  final ValueChanged<int> onChanged;
+  const TimingFineTune({super.key, required this.offsetUs, required this.onChanged});
+
+  @override
+  State<TimingFineTune> createState() => _TimingFineTuneState();
 }
 
-/// "Calibrate to this spot": aligns every device's sound at this phone's
-/// microphone, which also removes Bluetooth and speaker delays that software
-/// estimates cannot see.
+class _TimingFineTuneState extends State<TimingFineTune> {
+  static const _range = 500; // ms
+  double? _drag;
+
+  void _set(int ms) => widget.onChanged(ms.clamp(-1000, 1000) * 1000);
+
+  @override
+  Widget build(BuildContext context) {
+    final ms = (widget.offsetUs / 1000).round();
+    final shown = _drag?.round() ?? ms;
+    final t = Theme.of(context).textTheme;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(child: Text(offsetLabel(shown * 1000), style: t.bodyLarge)),
+        if (ms != 0) TextButton(onPressed: () => _set(0), child: const Text('Reset')),
+      ]),
+      Row(children: [
+        IconButton.outlined(
+          tooltip: 'Play 5 ms later',
+          icon: const Icon(Icons.remove),
+          onPressed: () => _set(ms - 5),
+        ),
+        Expanded(
+          child: Slider(
+            min: -_range.toDouble(),
+            max: _range.toDouble(),
+            divisions: _range * 2 ~/ 5,
+            value: (_drag ?? ms.toDouble()).clamp(-_range.toDouble(), _range.toDouble()),
+            label: '$shown ms',
+            onChanged: (v) => setState(() => _drag = v),
+            onChangeEnd: (v) {
+              setState(() => _drag = null);
+              _set(v.round());
+            },
+          ),
+        ),
+        IconButton.outlined(
+          tooltip: 'Play 5 ms earlier',
+          icon: const Icon(Icons.add),
+          onPressed: () => _set(ms + 5),
+        ),
+      ]),
+      Text('Sounds late? Tap +. Sounds early? Tap −. Changes apply within a few seconds.', style: t.bodySmall),
+    ]);
+  }
+}
+
+/// "Calibrate to this spot": aligns every phone's sound at this phone's
+/// microphone, including Bluetooth and speaker delays software cannot see.
 class _ListeningSpot extends ConsumerStatefulWidget {
-  final RoomViewState s;
-  const _ListeningSpot(this.s);
+  const _ListeningSpot();
 
   @override
   ConsumerState<_ListeningSpot> createState() => _ListeningSpotState();
@@ -208,13 +407,13 @@ class _ListeningSpotState extends ConsumerState<_ListeningSpot> {
       builder: (c) => AlertDialog(
         title: const Text('Calibrate to this spot?'),
         content: const Text(
-          'Music stops for 15–30 seconds (longer with more devices) while every device plays short clicks in turn. '
-          'Hold this phone where you will listen, keep the room quiet, and keep all devices at their usual volume. '
-          'The microphone recording stays on this phone; only timing results are sent.',
+          'Stand where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
+          'clicks in turn. Keep the room quiet and the volumes as they are.\n\n'
+          'The recording stays on this phone; only timing results are shared.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Calibrate')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
         ],
       ),
     );
@@ -230,7 +429,7 @@ class _ListeningSpotState extends ConsumerState<_ListeningSpot> {
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.s;
+    final s = ref.watch(roomControllerProvider);
     final room = s.room!;
     final t = Theme.of(context).textTheme;
     final ctl = ref.read(roomControllerProvider.notifier);
@@ -243,232 +442,39 @@ class _ListeningSpotState extends ConsumerState<_ListeningSpot> {
       });
     }
     final canStart = s.canControl && ctl.hasMicrophone && !running;
+    final String note;
+    if (running) {
+      note = mine ? 'Listening… keep still and quiet.' : 'Another phone is calibrating…';
+    } else if (!ctl.hasMicrophone) {
+      note = 'This phone cannot record audio, so use another phone to calibrate.';
+    } else if (!s.canControl) {
+      note = 'Ask the host for control to calibrate.';
+    } else if (outcome != null) {
+      final heard = outcome.devices.length - outcome.undetected.length;
+      note = 'Last time: heard $heard of ${outcome.devices.length} phones'
+          '${outcome.undetected.isEmpty ? '.' : ' – turn up the others and try again.'}';
+    } else {
+      note = 'Lines up the sound from every phone where you stand.';
+    }
     return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.hearing),
-            const SizedBox(width: 8),
-            Expanded(child: Text('Listening spot', style: t.titleSmall)),
-            if (running) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-          ]),
-          const SizedBox(height: 6),
-          Text(
-            running
-                ? (mine ? 'Listening for clicks from each device… keep still and quiet.' : 'Another device is calibrating the room…')
-                : 'Measures when each device\'s sound reaches this phone and aligns them here, '
-                    'including Bluetooth and speaker delays.',
-            style: t.bodySmall,
+        child: Row(children: [
+          Icon(Icons.my_location, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Calibrate to this spot', style: t.titleSmall),
+              Text(note, style: t.bodySmall),
+            ]),
           ),
-          if (!running && outcome != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Last calibration: heard ${outcome.devices.length - outcome.undetected.length} of ${outcome.devices.length} devices'
-              '${outcome.undetected.isEmpty ? '' : ' (not heard: ${outcome.undetected.map((id) => room.participant(id)?.displayName ?? id).join(', ')})'}.',
-              style: t.bodySmall,
-            ),
-          ],
-          if (!ctl.hasMicrophone)
-            Text('This device cannot record audio, so it cannot be the listening spot.', style: t.bodySmall)
-          else if (!s.canControl)
-            Text('Only devices with control rights can start a calibration.', style: t.bodySmall),
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            icon: const Icon(Icons.my_location),
-            label: const Text('Calibrate to this spot'),
-            onPressed: canStart && !_requested ? _calibrate : null,
-          ),
+          const SizedBox(width: 8),
+          running
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+              : FilledButton.tonal(onPressed: canStart && !_requested ? _calibrate : null, child: const Text('Start')),
         ]),
       ),
     );
-  }
-}
-
-class _Devices extends ConsumerWidget {
-  final RoomViewState s;
-  const _Devices(this.s);
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final room = s.room!;
-    final diag = {for (final d in s.diagnostics?.participants ?? const <ParticipantDiagnostics>[]) d.deviceId: d};
-    final me = ref.watch(identityProvider).deviceId;
-    final spread = s.diagnostics?.maxPairwiseErrorUs;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SectionHeader('Devices (${room.participants.where((p) => p.connection != ConnectionStatus.disconnected).length} connected)',
-          trailing: spread == null
-              ? null
-              : Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text('spread ${fmtMs(spread)} (est.)', style: Theme.of(context).textTheme.bodySmall),
-                )),
-      for (final p in room.participants)
-        _DeviceTile(
-          p: p,
-          d: diag[p.deviceId],
-          isMe: p.deviceId == me,
-          canManage: s.role == ParticipantRole.host && p.role != ParticipantRole.host,
-          canSetChannel: s.isLive && (p.deviceId == me || s.canControl),
-        ),
-    ]);
-  }
-}
-
-class _DeviceTile extends ConsumerWidget {
-  final ParticipantSummary p;
-  final ParticipantDiagnostics? d;
-  final bool isMe;
-  final bool canManage;
-  final bool canSetChannel;
-  const _DeviceTile({
-    required this.p,
-    required this.d,
-    required this.isMe,
-    required this.canManage,
-    required this.canSetChannel,
-  });
-
-  Future<void> _onAction(BuildContext context, WidgetRef ref, Object action) async {
-    final ctl = ref.read(roomControllerProvider.notifier);
-    final err = switch (action) {
-      final ParticipantRole r => await ctl.control(ControlAction.setRole, targetDevice: p.deviceId, role: r),
-      final ChannelRole c => await ctl.setChannelRole(c, deviceId: isMe ? null : p.deviceId),
-      _ => null,
-    };
-    if (err != null && context.mounted) showMessage(context, err, error: true);
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final h = healthOf(d?.errorUs, d?.mode ?? CorrectionMode.idle, connection: p.connection);
-    final conn = switch (p.connection) {
-      ConnectionStatus.connected => null,
-      ConnectionStatus.suspect => 'not responding',
-      ConnectionStatus.disconnected => 'disconnected',
-    };
-    final parts = <String>[
-      roleLabel(p.role),
-      if (conn != null) conn,
-      availabilityLabel(p.currentTrack),
-      if (d?.errorUs != null) 'error ${fmtMs(d!.errorUs, signed: true)} (est.)',
-      if (d != null && d!.playerState == 'buffering') 'buffering',
-      if (p.channel != ChannelRole.stereo) channelLabel(p.channel),
-      if (p.calibrationUs != null && p.calibrationUs != 0) 'offset ${fmtMs(p.calibrationUs, signed: true)}',
-    ];
-    return ListTile(
-      leading: Stack(clipBehavior: Clip.none, children: [
-        Icon(isMe ? Icons.smartphone : Icons.phone_android,
-            color: p.connection == ConnectionStatus.disconnected ? Theme.of(context).disabledColor : null),
-        Positioned(right: -2, bottom: -2, child: HealthDot(h)),
-      ]),
-      title: Text('${p.displayName}${isMe ? ' (you)' : ''}'),
-      subtitle: Text(parts.join(' · ')),
-      trailing: canManage || canSetChannel
-          ? PopupMenuButton<Object>(
-              tooltip: 'Device options',
-              onSelected: (a) => _onAction(context, ref, a),
-              itemBuilder: (_) => [
-                if (canManage) ...const [
-                  PopupMenuItem(value: ParticipantRole.controller, child: Text('Allow control')),
-                  PopupMenuItem(value: ParticipantRole.listener, child: Text('Listener only')),
-                ],
-                if (canManage && canSetChannel) const PopupMenuDivider(),
-                if (canSetChannel)
-                  for (final c in ChannelRole.values)
-                    CheckedPopupMenuItem(value: c, checked: p.channel == c, child: Text(channelLabel(c))),
-              ],
-            )
-          : null,
-    );
-  }
-}
-
-class _Playlist extends ConsumerWidget {
-  final RoomViewState s;
-  const _Playlist(this.s);
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final room = s.room!;
-    final connected = room.participants.where((p) => p.connection != ConnectionStatus.disconnected).length;
-    final current = room.timeline.trackId ?? room.pending?.trackId;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SectionHeader(
-        'Playlist',
-        trailing: s.isHost
-            ? TextButton.icon(
-                icon: const Icon(Icons.playlist_add),
-                label: const Text('Add'),
-                onPressed: () => _addTracks(context, ref),
-              )
-            : null,
-      ),
-      if (room.playlist.isEmpty)
-        ListTile(
-          leading: const Icon(Icons.queue_music),
-          title: const Text('No tracks in this room'),
-          subtitle: Text(s.isHost ? 'Import tracks on the home screen, then add them here.' : 'Waiting for the host to add tracks.'),
-        ),
-      for (final t in room.playlist)
-        ListTile(
-          selected: t.id == current,
-          leading: Icon(t.id == current ? Icons.equalizer : Icons.music_note_outlined),
-          title: Text(t.title, overflow: TextOverflow.ellipsis),
-          subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
-          trailing: Tooltip(
-            message: 'Devices that have this exact file (SHA-256)',
-            child: Chip(
-              label: Text('${t.availableCount}/$connected'),
-              avatar: Icon(t.availableCount >= connected ? Icons.check : Icons.download_outlined, size: 16),
-            ),
-          ),
-          onTap: s.canControl
-              ? () async {
-                  final err = await ref.read(roomControllerProvider.notifier).control(ControlAction.setTrack, trackId: t.id);
-                  if (err != null && context.mounted) showMessage(context, err, error: true);
-                }
-              : null,
-        ),
-    ]);
-  }
-
-  Future<void> _addTracks(BuildContext context, WidgetRef ref) async {
-    final lib = await ref.read(libraryProvider.future);
-    final inRoom = ref.read(roomControllerProvider).room?.playlist.map((t) => t.id).toSet() ?? {};
-    final candidates = lib.where((t) => !inRoom.contains(t.id)).toList();
-    if (!context.mounted) return;
-    if (candidates.isEmpty) {
-      showMessage(context, 'All library tracks are already in the room.');
-      return;
-    }
-    final chosen = <String>{};
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setState) => AlertDialog(
-          title: const Text('Add tracks'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView(shrinkWrap: true, children: [
-              for (final t in candidates)
-                CheckboxListTile(
-                  value: chosen.contains(t.id),
-                  title: Text(t.title),
-                  onChanged: (v) => setState(() => v == true ? chosen.add(t.id) : chosen.remove(t.id)),
-                ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Add')),
-          ],
-        ),
-      ),
-    );
-    if (ok == true && chosen.isNotEmpty) {
-      ref.read(roomControllerProvider.notifier).addTracks(candidates.where((t) => chosen.contains(t.id)).toList());
-    }
   }
 }

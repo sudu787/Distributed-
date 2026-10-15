@@ -101,16 +101,17 @@ Download that artifact and install it with `adb install` or a file manager.
 
 ### Using the app
 
-1. Install the app on 2+ phones on the same Wi-Fi or hotspot.
-2. On every phone, **Import** the same audio files. Identical files match by content. Alternatively, import only on the
-   host and choose *"Local file, else download from host"*.
-3. Host: **Create room**. The room screen shows the join key, the host address and **Invite with QR code**.
-4. Others: **Scan invite QR code**, or tap the room under **Nearby rooms** (or **Join by address**) and enter the key.
-5. Open **Player** and press play. All phones start together at a scheduled instant.
-6. **Diagnostics** shows clock offsets ± uncertainty, estimated playback error, correction mode and recent events per
-   device.
-7. Optional: stand where you will listen and tap **Calibrate to this spot** on the room screen. Use a device's ⋮ menu
-   to give it a channel role.
+1. Install the app on 2+ phones on the same Wi-Fi or one phone's hotspot.
+2. Host phone: **My music → Add** to pick songs (guests need no music; they get it from the host).
+3. Host: **Host a party → Start**, then tap the **QR icon** (or **Invite** on the Speakers tab).
+4. Guests: **Join a party → Scan QR code**. Nearby parties are also listed on the home screen.
+5. The party has three tabs:
+   - **Playing:** play/pause, seek, skip, shuffle, repeat, volume for everyone and for this phone.
+   - **Queue:** the songs; the host adds more with **Add songs**.
+   - **Speakers:** every phone and its sync state. **Calibrate to this spot** lines the sound up where you stand.
+     Tap a phone to set its volume, **timing** (fine-tune by ear: + plays earlier, − later) and channel.
+6. Something sounds off? On the Playing tab tap **This phone sounds early or late?**. For bug reports, open
+   **⋮ → Diagnostics** on each phone and tap the copy icon.
 
 ### Headless node (laptop as coordinator or probe)
 
@@ -138,8 +139,8 @@ software-estimated sync data during real-device benchmarks.
 
 Ports:
 
-- TCP **47800**: WebSocket `/ws` plus HTTP `/tracks/*`. If 47800 is busy, an ephemeral port is used and shown on the
-  room screen.
+- TCP **47800**: WebSocket `/ws` plus HTTP `/tracks/*`. If 47800 is busy, an ephemeral port is used and shown in the
+  host's invite (QR icon).
 - UDP **47801**: discovery beacons.
 
 All traffic stays on the LAN. No cleartext traffic leaves the device for the internet, because there is none.
