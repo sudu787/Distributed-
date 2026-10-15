@@ -71,6 +71,10 @@ class ParticipantOptions {
   /// Acoustic output calibration (see [PlaybackEngine.outputCalibrationUs]).
   final int outputCalibrationUs;
 
+  /// Derives the room key (PBKDF2). Defaults to synchronous derivation; apps
+  /// pass an isolate-backed implementation so the UI does not stall.
+  final Future<RoomKey> Function(String roomId, String joinKey, int iterations)? keyDeriver;
+
   const ParticipantOptions({
     required this.deviceId,
     required this.displayName,
@@ -83,6 +87,7 @@ class ParticipantOptions {
     this.limits = const ProtocolLimits(),
     this.initialStartLatencyUs = 0,
     this.outputCalibrationUs = 0,
+    this.keyDeriver,
   });
 }
 
@@ -343,7 +348,7 @@ class ParticipantSession implements ClockSource {
     switch (_hs) {
       case _Hs.awaitChallenge:
         if (msg is ChallengeMsg) {
-          _onChallenge(msg);
+          unawaited(_onChallenge(msg));
         } else if (msg is RejectMsg) {
           _onReject(msg);
         } else {
@@ -374,7 +379,7 @@ class ParticipantSession implements ClockSource {
     }
   }
 
-  void _onChallenge(ChallengeMsg c) {
+  Future<void> _onChallenge(ChallengeMsg c) async {
     if (options.roomId != null && c.roomId != options.roomId) {
       _completeLink();
       _fatal(SessionFailure(RejectCode.wrongRoom, 'expected room ${options.roomId}, found ${c.roomId}'));
@@ -385,7 +390,12 @@ class ParticipantSession implements ClockSource {
       return;
     }
     if (_roomKey == null || _roomKey!.roomId != c.roomId || _roomKey!.iterations != c.kdfIterations) {
-      _roomKey = RoomKey.derive(roomId: c.roomId, joinKey: options.joinKey, iterations: c.kdfIterations);
+      final conn = _conn;
+      final derive = options.keyDeriver;
+      _roomKey = derive == null
+          ? RoomKey.derive(roomId: c.roomId, joinKey: options.joinKey, iterations: c.kdfIterations)
+          : await derive(c.roomId, options.joinKey, c.kdfIterations);
+      if (!identical(conn, _conn) || _hs != _Hs.awaitChallenge) return; // link changed meanwhile
     }
     if (_coordinatorInstance != null && _coordinatorInstance != c.instance) {
       log.warn('session.clock', 'coordinator instance changed; discarding clock samples');

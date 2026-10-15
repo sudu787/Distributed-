@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.47.5'
+
+jobs:
+  core:
+    name: Core (Dart) — analyze, test, simulated benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Analyze and test syncsphere_core
+        working-directory: packages/syncsphere_core
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
+      - name: Quick simulated benchmark (labelled SIMULATED)
+        working-directory: packages/syncsphere_core
+        run: dart run bin/benchmark.dart --suite quick --out ../../benchmarks/out
+      - name: Cross-check percentiles with the Python analyzer
+        run: python3 tools/analyze_samples.py benchmarks/out/matrix-wifi-good-n5.samples.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulated-benchmark-quick
+          path: benchmarks/out
+
+  flutter:
+    name: Flutter — plugin and app analyze/test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Plugin (Dart side)
+        working-directory: packages/syncsphere_audio
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: App
+        working-directory: app
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y libsqlite3-dev
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  android:
+    name: Android — build APK and native unit tests
+    runs-on: ubuntu-latest
+    needs: [flutter]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Build debug APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --debug
+      - name: Native unit tests (syncsphere_audio Kotlin)
+        working-directory: app/android
+        run: ./gradlew :syncsphere_audio:testDebugUnitTest --no-daemon
+      - name: Build release APK (debug-signed, for sideloading tests)
+        working-directory: app
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncsphere-apks
+          path: |
+            app/build/app/outputs/flutter-apk/app-debug.apk
+            app/build/app/outputs/flutter-apk/app-release.apk

@@ -45,6 +45,10 @@ class CoordinatorOptions {
   /// Max unauthenticated connections held at once.
   final int maxPendingHandshakes;
 
+  /// Pre-derived room key. PBKDF2 is deliberately slow; apps derive it on a
+  /// background isolate and pass it here to keep the UI responsive.
+  final RoomKey? roomKey;
+
   const CoordinatorOptions({
     required this.roomId,
     required this.roomName,
@@ -57,6 +61,7 @@ class CoordinatorOptions {
     this.limits = const ProtocolLimits(),
     this.coordinatorEpoch = 1,
     this.maxPendingHandshakes = 32,
+    this.roomKey,
   });
 }
 
@@ -143,10 +148,14 @@ class RoomCoordinator {
     String? instanceId,
   })  : log = log ?? EventLog(clock: clock, source: 'coordinator'),
         instanceId = instanceId ?? newId(9),
-        _key = RoomKey.derive(
-            roomId: options.roomId,
-            joinKey: options.joinKey,
-            iterations: options.kdfIterations) {
+        _key = options.roomKey ??
+            RoomKey.derive(
+                roomId: options.roomId,
+                joinKey: options.joinKey,
+                iterations: options.kdfIterations) {
+    if (_key.roomId != options.roomId) {
+      throw ArgumentError('roomKey was derived for room ${_key.roomId}, not ${options.roomId}');
+    }
     _members = MembershipManager(options.config.membership);
     _state = restoredState?.copyWith(
           coordinatorId: options.coordinatorId,
