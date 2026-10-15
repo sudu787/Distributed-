@@ -154,7 +154,21 @@ void main() {
     Future<void> waitFor(bool Function() cond, String what, {int seconds = 20}) async {
       final deadline = DateTime.now().add(Duration(seconds: seconds));
       while (!cond()) {
-        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        if (DateTime.now().isAfter(deadline)) {
+          // Enough context to diagnose a CI-only failure.
+          final c = a.coordinator ?? host.coordinator;
+          final dump = StringBuffer('timed out waiting for $what\n')
+            ..writeln('coordinator: ${c?.state.timeline} pending=${c?.state.pending?.generation}')
+            ..writeln('a: ${a.session?.phase} engine g${a.session?.engine.status.activeGeneration}')
+            ..writeln('b: ${b.session?.phase} engine g${b.session?.engine.status.activeGeneration}');
+          for (final (name, svc) in [('a', a), ('b', b)]) {
+            dump.writeln('--- $name events');
+            for (final e in svc.log.recent(limit: 40).reversed) {
+              dump.writeln(e);
+            }
+          }
+          fail(dump.toString());
+        }
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
     }
