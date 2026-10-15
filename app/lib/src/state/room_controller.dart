@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
 import '../data/models.dart';
+import '../services/network_info.dart';
 import '../services/room_service.dart';
 import 'providers.dart';
 
@@ -109,6 +110,23 @@ class RoomController extends Notifier<RoomViewState> {
 
   Future<void> join({required String host, required int port, required String joinKey, String? roomId}) async {
     state = const RoomViewState(status: RoomStatus.starting);
+    final err = await _tryJoin(host, port, joinKey, roomId);
+    if (err != null) state = RoomViewState(error: _describe(err));
+  }
+
+  /// Joins via a link, trying each advertised address until one answers.
+  Future<void> joinWithLink(JoinLink link) async {
+    state = const RoomViewState(status: RoomStatus.starting);
+    Object? err;
+    for (final h in link.hosts) {
+      err = await _tryJoin(h, link.port, link.joinKey, link.roomId);
+      if (err == null) return;
+      if (!(err is SessionFailure && err.code == 'unreachable')) break;
+    }
+    state = RoomViewState(error: _describe(err!));
+  }
+
+  Future<Object?> _tryJoin(String host, int port, String joinKey, String? roomId) async {
     try {
       final info = await _svc.join(
         identity: ref.read(identityProvider),
@@ -118,8 +136,9 @@ class RoomController extends Notifier<RoomViewState> {
         roomId: roomId,
       );
       _attach(info);
+      return null;
     } catch (e) {
-      state = RoomViewState(error: _describe(e));
+      return e;
     }
   }
 
@@ -160,6 +179,13 @@ class RoomController extends Notifier<RoomViewState> {
   Future<void> leave() async {
     state = state.copyWith(status: RoomStatus.leaving);
     _detach();
+    try {
+      // Keep what acoustic calibration and latency learning found.
+      final id = await _svc.persistCalibration();
+      if (id != null) await ref.read(identityProvider.notifier).update(id);
+    } catch (_) {
+      // Best effort; leave() logs persistence failures too.
+    }
     await _svc.leave();
     ref.invalidate(roomHistoryProvider);
     state = const RoomViewState();
@@ -169,14 +195,29 @@ class RoomController extends Notifier<RoomViewState> {
 
   /// Sends a control request; returns a user-facing error or null.
   Future<String?> control(ControlAction action,
-      {int? positionUs, String? trackId, double? value, String? targetDevice, ParticipantRole? role}) async {
+      {int? positionUs,
+      String? trackId,
+      double? value,
+      String? targetDevice,
+      ParticipantRole? role,
+      String? mode,
+      int? offsetUs}) async {
     final s = _svc.session;
     if (s == null) return 'Not in a room';
     final ack = await s.control(action,
-        positionUs: positionUs, trackId: trackId, value: value, targetDevice: targetDevice, role: role);
+        positionUs: positionUs,
+        trackId: trackId,
+        value: value,
+        targetDevice: targetDevice,
+        role: role,
+        mode: mode,
+        offsetUs: offsetUs);
     if (ack.accepted) return null;
     return switch (ack.error) {
       ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
+      ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
+      ControlError.invalid when action == ControlAction.calibrate =>
+        'Calibration needs microphone access and at least one connected device.',
       ControlError.staleVersion => 'The room changed meanwhile — try again.',
       ControlError.notConnected => 'Not connected to the room coordinator.',
       ControlError.nothingToPlay => 'Nothing to play.',
@@ -188,8 +229,41 @@ class RoomController extends Notifier<RoomViewState> {
   Future<void> setCalibration(int outputCalibrationUs) async {
     final id = ref.read(identityProvider);
     await ref.read(identityProvider.notifier).update(id.copyWith(outputCalibrationUs: outputCalibrationUs));
-    _svc.session?.engine.outputCalibrationUs = outputCalibrationUs;
+    final s = _svc.session;
+    if (s == null) return;
+    // The room keeps each device's offset (acoustic calibration updates it
+    // there too); offline, apply it locally.
+    final err = await control(ControlAction.setCalibration, offsetUs: outputCalibrationUs);
+    if (err != null) s.engine.outputCalibrationUs = outputCalibrationUs;
   }
+
+  Future<String?> setRepeat(PlaylistRepeat mode) => control(ControlAction.setRepeat, mode: mode.name);
+
+  Future<String?> setShuffle(bool on) => control(ControlAction.setShuffle, value: on ? 1 : 0);
+
+  /// Channel role of [deviceId] (default: this device).
+  Future<String?> setChannelRole(ChannelRole role, {String? deviceId}) =>
+      control(ControlAction.setChannelRole, mode: role.name, targetDevice: deviceId);
+
+  /// Starts an acoustic calibration measured by this device's microphone.
+  Future<String?> calibrateHere() => control(ControlAction.calibrate);
+
+  /// Whether this device can take part as the calibration listener.
+  bool get hasMicrophone => _svc.session?.calibrationListener != null;
+
+  /// Last calibration measured by this device's microphone.
+  CalibrationOutcome? get lastCalibration => _svc.session?.calibrationListener?.lastOutcome;
+
+  /// Join link for this room (host only; contains the join key).
+  Future<JoinLink?> joinLink() async {
+    final info = state.info;
+    if (info == null || !info.isHost || info.joinKey == null) return null;
+    final net = await readNetworkSummary();
+    final hosts = rankLanAddresses(net.ipv4);
+    if (hosts.isEmpty) return null;
+    return JoinLink(hosts: hosts, port: info.port, joinKey: info.joinKey!, roomId: info.roomId);
+  }
+
 
   /// Current expected track position (µs) of the room timeline, as seen
   /// through this device's clock estimate.

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
@@ -9,6 +10,7 @@ import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
+import 'scan_screen.dart';
 import 'widgets.dart';
 
 /// Screen 1: create/join/discover rooms, manage the local library.
@@ -121,26 +123,42 @@ class _PrimaryActions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: FilledButton.icon(
-              icon: const Icon(Icons.add_circle_outline),
-              label: const Text('Create room'),
-              onPressed: () => _create(context, ref),
+      child: Column(children: [
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Create room'),
+                onPressed: () => _create(context, ref),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.login),
-              label: const Text('Join by address'),
-              onPressed: () => _joinManual(context, ref),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.login),
+                label: const Text('Join by address'),
+                onPressed: () => _joinManual(context, ref),
+              ),
             ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan invite QR code'),
+            onPressed: () => _scan(context, ref),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
+  }
+
+  Future<void> _scan(BuildContext context, WidgetRef ref) async {
+    final link = await Navigator.of(context).push<JoinLink>(MaterialPageRoute(builder: (_) => const ScanScreen()));
+    if (link != null) await ref.read(roomControllerProvider.notifier).joinWithLink(link);
   }
 
   Future<void> _create(BuildContext context, WidgetRef ref) async {
@@ -196,11 +214,32 @@ class _PrimaryActions extends ConsumerWidget {
     final host = TextEditingController();
     final port = TextEditingController(text: '$kDefaultRoomPort');
     final key = TextEditingController();
+    JoinLink? pasted;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Join room'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.content_paste),
+              label: const Text('Paste invite link'),
+              onPressed: () async {
+                final clip = await Clipboard.getData(Clipboard.kTextPlain);
+                final link = JoinLink.tryParse(clip?.text ?? '');
+                if (!c.mounted) return;
+                if (link == null) {
+                  showMessage(c, 'The clipboard does not contain a SyncSphere invite link.', error: true);
+                  return;
+                }
+                host.text = link.hosts.first;
+                port.text = '${link.port}';
+                key.text = formatJoinKey(link.joinKey);
+                pasted = link;
+              },
+            ),
+          ),
           TextField(
               controller: host,
               decoration: const InputDecoration(labelText: 'Host address', hintText: '192.168.1.20'),
@@ -218,6 +257,15 @@ class _PrimaryActions extends ConsumerWidget {
       ),
     );
     if (ok != true) return;
+    final link = pasted;
+    if (link != null &&
+        host.text.trim() == link.hosts.first &&
+        port.text.trim() == '${link.port}' &&
+        normalizeJoinKey(key.text) == link.joinKey) {
+      // Unedited paste: try every address in the link.
+      await ref.read(roomControllerProvider.notifier).joinWithLink(link);
+      return;
+    }
     final p = int.tryParse(port.text.trim());
     if (host.text.trim().isEmpty || p == null || p <= 0 || p > 65535 || key.text.trim().isEmpty) {
       if (context.mounted) showMessage(context, 'Enter a host, a valid port and the join key.', error: true);

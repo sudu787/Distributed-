@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:syncsphere/src/data/app_store.dart';
 import 'package:syncsphere/src/data/models.dart';
 import 'package:syncsphere/src/services/library_service.dart';
@@ -59,13 +60,23 @@ class _FakeRoomController extends RoomController {
   RoomViewState build() => initial;
   @override
   Future<String?> control(ControlAction action,
-      {int? positionUs, String? trackId, double? value, String? targetDevice, ParticipantRole? role}) async {
+      {int? positionUs,
+      String? trackId,
+      double? value,
+      String? targetDevice,
+      ParticipantRole? role,
+      String? mode,
+      int? offsetUs}) async {
     sent.add(action);
     return null;
   }
 
   @override
   int? expectedPositionUs() => 65000000;
+
+  @override
+  Future<JoinLink?> joinLink() async =>
+      JoinLink(hosts: ['192.168.1.20'], port: 47800, joinKey: 'ABCD2345', roomId: 'K7Q2M9');
 }
 
 List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller}) {
@@ -159,5 +170,38 @@ void main() {
     expect(find.text('dev-other'), findsOneWidget);
     expect(find.textContaining('-14.8 ms (est.)'), findsOneWidget);
     expect(find.textContaining('adjusting rate'), findsWidgets);
+  });
+
+  testWidgets('player toggles shuffle and cycles repeat', (tester) async {
+    _phone(tester);
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const PlayerScreen(), _overrides(_roomState(), controller: ctl)));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Shuffle off'));
+    await tester.tap(find.byTooltip('Repeat off'));
+    await tester.pump();
+    expect(ctl.sent, [ControlAction.setShuffle, ControlAction.setRepeat]);
+  });
+
+  testWidgets('room screen: invite QR, calibration card and channel roles', (tester) async {
+    _phone(tester);
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
+    await tester.pump();
+    expect(find.text('Calibrate to this spot'), findsOneWidget);
+    expect(find.textContaining('cannot record audio'), findsOneWidget);
+
+    await tester.tap(find.text('Invite with QR code'));
+    await tester.pumpAndSettle();
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.textContaining('contains the join key'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Device options').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<Object>, 'Left channel (experimental)'));
+    await tester.pumpAndSettle();
+    expect(ctl.sent, [ControlAction.setChannelRole]);
   });
 }

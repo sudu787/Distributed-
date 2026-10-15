@@ -123,6 +123,15 @@ class CalibrateAction extends SimAction {
   String get label => 'calibrate';
 }
 
+/// A participant switches its own channel role (distributed stereo).
+class ChannelRoleAction extends SimAction {
+  final int participant;
+  final ChannelRole role;
+  const ChannelRoleAction(this.participant, this.role);
+  @override
+  String get label => 'channel(p$participant, ${role.name})';
+}
+
 /// Kills the host device (coordinator process and the host's own player).
 /// Participants must detect it and either fail over or report it.
 class KillCoordinatorAction extends SimAction {
@@ -554,6 +563,10 @@ class SimulationRunner {
           unawaited(devices[li].session.control(ControlAction.calibrate).then((ack) {
             logEvent(ack.accepted ? 'calibration-started' : 'calibration-rejected', {'error': ack.error});
           }));
+        case ChannelRoleAction(:final participant, :final role):
+          unawaited(devices[participant].session.control(ControlAction.setChannelRole, mode: role.name).then((ack) {
+            if (!ack.accepted) logEvent('control-rejected', {'action': 'setChannelRole', 'error': ack.error});
+          }));
         case PartitionAction(:final participant, :final duration):
           final d = devices[participant];
           d.link.partition();
@@ -709,6 +722,8 @@ class SimulationRunner {
       'clockUncertaintyCoverage': clockTotal == 0 ? null : double.parse((clockCovered / clockTotal).toStringAsFixed(4)),
       'recoveryAfterPartitionMs': recovery.summary(),
       'unrecoveredDevices': partitionHeal.keys.toList(),
+      if (sc.actions.any((a) => a.action is ChannelRoleAction))
+        'activeChannelRoles': [for (final d in devices) d.backend.activeRole?.name],
       'resyncSeeks': resyncs,
       'rateChanges': rateChanges,
       'bufferingStalls': stalls,

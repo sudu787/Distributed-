@@ -44,6 +44,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (err != null && mounted) showMessage(context, err, error: true);
   }
 
+  Future<void> _result(Future<String?> f) async {
+    final err = await f;
+    if (err != null && mounted) showMessage(context, err, error: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(roomControllerProvider);
@@ -112,6 +117,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             const SizedBox(height: 8),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               IconButton(
+                tooltip: room?.shuffle ?? false ? 'Shuffle on' : 'Shuffle off',
+                isSelected: room?.shuffle ?? false,
+                icon: const Icon(Icons.shuffle_rounded),
+                selectedIcon: Icon(Icons.shuffle_on_rounded, color: cs.primary),
+                onPressed: canControl ? () => _result(ref.read(roomControllerProvider.notifier).setShuffle(!(room?.shuffle ?? false))) : null,
+              ),
+              const SizedBox(width: 4),
+              IconButton(
                 iconSize: 40,
                 tooltip: 'Previous',
                 icon: const Icon(Icons.skip_previous_rounded),
@@ -130,6 +143,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 tooltip: 'Next',
                 icon: const Icon(Icons.skip_next_rounded),
                 onPressed: canControl ? () => _ctl(ControlAction.next) : null,
+              ),
+              const SizedBox(width: 4),
+              _RepeatButton(
+                mode: room?.repeat ?? PlaylistRepeat.off,
+                onPressed: canControl
+                    ? (next) => _result(ref.read(roomControllerProvider.notifier).setRepeat(next))
+                    : null,
               ),
             ]),
             if (!canControl)
@@ -179,6 +199,7 @@ class _StatusLine extends StatelessWidget {
       return StatusChip('Reconnecting — playing on last known timeline', Icons.sync_problem, color: const Color(0xFFD99A1E));
     }
     if (room == null) return const SizedBox.shrink();
+    if (room.calibration != null) return const StatusChip('Calibrating to a listening spot…', Icons.hearing);
     if (room.pending != null) return const StatusChip('Preparing on all devices…', Icons.downloading);
     final tl = room.timeline;
     if (e?.buffering ?? false) return StatusChip('Buffering', Icons.hourglass_bottom, color: cs.error);
@@ -196,6 +217,31 @@ class _StatusLine extends StatelessWidget {
         final err = e?.lastErrorUs == null ? '' : ' · ${fmtMs(e!.lastErrorUs, signed: true)} (est.)';
         return StatusChip('Playing · ${modeLabel(mode)}$err', Icons.graphic_eq, color: healthColor(h, cs));
     }
+  }
+}
+
+/// Cycles off → all → one.
+class _RepeatButton extends StatelessWidget {
+  final PlaylistRepeat mode;
+  final ValueChanged<PlaylistRepeat>? onPressed;
+  const _RepeatButton({required this.mode, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final next = PlaylistRepeat.values[(mode.index + 1) % PlaylistRepeat.values.length];
+    return IconButton(
+      tooltip: switch (mode) {
+        PlaylistRepeat.off => 'Repeat off',
+        PlaylistRepeat.all => 'Repeat playlist',
+        PlaylistRepeat.one => 'Repeat track',
+      },
+      icon: Icon(
+        mode == PlaylistRepeat.one ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+        color: mode == PlaylistRepeat.off ? null : cs.primary,
+      ),
+      onPressed: onPressed == null ? null : () => onPressed!(next),
+    );
   }
 }
 

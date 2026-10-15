@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -29,6 +30,7 @@ Future<void> main() async {
   }
 
   final native = Platform.isAndroid ? MethodChannelAudioApi() : null;
+  final hooks = native == null ? null : _AndroidHooks(native, log);
   final library = LibraryService(
     store: store,
     libraryDir: Directory(p.join(docs.path, 'library')),
@@ -40,7 +42,8 @@ Future<void> main() async {
     cacheDir: cache,
     clock: clock,
     log: log,
-    hooks: native == null ? const NoopPlatformHooks() : _AndroidHooks(native, log),
+    hooks: hooks ?? const NoopPlatformHooks(),
+    recorderFor: (b) => b is Media3AudioBackend ? b.calibrationRecorder() : null,
     backendFactory: (log) async {
       if (native == null) {
         // Desktop/dev builds: follow the timeline without rendering audio.
@@ -48,6 +51,7 @@ Future<void> main() async {
       }
       final b = Media3AudioBackend(api: native, clock: clock, log: log);
       await b.initialize();
+      hooks!.attach(b);
       if (b.deviceInfo['bluetoothOutputPresent'] == true) {
         log.warn('audio.bluetooth',
             'Bluetooth output detected: its latency is not visible to sync estimates; calibrate acoustically.');
@@ -73,13 +77,26 @@ String _defaultName() {
   return host;
 }
 
-class _AndroidHooks implements PlatformHooks {
+class _AndroidHooks extends PlatformHooks {
   final NativeAudioApi api;
   final EventLog log;
-  _AndroidHooks(this.api, this.log);
+  final BackgroundPlayback background;
+  final StreamController<String> _commands = StreamController.broadcast();
+  StreamSubscription<String>? _backendCommands;
+
+  _AndroidHooks(this.api, this.log) : background = BackgroundPlayback(api: api);
+
+  /// Forwards notification buttons from the current backend.
+  void attach(Media3AudioBackend backend) {
+    _backendCommands?.cancel();
+    _backendCommands = backend.notificationCommands.listen(_commands.add);
+  }
 
   @override
-  Future<void> enterRoom() async {
+  Stream<String> get commands => _commands.stream;
+
+  @override
+  Future<void> enterRoom(String roomName) async {
     try {
       final locks = await api.acquireNetworkLocks();
       log.info('platform.locks', 'network locks acquired', locks);
@@ -87,10 +104,20 @@ class _AndroidHooks implements PlatformHooks {
     } catch (e) {
       log.warn('platform.locks', 'could not acquire network locks: $e');
     }
+    // Foreground service: keeps the room alive with the screen off.
+    await background.start(title: roomName, text: 'Connected', playing: false);
+    if (!background.running) log.warn('platform.background', 'background playback service unavailable');
   }
 
   @override
+  Future<void> nowPlaying({required String roomName, required String text, required bool playing}) =>
+      background.update(title: roomName, text: text, playing: playing);
+
+  @override
   Future<void> leaveRoom() async {
+    await background.stop();
+    await _backendCommands?.cancel();
+    _backendCommands = null;
     try {
       await api.releaseNetworkLocks();
       await api.keepScreenOn(false);

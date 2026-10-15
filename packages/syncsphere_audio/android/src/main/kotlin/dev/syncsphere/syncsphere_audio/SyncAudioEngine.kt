@@ -56,7 +56,7 @@ class SyncAudioEngine(
         private const val RELEASE_DELAY_MS = 400L
     }
 
-    private class Segment(val id: Int, val uri: String, val player: ExoPlayer) {
+    private class Segment(val id: Int, val uri: String, val player: ExoPlayer, val role: String) {
         @Volatile var ready = false
     }
 
@@ -69,6 +69,7 @@ class SyncAudioEngine(
     private var standby: Segment? = null
     private var rate = 1f
     private var volume = 1f
+    private var channelRole = "stereo"
 
     // ------------------------------------------------------------ prepare
 
@@ -90,17 +91,17 @@ class SyncAudioEngine(
         // Resume optimisation: the paused active player is already buffered at
         // the requested position, so reuse it instead of creating a new one.
         val a = active
-        if (a != null && a.uri == uri && !a.player.isPlaying &&
+        if (a != null && a.uri == uri && a.role == channelRole && !a.player.isPlaying &&
             a.player.playbackState == Player.STATE_READY &&
             abs(a.player.currentPosition * 1000 - positionUs) <= 2000
         ) {
-            standby = Segment(segmentId, uri, a.player).also { it.ready = true }
+            standby = Segment(segmentId, uri, a.player, a.role).also { it.ready = true }
             main.post { done(null) }
             return
         }
 
         val player = buildPlayer()
-        val seg = Segment(segmentId, uri, player)
+        val seg = Segment(segmentId, uri, player, channelRole)
         standby = seg
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -136,7 +137,9 @@ class SyncAudioEngine(
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        val player = ExoPlayer.Builder(context)
+        // The channel role is baked into the audio sink, so a role change
+        // takes effect with the next prepared segment.
+        val player = ExoPlayer.Builder(context, RoleRenderersFactory(context, channelRole))
             .setLooper(thread.looper)
             .setMediaSourceFactory(DefaultMediaSourceFactory(context, extractors))
             // Audio focus handling would pause this device on its own and
@@ -222,6 +225,9 @@ class SyncAudioEngine(
         active?.player?.volume = v
         standby?.player?.volume = v
     }
+
+    /** "stereo", "left", "right" or "mono"; applies from the next segment. */
+    fun setChannelRole(role: String) = handler.post { channelRole = role }
 
     fun stop() = handler.post {
         standby?.let { if (it.player !== active?.player) it.player.release() }

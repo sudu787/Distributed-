@@ -137,4 +137,25 @@ void main() {
     )).run();
     expect(p(cal, 'interDeviceSpreadMs_steady', 'median'), lessThan(20));
   });
+
+  test('channel role change while playing switches segments without losing sync', () {
+    final r = SimulationRunner(const Scenario(
+      name: 'channel-role',
+      participants: 3,
+      network: NetworkCondition.wifiGood,
+      duration: Duration(seconds: 45),
+      actions: [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 20), ChannelRoleAction(1, ChannelRole.left)),
+      ],
+    )).run();
+    expect(r.metrics['activeChannelRoles'], ['stereo', 'left', 'stereo']);
+    expect(r.metrics['playCalls'] as int, greaterThanOrEqualTo(4), reason: 'the role change starts a fresh segment');
+    // The fresh segment's start error shows up as a brief blip (~13 ms in
+    // this scenario vs ~7 ms max without the switch), then drift control
+    // brings it back. SIMULATED numbers.
+    final steady = r.metrics['interDeviceSpreadMs_steady'] as Map;
+    expect((steady['median'] as num).toDouble(), lessThan(8));
+    expect((steady['max'] as num).toDouble(), lessThan(30));
+  });
 }

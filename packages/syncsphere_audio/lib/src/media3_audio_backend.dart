@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
+import 'android_calibration_recorder.dart';
 import 'native_audio_api.dart';
 
 /// [AudioBackend] backed by Media3/ExoPlayer on Android.
@@ -20,6 +21,7 @@ class Media3AudioBackend implements AudioBackend {
   AudioCapabilities _caps = const AudioCapabilities(backend: 'media3-exoplayer', rateControl: true);
   Map<String, Object?> deviceInfo = const {};
   final StreamController<AudioBackendEvent> _events = StreamController.broadcast();
+  final StreamController<String> _commands = StreamController.broadcast();
   StreamSubscription<Map<String, Object?>>? _nativeSub;
   Timer? _recalibrate;
 
@@ -62,6 +64,11 @@ class Media3AudioBackend implements AudioBackend {
   int _toLocalUs(int nativeNanos) => bridge.toLocal(nativeNanos ~/ 1000);
 
   void _onNativeEvent(Map<String, Object?> e) {
+    if (e['kind'] == 'command') {
+      final cmd = e['message'];
+      if (cmd is String) _commands.add(cmd);
+      return;
+    }
     final kind = switch (e['kind']) {
       'playCalled' => AudioEventKind.playCalled,
       'paused' => AudioEventKind.paused,
@@ -109,6 +116,9 @@ class Media3AudioBackend implements AudioBackend {
   Future<void> setVolume(double volume) => api.setVolume(volume.clamp(0.0, 1.0));
 
   @override
+  Future<void> setChannelRole(ChannelRole role) => api.setChannelRole(role.name);
+
+  @override
   Future<void> stop() => api.stop();
 
   @override
@@ -130,11 +140,20 @@ class Media3AudioBackend implements AudioBackend {
   @override
   Stream<AudioBackendEvent> get events => _events.stream;
 
+  /// Notification button presses ("play", "pause", "next", "previous").
+  Stream<String> get notificationCommands => _commands.stream;
+
+  /// Microphone recorder for acoustic calibration, sharing this backend's
+  /// clock bridge.
+  CalibrationRecorder calibrationRecorder({int sampleRate = 48000}) =>
+      AndroidCalibrationRecorder(api: api, bridge: bridge, sampleRate: sampleRate, log: log);
+
   @override
   Future<void> dispose() async {
     _recalibrate?.cancel();
     await _nativeSub?.cancel();
     await api.stop();
     await _events.close();
+    await _commands.close();
   }
 }

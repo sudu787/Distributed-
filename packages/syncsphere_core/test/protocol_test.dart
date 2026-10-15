@@ -143,6 +143,21 @@ void main() {
       final frame = s.encode(const UnknownMessage('future.thing', {'x': 1}));
       expect(c.decode(frame), isA<UnknownMessage>());
     });
+
+    test('control offsets are signed and bounded', () {
+      final c = FrameCodec()
+        ..activate(sendKey: keys.clientToServer, recvKey: keys.serverToClient);
+      final s = FrameCodec()
+        ..activate(sendKey: keys.serverToClient, recvKey: keys.clientToServer);
+      final m = s.decode(c.encode(const ControlMsg(
+          requestId: 1, action: ControlAction.setCalibration, baseVersion: 0, offsetUs: -250000))) as ControlMsg;
+      expect(m.offsetUs, -250000);
+      expect(m.action, ControlAction.setCalibration);
+      expect(
+          () => s.decode(c.encode(const ControlMsg(
+              requestId: 2, action: ControlAction.setCalibration, baseVersion: 0, offsetUs: kMaxCalibrationUs + 1))),
+          throwsA(isA<ProtocolException>()));
+    });
   });
 
   group('RoomState', () {

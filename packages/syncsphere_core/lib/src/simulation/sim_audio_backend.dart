@@ -218,6 +218,8 @@ class SimulatedAudioBackend implements AudioBackend {
     await Future<void>.delayed(Duration(microseconds: max(1000, d)));
     if (_disposed) throw const AudioBackendException('disposed', 'backend disposed');
     _standby = _Standby(segmentId, positionUs);
+    // Like the Media3 backend, the role is fixed when a segment is prepared.
+    _segmentRoles[segmentId] = channelRole;
   }
 
   @override
@@ -276,6 +278,10 @@ class SimulatedAudioBackend implements AudioBackend {
   Future<void> setVolume(double volume) async {}
 
   ChannelRole channelRole = ChannelRole.stereo;
+  final Map<int, ChannelRole> _segmentRoles = {};
+
+  /// Channel role of the segment currently rendering (null when silent).
+  ChannelRole? get activeRole => _activeId == null ? null : _segmentRoles[_activeId];
 
   @override
   Future<void> setChannelRole(ChannelRole role) async => channelRole = role;

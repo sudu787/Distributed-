@@ -107,6 +107,42 @@ List<Scenario> _suite(String name, int seed) {
       outputCalibrationUs: const [0, 180000],
       seed: seed,
     ),
+    // "Calibrate to this spot": listener at 0.3 m, others at 2–7 m, one on
+    // uncalibrated Bluetooth. listenerSpreadMs_steady is what reaches the
+    // listener's ears (propagation included), from the music after
+    // calibration only.
+    for (final calibrate in [false, true])
+      Scenario(
+        name: 'listening-spot-${calibrate ? 'calibrated' : 'uncalibrated'}-n4',
+        participants: 4,
+        network: NetworkCondition.wifiGood,
+        duration: const Duration(seconds: 70),
+        profiles: const [
+          DeviceAudioProfile.flagship,
+          DeviceAudioProfile.bluetoothUncalibrated,
+          DeviceAudioProfile.midrange,
+          DeviceAudioProfile.flagship,
+        ],
+        listenerIndex: 0,
+        distancesM: const [0.3, 2.0, 4.5, 7.0],
+        actions: [
+          if (calibrate) const ScheduledAction(Duration(seconds: 3), CalibrateAction()),
+          const ScheduledAction(Duration(seconds: 35), PlayAction()),
+        ],
+        seed: seed,
+      ),
+    Scenario(
+      name: 'channel-role-switch-n3',
+      participants: 3,
+      network: NetworkCondition.wifiGood,
+      duration: const Duration(seconds: 60),
+      actions: const [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 20), ChannelRoleAction(1, ChannelRole.left)),
+        ScheduledAction(Duration(seconds: 35), ChannelRoleAction(2, ChannelRole.right)),
+      ],
+      seed: seed,
+    ),
     Scenario(
       name: 'drift-uncorrected-n3',
       participants: 3,
@@ -185,6 +221,7 @@ Future<void> main(List<String> argv) async {
       'bytesPerDevPerS': m['networkBytesPerDevicePerSecond'],
       'failed': (m['failedSessions'] as List).length,
       if (m['failover'] != null) 'failover': m['failover'],
+      if (m['listenerSpreadMs_steady'] != null) 'listenerSpread': q('listenerSpreadMs_steady'),
     });
     stdout.writeln('${sc.name.padRight(36)} spread p50/p95/max '
         '${_f(q('interDeviceSpreadMs_steady'), 'median')}/${_f(q('interDeviceSpreadMs_steady'), 'p95')}/${_f(q('interDeviceSpreadMs_steady'), 'max')} ms  '
@@ -240,6 +277,23 @@ String _markdown(Map<String, Object?> meta, List<Map<String, Object?>> rows) {
       final sp = f['spreadMs_15sAfterPromotion'] as Map<String, Object?>;
       b.writeln('| ${r['scenario']} | ${f['finalEpoch']} | ${f['promoted']} | ${f['promotedAfterKillMs']} | '
           '${_f(sp, 'p95')} / ${_f(sp, 'max')} |');
+    }
+  }
+  final ls = rows.where((r) => r['listenerSpread'] != null).toList();
+  if (ls.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('## Listening-spot calibration (SIMULATED)')
+      ..writeln()
+      ..writeln('What reaches the listener (acoustic propagation at 343 m/s included). The main table\'s spread is '
+          'the devices\' *output* spread, which calibration deliberately increases: nearer speakers are delayed so '
+          'every sound arrives at the listening spot together.')
+      ..writeln()
+      ..writeln('| scenario | spread at listener p50 | p95 | max |')
+      ..writeln('|---|---|---|---|');
+    for (final r in ls) {
+      final l = r['listenerSpread'] as Map<String, Object?>;
+      b.writeln('| ${r['scenario']} | ${_f(l, 'median')} | ${_f(l, 'p95')} | ${_f(l, 'max')} |');
     }
   }
   b

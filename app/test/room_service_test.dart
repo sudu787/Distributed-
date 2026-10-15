@@ -1,6 +1,7 @@
 // Real-socket test of the app's room orchestration: one device hosts, one
 // joins over loopback, the joiner downloads the track from the host, and
 // playback starts on both (null audio backend; no Android needed).
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -181,4 +182,67 @@ void main() {
     await b.leave();
     await a.leave();
   });
+
+  test('platform hooks: notification commands control the room, now-playing follows, calibration persists', () async {
+    final clock = SystemMonotonicClock.instance;
+    final store = MemoryAppStore();
+    final lib = LibraryService(store: store, libraryDir: Directory('${tmp.path}/lib'), log: EventLog(clock: clock));
+    final track = await lib.import(await audioFile('n.mp3', 5));
+    final hooks = _RecordingHooks();
+    final svc = RoomService(
+      store: store,
+      cacheDir: Directory('${tmp.path}/cache'),
+      backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+      keyDeriver: (r, k, i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i),
+      kdfIterations: 50,
+      hooks: hooks,
+    );
+    final id = await store.loadIdentity(defaultName: 'Host');
+    await svc.host(identity: id, roomName: 'Hooked', tracks: [track], port: 0);
+    expect(hooks.entered, ['Hooked']);
+
+    Future<void> waitFor(bool Function() cond, String what) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while (!cond()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+
+    hooks.cmd.add('play');
+    await waitFor(() => svc.coordinator!.state.timeline.isPlaying, 'play from notification');
+    await waitFor(() => hooks.shown.any((n) => n.playing && n.text.contains(track.title)), 'now-playing update');
+    hooks.cmd.add('pause');
+    await waitFor(() => svc.coordinator!.state.timeline.status == PlaybackStatus.paused, 'pause from notification');
+    expect(hooks.shown.last.playing, isFalse);
+    expect(hooks.shown.last.roomName, 'Hooked');
+
+    // Manual calibration goes through the room, and is saved on leave.
+    final ack = await svc.session!.control(ControlAction.setCalibration, offsetUs: -30000);
+    expect(ack.accepted, isTrue);
+    await waitFor(() => svc.session!.engine.outputCalibrationUs == -30000, 'calibration applied');
+    await svc.leave();
+    expect(hooks.left, 1);
+    expect((await store.loadIdentity(defaultName: 'x')).outputCalibrationUs, -30000);
+  });
+}
+
+class _RecordingHooks extends PlatformHooks {
+  final cmd = StreamController<String>.broadcast();
+  final entered = <String>[];
+  final shown = <({String roomName, String text, bool playing})>[];
+  var left = 0;
+
+  @override
+  Future<void> enterRoom(String roomName) async => entered.add(roomName);
+
+  @override
+  Future<void> leaveRoom() async => left++;
+
+  @override
+  Future<void> nowPlaying({required String roomName, required String text, required bool playing}) async =>
+      shown.add((roomName: roomName, text: text, playing: playing));
+
+  @override
+  Stream<String> get commands => cmd.stream;
 }

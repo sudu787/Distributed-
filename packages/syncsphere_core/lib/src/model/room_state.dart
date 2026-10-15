@@ -255,7 +255,7 @@ class TrackInfo {
 enum ChannelRole { stereo, left, right, mono }
 
 /// Room-wide repeat behaviour at the end of a track.
-enum RepeatMode { off, all, one }
+enum PlaylistRepeat { off, all, one }
 
 enum ParticipantRole {
   /// The coordinator's own device. Full control, cannot be demoted.
@@ -374,7 +374,7 @@ class RoomState {
   final double masterVolume;
   final List<ParticipantSummary> participants;
   final DistributionMode distribution;
-  final RepeatMode repeat;
+  final PlaylistRepeat repeat;
   final bool shuffle;
 
   /// Active acoustic calibration, if any (its click track is not part of the
@@ -393,7 +393,7 @@ class RoomState {
     this.masterVolume = 1.0,
     this.participants = const [],
     this.distribution = DistributionMode.auto,
-    this.repeat = RepeatMode.off,
+    this.repeat = PlaylistRepeat.off,
     this.shuffle = false,
     this.calibration,
   });
@@ -433,7 +433,7 @@ class RoomState {
     double? masterVolume,
     List<ParticipantSummary>? participants,
     DistributionMode? distribution,
-    RepeatMode? repeat,
+    PlaylistRepeat? repeat,
     bool? shuffle,
     CalibrationPlan? calibration,
     bool clearCalibration = false,
@@ -467,7 +467,7 @@ class RoomState {
         'mvol': masterVolume,
         'parts': [for (final p in participants) p.toJson()],
         'dist': distribution.name,
-        if (repeat != RepeatMode.off) 'rep': repeat.name,
+        if (repeat != PlaylistRepeat.off) 'rep': repeat.name,
         if (shuffle) 'shuf': true,
         if (calibration != null) 'cal': calibration!.toJson(),
       };
@@ -494,7 +494,7 @@ class RoomState {
           ParticipantSummary.fromJson(m)
       ],
       distribution: r.enumValue('dist', DistributionMode.values),
-      repeat: r.optEnum('rep', RepeatMode.values) ?? RepeatMode.off,
+      repeat: r.optEnum('rep', PlaylistRepeat.values) ?? PlaylistRepeat.off,
       shuffle: r.optBoolean('shuf') ?? false,
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
     );

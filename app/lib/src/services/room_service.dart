@@ -10,21 +10,29 @@ import '../data/models.dart';
 /// Default control/transfer port. Falls back to an ephemeral port if taken.
 const int kDefaultRoomPort = 47800;
 
-/// Platform side effects of being in a room (Wi-Fi locks, screen on).
+/// Platform side effects of being in a room (Wi-Fi locks, screen on,
+/// background playback notification).
 abstract class PlatformHooks {
-  Future<void> enterRoom();
-  Future<void> leaveRoom();
+  const PlatformHooks();
+  Future<void> enterRoom(String roomName) async {}
+  Future<void> leaveRoom() async {}
+
+  /// Keeps a "now playing" notification current.
+  Future<void> nowPlaying({required String roomName, required String text, required bool playing}) async {}
+
+  /// Room commands from outside the app UI (notification buttons):
+  /// "play", "pause", "next", "previous".
+  Stream<String> get commands => const Stream.empty();
 }
 
-class NoopPlatformHooks implements PlatformHooks {
+class NoopPlatformHooks extends PlatformHooks {
   const NoopPlatformHooks();
-  @override
-  Future<void> enterRoom() async {}
-  @override
-  Future<void> leaveRoom() async {}
 }
 
 typedef BackendFactory = Future<AudioBackend> Function(EventLog log);
+
+/// Microphone access for acoustic calibration, if the backend has one.
+typedef RecorderFactory = CalibrationRecorder? Function(AudioBackend backend);
 
 /// Derives the room key off the UI isolate (PBKDF2 is intentionally slow).
 Future<RoomKey> deriveRoomKeyInIsolate(String roomId, String joinKey, int iterations) =>
@@ -59,6 +67,7 @@ class RoomService {
   final MonotonicClock clock;
   final Future<RoomKey> Function(String, String, int) keyDeriver;
   final int kdfIterations;
+  final RecorderFactory? recorderFor;
 
   final EventLog log;
   RoomCoordinator? coordinator;
@@ -70,6 +79,7 @@ class RoomService {
   TrackDownloader? _downloader;
   final Map<String, File> _served = {};
   DeviceIdentity? _identity;
+  final List<StreamSubscription<Object?>> _subs = [];
 
   /// True once this device took over as coordinator after the original
   /// host disappeared.
@@ -83,6 +93,7 @@ class RoomService {
     MonotonicClock? clock,
     this.keyDeriver = deriveRoomKeyInIsolate,
     this.kdfIterations = kDefaultKdfIterations,
+    this.recorderFor,
     EventLog? log,
   })  : clock = clock ?? SystemMonotonicClock.instance,
         log = log ?? EventLog(clock: clock ?? SystemMonotonicClock.instance, source: 'room', capacity: 3000);
@@ -283,6 +294,8 @@ class RoomService {
         // Guests can take over if the host disappears (see docs/roadmap.md);
         // the host itself has nobody to fail over to.
         failover: key == null ? _AppFailover(this, identity) : null,
+        recorder: recorderFor?.call(backend),
+        calibrationTracks: FileCalibrationTrackFactory(Directory('${cacheDir.path}/calibration')),
       ),
       connector: webSocketConnector(host, port),
       clock: clock,
@@ -297,12 +310,51 @@ class RoomService {
     );
     session = s;
     await s.start();
-    await hooks.enterRoom();
+    await hooks.enterRoom(s.state?.roomName ?? 'SyncSphere');
+    _subs
+      ..add(s.stateStream.listen(_updateNowPlaying))
+      ..add(hooks.commands.listen(_onExternalCommand));
+  }
+
+  void _updateNowPlaying(RoomState r) {
+    final tl = r.timeline;
+    final String text;
+    if (r.calibration != null) {
+      text = 'Calibrating…';
+    } else {
+      final t = r.trackById(tl.trackId);
+      text = t == null ? '${r.participants.length} device(s) · nothing playing' : [t.title, if (t.artist != null) t.artist].join(' · ');
+    }
+    unawaited(hooks.nowPlaying(roomName: r.roomName, text: text, playing: tl.isPlaying));
+  }
+
+  void _onExternalCommand(String cmd) {
+    final s = session;
+    if (s == null) return;
+    final action = switch (cmd) {
+      'play' => ControlAction.play,
+      'pause' => ControlAction.pause,
+      'next' => ControlAction.next,
+      'previous' => ControlAction.previous,
+      _ => null,
+    };
+    if (action == null) return;
+    unawaited(s.control(action).then((ack) {
+      if (!ack.accepted) log.warn('notification.control', '$cmd rejected: ${ack.error}');
+    }));
+  }
+
+  void _cancelSubs() {
+    for (final sub in _subs) {
+      sub.cancel();
+    }
+    _subs.clear();
   }
 
   /// Test hook: kills hosting abruptly (no `bye`), as if the app crashed,
   /// so guests exercise failover.
   Future<void> crashForTesting() async {
+    _cancelSubs();
     final c = coordinator;
     coordinator = null;
     await c?.abort();
@@ -326,16 +378,19 @@ class RoomService {
     }
   }
 
-  /// Saves what this device learned (start latency) for next time.
-  Future<void> persistCalibration() async {
+  /// Saves what this device learned (start latency, and the output
+  /// calibration, which acoustic calibration may have changed) for next time.
+  Future<DeviceIdentity?> persistCalibration() async {
     final s = session;
     final id = _identity;
-    if (s == null || id == null) return;
+    if (s == null || id == null) return id;
     final learned = s.engine.startLatencyUs;
-    if (learned != id.startLatencyUs) {
-      _identity = id.copyWith(startLatencyUs: learned);
+    final cal = s.engine.outputCalibrationUs;
+    if (learned != id.startLatencyUs || cal != id.outputCalibrationUs) {
+      _identity = id.copyWith(startLatencyUs: learned, outputCalibrationUs: cal);
       await store.saveIdentity(_identity!);
     }
+    return _identity;
   }
 
   Future<void> leave() async {
@@ -344,6 +399,7 @@ class RoomService {
     } catch (e) {
       log.warn('room.persist', 'could not save calibration: $e');
     }
+    _cancelSubs();
     final s = session;
     session = null;
     if (s != null) await s.leave();

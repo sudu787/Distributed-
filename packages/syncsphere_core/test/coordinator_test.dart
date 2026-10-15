@@ -335,7 +335,7 @@ void main() {
       ctl((v) => ControlMsg(requestId: 2, action: ControlAction.next, baseVersion: v));
       expect(a.last<ControlAckMsg>()!.error, ControlError.nothingToPlay);
       ctl((v) => ControlMsg(requestId: 3, action: ControlAction.setRepeat, baseVersion: v, mode: 'all'));
-      expect(f.coord.state.repeat, RepeatMode.all);
+      expect(f.coord.state.repeat, PlaylistRepeat.all);
       ctl((v) => ControlMsg(requestId: 4, action: ControlAction.next, baseVersion: v));
       expect(a.last<ControlAckMsg>()!.accepted, isTrue);
       expect(f.coord.state.pending!.trackId, tracks[0].id);
@@ -416,6 +416,28 @@ void main() {
           requestId: 3, action: ControlAction.setChannelRole, baseVersion: 0, mode: 'mono', targetDevice: 'phone-1'));
       fa.elapse(const Duration(milliseconds: 10));
       expect(f.coord.state.participant('phone-1')!.channel, ChannelRole.mono);
+    });
+  });
+
+  test('manual calibration: own device always, others only with control rights', () {
+    fakeAsync((fa) {
+      final f = Fixture(fa);
+      final (host, _) = f.join('host-device');
+      final (p, _) = f.join('phone-1');
+      p.send(const ControlMsg(requestId: 1, action: ControlAction.setCalibration, baseVersion: 0, offsetUs: -42000));
+      p.send(const ControlMsg(
+          requestId: 2, action: ControlAction.setCalibration, baseVersion: 0, offsetUs: 5000, targetDevice: 'host-device'));
+      p.send(const ControlMsg(requestId: 3, action: ControlAction.setCalibration, baseVersion: 0));
+      fa.elapse(const Duration(milliseconds: 10));
+      final acks = p.received.whereType<ControlAckMsg>().toList();
+      expect(acks[0].accepted, isTrue);
+      expect(acks[1].error, ControlError.unauthorized);
+      expect(acks[2].error, ControlError.invalid);
+      expect(f.coord.state.participant('phone-1')!.calibrationUs, -42000);
+      host.send(const ControlMsg(
+          requestId: 4, action: ControlAction.setCalibration, baseVersion: 0, offsetUs: 7000, targetDevice: 'phone-1'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(f.coord.state.participant('phone-1')!.calibrationUs, 7000);
     });
   });
 

@@ -7,4 +7,17 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- ExoPlayer wake mode + low-latency WifiLock while in a room. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Background playback: foreground service with a media notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Acoustic calibration ("calibrate to this spot"); requested at runtime. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application>
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+    </application>
 </manifest>

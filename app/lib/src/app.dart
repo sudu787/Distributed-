@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:syncsphere_core/syncsphere_core.dart';
 
 import 'state/room_controller.dart';
 import 'ui/home_screen.dart';
 import 'ui/room_screen.dart';
+import 'ui/widgets.dart';
 
 class SyncSphereApp extends StatelessWidget {
   const SyncSphereApp({super.key});
@@ -20,7 +22,65 @@ class SyncSphereApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const _Root(),
+      // Deep links (`syncsphere://app/join?...`, e.g. from a QR code scanned
+      // with the camera app) arrive as the route `/join?...`.
+      onGenerateRoute: (settings) {
+        final link = JoinLink.tryParse(settings.name ?? '');
+        if (link == null) return null;
+        return PageRouteBuilder<void>(
+          settings: settings,
+          opaque: false,
+          pageBuilder: (context, animation, secondary) => _JoinFromLink(link),
+        );
+      },
+      onUnknownRoute: (settings) => PageRouteBuilder<void>(
+        settings: settings,
+        opaque: false,
+        pageBuilder: (context, animation, secondary) => const _PopImmediately(),
+      ),
     );
+  }
+}
+
+/// Joins the room in a deep link (unless already in one) and returns to
+/// the root screen, which then shows the room.
+class _JoinFromLink extends ConsumerStatefulWidget {
+  final JoinLink link;
+  const _JoinFromLink(this.link);
+
+  @override
+  ConsumerState<_JoinFromLink> createState() => _JoinFromLinkState();
+}
+
+class _JoinFromLinkState extends ConsumerState<_JoinFromLink> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final ctl = ref.read(roomControllerProvider.notifier);
+      final status = ref.read(roomControllerProvider).status;
+      final nav = Navigator.of(context);
+      if (status != RoomStatus.none) {
+        showMessage(context, 'Leave the current room before joining another.', error: true);
+      }
+      nav.popUntil((r) => r.isFirst);
+      if (status == RoomStatus.none) await ctl.joinWithLink(widget.link);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+class _PopImmediately extends StatelessWidget {
+  const _PopImmediately();
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+    });
+    return const SizedBox.shrink();
   }
 }
 

@@ -459,6 +459,10 @@ enum ControlAction {
 
   /// Starts an acoustic calibration measured by the sender's microphone.
   calibrate,
+
+  /// `dev` (default: sender), `off`: output calibration offset in µs
+  /// (manual adjustment; acoustic calibration sets it automatically).
+  setCalibration,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -480,6 +484,9 @@ class ControlMsg extends Message {
   /// Mode argument for setRepeat / setChannelRole.
   final String? mode;
 
+  /// Signed offset argument (µs) for setCalibration.
+  final int? offsetUs;
+
   const ControlMsg({
     required this.requestId,
     required this.action,
@@ -490,6 +497,7 @@ class ControlMsg extends Message {
     this.targetDevice,
     this.role,
     this.mode,
+    this.offsetUs,
   });
 
   @override
@@ -503,6 +511,7 @@ class ControlMsg extends Message {
         if (targetDevice != null) 'dev': targetDevice,
         if (role != null) 'role': role!.name,
         if (mode != null) 'mode': mode,
+        if (offsetUs != null) 'off': offsetUs,
       };
 
   static ControlMsg read(Reader r) => ControlMsg(
@@ -515,8 +524,12 @@ class ControlMsg extends Message {
         targetDevice: r.optString('dev', maxLength: 64),
         role: r.optEnum('role', ParticipantRole.values),
         mode: r.optString('mode', maxLength: 16),
+        offsetUs: r.optInteger('off', min: -kMaxCalibrationUs, max: kMaxCalibrationUs),
       );
 }
+
+/// Largest accepted output calibration offset magnitude (µs).
+const int kMaxCalibrationUs = 1000000;
 
 abstract final class ControlError {
   static const unauthorized = 'unauthorized';

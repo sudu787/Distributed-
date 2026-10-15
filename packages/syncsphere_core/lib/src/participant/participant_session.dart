@@ -690,6 +690,8 @@ class ParticipantSession implements ClockSource {
     double? value,
     String? targetDevice,
     ParticipantRole? role,
+    String? mode,
+    int? offsetUs,
     Duration timeout = const Duration(seconds: 5),
   }) {
     final version = _state?.version ?? 0;
@@ -709,6 +711,8 @@ class ParticipantSession implements ClockSource {
       value: value,
       targetDevice: targetDevice,
       role: role,
+      mode: mode,
+      offsetUs: offsetUs,
     ));
     return c.future.timeout(timeout, onTimeout: () {
       _pendingControls.remove(rid);

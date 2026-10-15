@@ -28,6 +28,7 @@ export 'src/simulation/scenario.dart';
 export 'src/distribution/track_hasher.dart';
 export 'src/distribution/file_server.dart';
 export 'src/distribution/track_downloader.dart';
+export 'src/discovery/join_link.dart';
 export 'src/discovery/udp_discovery.dart';
 export 'src/participant/failover.dart';
 export 'src/model/calibration_plan.dart';

@@ -667,6 +667,17 @@ class RoomCoordinator {
         log.info('member.channel', '${t.displayName} plays ${role.name}');
         _mutate(_state);
         return ok;
+      case ControlAction.setCalibration:
+        final target = c.targetDevice ?? m.deviceId;
+        if (target != m.deviceId && !m.role.canControl) {
+          return const ControlOutcome.fail(ControlError.unauthorized);
+        }
+        final t = _members.byDevice(target);
+        if (t == null || c.offsetUs == null) return const ControlOutcome.fail(ControlError.invalid);
+        t.calibrationUs = c.offsetUs;
+        log.info('member.calibration', '${t.displayName} output calibration ${c.offsetUs! ~/ 1000} ms (manual)');
+        _mutate(_state);
+        return ok;
       default:
         break;
     }
@@ -733,7 +744,7 @@ class RoomCoordinator {
         if (stale()) return const ControlOutcome.fail(ControlError.staleVersion);
         final cur = _state.pending?.trackId ?? tl.trackId;
         final playing = tl.isPlaying || (_state.pending?.autoPlay ?? false);
-        final wrap = _state.repeat == RepeatMode.all;
+        final wrap = _state.repeat == PlaylistRepeat.all;
         String? id;
         if (c.action == ControlAction.next) {
           id = _neighbor(cur, 1, wrap: wrap);
@@ -750,7 +761,7 @@ class RoomCoordinator {
         return ok;
 
       case ControlAction.setRepeat:
-        final mode = _parseEnum(RepeatMode.values, c.mode);
+        final mode = _parseEnum(PlaylistRepeat.values, c.mode);
         if (mode == null) return const ControlOutcome.fail(ControlError.invalid);
         _mutate(_state.copyWith(repeat: mode));
         return ok;
@@ -832,7 +843,7 @@ class RoomCoordinator {
       corrections.forEach((id, corr) {
         final m = _members.byDevice(id);
         if (m == null) return;
-        m.calibrationUs = ((m.calibrationUs ?? 0) + corr).clamp(-1000000, 1000000);
+        m.calibrationUs = ((m.calibrationUs ?? 0) + corr).clamp(-kMaxCalibrationUs, kMaxCalibrationUs);
       });
       log.info('calibration.done',
           'calibration applied to ${corrections.length} device(s)${r.undetected.isEmpty ? '' : '; not heard: ${r.undetected.join(', ')}'}',
@@ -1124,9 +1135,9 @@ class RoomCoordinator {
         options.config.scheduler.maxLead.inMicroseconds;
     if (now < endAt - prepareWindow) return;
     _autoAdvancedGeneration = tl.generation;
-    final next = _state.repeat == RepeatMode.one
+    final next = _state.repeat == PlaylistRepeat.one
         ? tl.trackId
-        : _neighbor(tl.trackId, 1, wrap: _state.repeat == RepeatMode.all);
+        : _neighbor(tl.trackId, 1, wrap: _state.repeat == PlaylistRepeat.all);
     if (next != null) {
       log.info('schedule.advance', 'track ending; preparing ${next == tl.trackId ? 'repeat' : 'next track'}');
       _requestSegment(next, 0, notBeforeUs: endAt);

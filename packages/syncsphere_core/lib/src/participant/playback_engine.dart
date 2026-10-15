@@ -666,7 +666,15 @@ class PlaybackEngine {
     if (ch != _channel) {
       _channel = ch;
       log.info('engine.channel', 'channel role → ${ch.name}');
-      unawaited(backend.setChannelRole(ch).catchError((Object e) => _fail('setChannelRole failed: $e')));
+      // The role is baked into newly prepared native players, so switch to a
+      // fresh segment now (scheduled like a drift resync) rather than waiting
+      // for the next track.
+      unawaited(backend.setChannelRole(ch).then((_) {
+        final tl = _state?.timeline;
+        if (tl != null && tl.isPlaying && _active != null && !(_state?.isCalibrationTrack(tl.trackId) ?? false)) {
+          _lateJoin(tl, resync: true);
+        }
+      }).catchError((Object e) => _fail('setChannelRole failed: $e')));
     }
   }
 

@@ -70,3 +70,10 @@ String distributionLabel(DistributionMode m) => switch (m) {
       DistributionMode.auto => 'Local file, else download from host',
       DistributionMode.lanOnly => 'Always download from host',
     };
+
+String channelLabel(ChannelRole c) => switch (c) {
+      ChannelRole.stereo => 'Stereo',
+      ChannelRole.left => 'Left channel (experimental)',
+      ChannelRole.right => 'Right channel (experimental)',
+      ChannelRole.mono => 'Mono mix',
+    };
