@@ -29,6 +29,7 @@ import '../protocol/reader.dart';
 import '../time/clock.dart';
 import '../time/clock_sync.dart';
 import '../transport/transport.dart';
+import 'failover.dart';
 import 'playback_engine.dart';
 
 enum SessionPhase { idle, connecting, authenticating, syncing, joined, reconnecting, failed, closed }
@@ -75,6 +76,11 @@ class ParticipantOptions {
   /// pass an isolate-backed implementation so the UI does not stall.
   final Future<RoomKey> Function(String roomId, String joinKey, int iterations)? keyDeriver;
 
+  /// Enables coordinator failover by succession (see `failover.dart`).
+  /// Null keeps the conservative behaviour: report that the room is gone.
+  final FailoverDelegate? failover;
+  final FailoverPolicy failoverPolicy;
+
   const ParticipantOptions({
     required this.deviceId,
     required this.displayName,
@@ -88,6 +94,8 @@ class ParticipantOptions {
     this.initialStartLatencyUs = 0,
     this.outputCalibrationUs = 0,
     this.keyDeriver,
+    this.failover,
+    this.failoverPolicy = const FailoverPolicy(),
   });
 }
 
@@ -132,6 +140,18 @@ class ParticipantSession implements ClockSource {
   final Map<int, Completer<ControlAckMsg>> _pendingControls = {};
   bool _closed = false;
   Completer<void>? _firstJoin;
+
+  // Failover state.
+  Connector? _target;
+  int? _linkLostAtUs;
+  int _candidateIndex = 0;
+  int _candidateAttempts = 0;
+  bool _promoted = false;
+
+  /// True while [_target] points at a failover candidate we have not yet
+  /// joined (as opposed to the coordinator we last joined).
+  bool _tryingCandidate = false;
+  int failoverCount = 0;
   Completer<void>? _linkClosed;
   int reconnectCount = 0;
 
@@ -199,7 +219,7 @@ class ParticipantSession implements ClockSource {
     while (!_closed) {
       _setPhase(attempt == 0 ? SessionPhase.connecting : SessionPhase.reconnecting);
       try {
-        final conn = await connector();
+        final conn = await (_target ?? connector)();
         if (_closed) {
           await conn.close('closed');
           break;
@@ -207,7 +227,10 @@ class ParticipantSession implements ClockSource {
         _linkClosed = Completer<void>();
         _attach(conn);
         await _linkClosed!.future;
-        if (_hadJoinedThisLink) attempt = 0;
+        if (_hadJoinedThisLink) {
+          attempt = 0;
+          _linkLostAtUs = clock.nowMicros();
+        }
       } on SessionFailure catch (f) {
         _fatal(f);
         return;
@@ -217,6 +240,14 @@ class ParticipantSession implements ClockSource {
       _detach();
       if (_closed || _phase == SessionPhase.failed) return;
       attempt++;
+      try {
+        if (await _maybeFailover()) {
+          attempt = 0;
+          continue;
+        }
+      } catch (e) {
+        log.error('failover.error', 'failover step failed: $e');
+      }
       final cfg = options.reconnect;
       if (cfg.maxAttempts > 0 && attempt > cfg.maxAttempts) {
         _fatal(const SessionFailure('unreachable', 'coordinator unreachable; the room may need to be recreated'));
@@ -225,7 +256,14 @@ class ParticipantSession implements ClockSource {
       final base = min(cfg.initialDelay.inMicroseconds * pow(cfg.multiplier, attempt - 1),
           cfg.maxDelay.inMicroseconds.toDouble());
       final jitter = base * cfg.jitter * (_random.nextDouble() * 2 - 1);
-      final delay = Duration(microseconds: (base + jitter).round());
+      var delayUs = (base + jitter).round();
+      // Do not sleep past the failover deadline.
+      final lost = _linkLostAtUs;
+      if (options.failover != null && lost != null && !_promoted && !_tryingCandidate) {
+        final untilFailover = lost + options.failoverPolicy.failoverAfter.inMicroseconds - clock.nowMicros();
+        if (untilFailover > 0 && untilFailover < delayUs) delayUs = untilFailover + 1000;
+      }
+      final delay = Duration(microseconds: delayUs);
       _setPhase(SessionPhase.reconnecting);
       log.info('session.backoff', 'reconnecting in ${delay.inMilliseconds} ms (attempt $attempt)');
       await Future<void>.delayed(delay);
@@ -233,6 +271,46 @@ class ParticipantSession implements ClockSource {
   }
 
   bool _hadJoinedThisLink = false;
+
+  /// Decides whether to switch to (or become) a successor coordinator.
+  /// Returns true when the connection target changed.
+  Future<bool> _maybeFailover() async {
+    final d = options.failover;
+    final s = _state;
+    final lost = _linkLostAtUs;
+    if (d == null || s == null || lost == null || _promoted) return false;
+    if (clock.nowMicros() - lost < options.failoverPolicy.failoverAfter.inMicroseconds) return false;
+    final order = successionOrder(s);
+    if (_tryingCandidate) {
+      // Already trying a candidate: give it a few attempts, then move on.
+      if (++_candidateAttempts < options.failoverPolicy.attemptsPerCandidate) return false;
+      _candidateIndex++;
+      _candidateAttempts = 0;
+    }
+    if (_candidateIndex >= order.length) {
+      if (order.isNotEmpty && _tryingCandidate) {
+        log.error('failover.exhausted', 'no failover candidate reachable');
+      }
+      return false;
+    }
+    final cand = order[_candidateIndex];
+    failoverCount++;
+    if (cand.deviceId == options.deviceId) {
+      final est = estimate;
+      final key = _roomKey;
+      if (est == null || key == null) return false;
+      final epoch = s.coordinatorEpoch + 1;
+      log.warn('failover.promote', 'coordinator lost; this device takes over (epoch $epoch)');
+      final translated = translateForSuccessor(s, estimate: est, newCoordinatorId: options.deviceId, newEpoch: epoch);
+      _target = await d.promote(PromotionRequest(state: translated, epoch: epoch, roomKey: key, joinKey: options.joinKey));
+      _promoted = true;
+      return true;
+    }
+    log.warn('failover.follow', 'coordinator lost; trying successor ${cand.displayName} (${cand.endpoint})');
+    _target = d.connectorFor(cand.endpoint!);
+    _tryingCandidate = true;
+    return true;
+  }
 
   void _fatal(SessionFailure f) {
     lastFailure = '${f.code}: ${f.message}';
@@ -290,7 +368,8 @@ class ParticipantSession implements ClockSource {
       caps: DeviceCapabilities(
         rateControl: backend.capabilities.rateControl,
         backend: backend.capabilities.backend,
-        canHost: options.canHost,
+        canHost: options.canHost || options.failover != null,
+        failoverPort: options.failover?.failoverPort,
       ),
     ));
   }
@@ -398,10 +477,17 @@ class ParticipantSession implements ClockSource {
       if (!identical(conn, _conn) || _hs != _Hs.awaitChallenge) return; // link changed meanwhile
     }
     if (_coordinatorInstance != null && _coordinatorInstance != c.instance) {
-      log.warn('session.clock', 'coordinator instance changed; discarding clock samples');
+      final cur = _state;
+      final isFailover = cur != null && c.roomId == cur.roomId && c.coordinatorEpoch > cur.coordinatorEpoch;
+      // Samples against the old coordinator's clock are meaningless now.
       _estimator = ClockSyncEstimator(config: _config.clock);
-      engine.onClockDomainReset();
-      _state = null;
+      if (isFailover) {
+        log.warn('failover.joined', 'joined successor coordinator (epoch ${c.coordinatorEpoch}); audio keeps playing');
+      } else {
+        log.warn('session.clock', 'coordinator instance changed; discarding clock samples');
+        engine.onClockDomainReset();
+        _state = null;
+      }
     }
     _coordinatorInstance = c.instance;
     _challenge = c;
@@ -427,6 +513,11 @@ class ParticipantSession implements ClockSource {
     _codec!.allowPlainReject = false;
     _hs = _Hs.active;
     _hadJoinedThisLink = true;
+    _linkLostAtUs = null;
+    _candidateIndex = 0;
+    _candidateAttempts = 0;
+    _promoted = false;
+    _tryingCandidate = false;
     if (_sessionId != null) reconnectCount++;
     _sessionId = w.sessionId;
     _role = w.role;

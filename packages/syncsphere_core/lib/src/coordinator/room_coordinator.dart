@@ -140,6 +140,10 @@ class RoomCoordinator {
   /// Start-time measurements reported by participants (observability).
   final List<Map<String, Object?>> startReports = [];
 
+  /// Roles from the state this coordinator was restored from (failover),
+  /// re-applied when those devices rejoin.
+  final Map<String, ParticipantRole> _restoredRoles = {};
+
   RoomCoordinator({
     required this.options,
     required this.clock,
@@ -173,6 +177,13 @@ class RoomCoordinator {
           distribution: options.distribution,
         );
     _timelineVersion = _state.version;
+    if (restoredState != null) {
+      for (final p in restoredState.participants) {
+        // The previous host does not keep host rights on the new coordinator.
+        _restoredRoles[p.deviceId] =
+            p.role == ParticipantRole.host ? ParticipantRole.controller : p.role;
+      }
+    }
   }
 
   RoomState get state => _state;
@@ -243,6 +254,29 @@ class RoomCoordinator {
     }
     _links.clear();
     log.info('room.close', 'room closed: $reason');
+    await _stateCtl.close();
+    await _diagCtl.close();
+  }
+
+  /// Stops abruptly without notifying members (no `bye`), as if the
+  /// process had crashed. Used by failover tests and the simulator.
+  Future<void> abort() async {
+    if (_closed) return;
+    _closed = true;
+    _heartbeatTimer?.cancel();
+    _tickTimer?.cancel();
+    _diagTimer?.cancel();
+    for (final s in _acceptorSubs) {
+      await s.cancel();
+    }
+    for (final l in _links.toList()) {
+      l.hs = _Hs.closed;
+      l.handshakeTimer?.cancel();
+      await l.sub?.cancel();
+      await l.conn.close('aborted');
+    }
+    _links.clear();
+    log.warn('room.abort', 'coordinator aborted');
     await _stateCtl.close();
     await _diagCtl.close();
   }
@@ -430,7 +464,13 @@ class RoomCoordinator {
       _reject(link, RejectCode.roomFull, 'room is full');
       return;
     }
-    if (isHost) m.role = ParticipantRole.host;
+    if (isHost) {
+      m.role = ParticipantRole.host;
+    } else if (existing == null && _restoredRoles.containsKey(m.deviceId)) {
+      m.role = _restoredRoles[m.deviceId]!;
+    }
+    final fport = h.caps.failoverPort;
+    m.endpoint = fport == null ? null : '${link.remoteHost}:$fport';
     // Close any older link of this device (e.g. after a silent failure).
     for (final other in _links.toList()) {
       if (!identical(other, link) && other.member?.deviceId == m.deviceId) {

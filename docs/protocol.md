@@ -63,7 +63,7 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `plat` | string ≤32 | e.g. `android` |
 | `nonce` | string 16–64 | Random, base64url |
 | `room` | string? | Expected room id (from discovery) |
-| `caps` | object | `{rate: bool, backend: string, lan: bool, canHost: bool}` |
+| `caps` | object | `{rate: bool, backend: string, lan: bool, canHost: bool, fport?: int}`. `fport` is the port this device would serve on if promoted (failover). |
 
 ### challenge (S→C)
 `proto` (chosen version), `room`, `name`, `coord` (coordinator device id), `epoch` (coordinator epoch),
@@ -112,7 +112,9 @@ All positions and times are integer microseconds. Every reported timing value is
                 "mime": "audio/mpeg", "serves": true, "avail": 3}],
   "mvol": 0.8,
   "parts": [{"id": "dev-abc", "name": "Host", "role": "host", "conn": "connected", "vol": 1.0,
-             "track": "available", "canHost": false}],
+             "track": "available", "canHost": false},
+            {"id": "dev-def", "name": "Kitchen", "role": "controller", "conn": "connected", "vol": 1.0,
+             "track": "available", "canHost": true, "ep": "192.168.1.31:47800"}],
   "dist": "auto"
 }
 ```
@@ -181,6 +183,22 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
   (`not_connected`). On reconnect it re-authenticates, receives the current state in `welcome`, runs a new clock burst,
   and joins the timeline. It emits `evt{rejoined}` once its measured error is back inside the correction band.
 - A newer authenticated link for the same device supersedes the older one; frames from the old link are dropped.
+
+### Failover (succession)
+
+1. **Candidates.** `successionOrder(state)` lists the participants with `canHost` and an `ep` whose `conn` is not
+   `disconnected`, excluding `coord`, in list (admission) order. Every member computes it from its last state.
+2. **Trigger.** A member that lost its coordinator link and could not re-establish it for 2 s (`failoverAfter`) picks
+   candidate *k*, starting at 0.
+   - If *k* is itself, it starts a coordinator with the same `room` and key, `epoch + 1` and a new `inst`. It restores
+     the last state with `tl.atUs` converted into its own clock using its offset estimate, keeps `tl.gen`, and drops
+     `pending`.
+   - Otherwise it connects to candidate *k*'s `ep`. After 3 failed attempts it moves to *k + 1*.
+3. **Rejoin.** Members re-authenticate normally. A `challenge` with a higher `epoch` and a new `inst` means failover:
+   clock samples are discarded, but the playing segment is kept, because the generation is unchanged.
+4. **Roles.** The new coordinator re-applies the previous roles; the old host becomes `controller`.
+5. **Not consensus.** Under a partition both sides may run coordinators. Members follow the highest
+   `(epoch, version)` they have seen.
 
 ## 8. Track delivery (HTTP)
 

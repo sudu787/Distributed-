@@ -68,6 +68,20 @@ List<Scenario> _suite(String name, int seed) {
       seed: seed,
     ),
     Scenario(
+      name: 'coordinator-failover-n5',
+      participants: 5,
+      network: NetworkCondition.wifiTypical,
+      duration: const Duration(seconds: 120),
+      failover: true,
+      actions: const [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 30), KillCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 70), SeekAction(Duration(minutes: 2))),
+        ScheduledAction(Duration(seconds: 90), KillCoordinatorAction()),
+      ],
+      seed: seed,
+    ),
+    Scenario(
       name: 'heterogeneous-devices-n5',
       participants: 5,
       network: NetworkCondition.wifiTypical,
@@ -170,6 +184,7 @@ Future<void> main(List<String> argv) async {
       'stalls': m['bufferingStalls'],
       'bytesPerDevPerS': m['networkBytesPerDevicePerSecond'],
       'failed': (m['failedSessions'] as List).length,
+      if (m['failover'] != null) 'failover': m['failover'],
     });
     stdout.writeln('${sc.name.padRight(36)} spread p50/p95/max '
         '${_f(q('interDeviceSpreadMs_steady'), 'median')}/${_f(q('interDeviceSpreadMs_steady'), 'p95')}/${_f(q('interDeviceSpreadMs_steady'), 'max')} ms  '
@@ -211,6 +226,21 @@ String _markdown(Map<String, Object?> meta, List<Map<String, Object?>> rows) {
         '${_f(m('startSkew'), 'median')} | ${_f(m('startSkew'), 'max')} | ${_f(m('driftLastMinute'), 'p95')} | '
         '${_f(m('commandLatency'), 'median')} | ${_f(m('clockErrUs'), 'p95')} | ${r['coverage'] ?? '–'} | '
         '${_f(m('recovery'), 'max')} | ${r['resyncs']} | ${r['failed']} |');
+  }
+  final fo = rows.where((r) => r['failover'] != null).toList();
+  if (fo.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('## Coordinator failover (SIMULATED)')
+      ..writeln()
+      ..writeln('| scenario | final epoch | last promoted | promoted after kill (ms) | spread p95 / max in 15 s after promotion (ms) |')
+      ..writeln('|---|---|---|---|---|');
+    for (final r in fo) {
+      final f = r['failover'] as Map<String, Object?>;
+      final sp = f['spreadMs_15sAfterPromotion'] as Map<String, Object?>;
+      b.writeln('| ${r['scenario']} | ${f['finalEpoch']} | ${f['promoted']} | ${f['promotedAfterKillMs']} | '
+          '${_f(sp, 'p95')} / ${_f(sp, 'max')} |');
+    }
   }
   b
     ..writeln()

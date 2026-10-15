@@ -122,8 +122,9 @@
     "networkBytes": 213132,
     "networkBytesPerDevicePerSecond": 888,
     "failedSessions": [],
+    "killedDevices": [],
     "failureReasons": {},
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 74
+  "wallClockMs": 73
 }

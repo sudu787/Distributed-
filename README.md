@@ -32,7 +32,9 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   - playback that continues on the last timeline while disconnected
   - rejection of stale, duplicate and reordered messages
   - role-based control authorization and per-address rate limits
-  - an explicit "room needs to be recreated" when the coordinator is gone
+  - **coordinator failover by succession**: if the host crashes, the first eligible guest takes over at epoch + 1,
+    with the timeline translated into its clock, and playback keeps running
+  - an explicit "room needs to be recreated" when no successor is available
 - **Audio distribution:** tracks are identified by SHA-256. Either every phone has the file ("matching local files"),
   or the host serves it over HTTP with `Range` resume, per-session signed URLs, verification and an LRU cache.
 - **Observability:** structured event log, per-device sync reports, a room-wide diagnostics broadcast, and a
@@ -142,8 +144,9 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
    then 3–10. Commit raw data to `benchmarks/results/real/`.
 2. **Native code on hardware.** The Kotlin plugin is compiled and unit-tested in CI only. Verify start-latency learning
    and position sampling on a few device models.
-3. **Coordinator failover.** Designed ([roadmap](docs/roadmap.md#coordinator-failover-milestone)), not implemented.
-   Today the room reports that it must be recreated.
+3. **Coordinator failover on hardware.** Succession failover is implemented and tested in simulation and over
+   loopback sockets, but not on phones. It is not consensus: a network partition can split a room
+   ([roadmap](docs/roadmap.md#coordinator-failover-milestone)).
 4. **Background playback** via a foreground media service.
 
 Only share music you are authorized to share.

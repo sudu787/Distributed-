@@ -268,7 +268,7 @@ docs/                       this documentation
 | Rate changes audible on some content | ±1.5 % cap, pitch preserved, dead band | Configurable |
 | VBR MP3 seek inaccuracy | Media3 index seeking enabled | Implemented |
 | Background restrictions or Doze stop playback | Screen kept on while in a room | A foreground service is on the [roadmap](roadmap.md) |
-| Coordinator loss | Detection, free-running playback, bounded reconnect, explicit "room needs to be recreated" message | Implemented. Automatic failover is a separate milestone ([roadmap](roadmap.md)). |
+| Coordinator loss | Detection, free-running playback, succession failover (epoch + 1, timeline translated into the successor's clock), explicit "room needs to be recreated" when no candidate exists | Implemented and tested (simulation and loopback). Not consensus; a partition can split the room ([roadmap](roadmap.md#coordinator-failover-milestone)). |
 | No Android SDK in the development container | GitHub Actions builds the APK and runs the Kotlin tests | See README |
 
 ## Milestones
@@ -281,4 +281,4 @@ docs/                       this documentation
 | 4 | Hash verification, availability, LAN delivery, cache, resume | Done (tests over loopback HTTP) |
 | 5 | Membership, malformed input, timeouts, coordinator loss, authorization | Done (tests) |
 | 6 | Benchmarks | Simulated harness and results done. Real-device protocol written; real-device data still to collect. |
-| 7 | Acoustic calibration, spatial audio, adaptive intervals, failover | Partly: calibration offset and adaptive probing exist. See the [roadmap](roadmap.md). |
+| 7 | Acoustic calibration, spatial audio, adaptive intervals, failover | Failover (succession), calibration offset and adaptive intervals done; in-app acoustic calibration and spatial audio are designed only. See the [roadmap](roadmap.md). |

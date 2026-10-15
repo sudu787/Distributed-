@@ -277,6 +277,10 @@ class ParticipantSummary {
   final TrackAvailability currentTrack;
   final bool canHost;
 
+  /// `host:port` where this device would serve the room if promoted to
+  /// coordinator (null when it is not a failover candidate).
+  final String? endpoint;
+
   const ParticipantSummary({
     required this.deviceId,
     required this.displayName,
@@ -285,6 +289,7 @@ class ParticipantSummary {
     this.volume = 1.0,
     this.currentTrack = TrackAvailability.unknown,
     this.canHost = false,
+    this.endpoint,
   });
 
   ParticipantSummary copyWith({
@@ -302,6 +307,7 @@ class ParticipantSummary {
         volume: volume ?? this.volume,
         currentTrack: currentTrack ?? this.currentTrack,
         canHost: canHost,
+        endpoint: endpoint,
       );
 
   Map<String, Object?> toJson() => {
@@ -312,6 +318,7 @@ class ParticipantSummary {
         'vol': volume,
         'track': currentTrack.name,
         'canHost': canHost,
+        if (endpoint != null) 'ep': endpoint,
       };
 
   factory ParticipantSummary.fromJson(Map<String, Object?> j) {
@@ -324,6 +331,7 @@ class ParticipantSummary {
       volume: r.number('vol', min: 0, max: 1),
       currentTrack: r.enumValue('track', TrackAvailability.values),
       canHost: r.optBoolean('canHost') ?? false,
+      endpoint: r.optString('ep', maxLength: 128),
     );
   }
 }

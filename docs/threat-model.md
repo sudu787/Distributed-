@@ -41,9 +41,11 @@ SyncSphere only plays files the user imported. Hosts must only distribute audio 
 
 ## Limitations (functional)
 
-1. **Coordinator failover is not implemented.** If the host disappears, participants keep playing the last timeline,
-   retry with bounded backoff for ~3–4 minutes, then report "the room may need to be recreated". The succession
-   design is in [roadmap.md](roadmap.md).
+1. **Coordinator failover is succession, not consensus.** If the host crashes, the first eligible guest takes over
+   (epoch + 1) and the others follow. Playback continues. Under a network *partition* both sides can end up with a
+   coordinator, and they do not merge automatically ([roadmap.md](roadmap.md#coordinator-failover-milestone)).
+   Without candidates, sessions retry for ~3–4 minutes and then report "the room may need to be recreated".
+   A failover candidate learns nothing beyond what every member already has: the join key and the state.
 2. **No real-device measurements yet** (see [benchmarking.md](benchmarking.md)). All quantitative claims are simulated
    or unit-tested.
 3. **The Android native code has only been compiled and unit-tested in CI**, not exercised on hardware.

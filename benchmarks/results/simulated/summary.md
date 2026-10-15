@@ -1,7 +1,7 @@
 # SyncSphere simulated benchmark results
 
 > **SIMULATED — virtual time, modelled clocks/network/audio devices. NOT hardware measurements.**  
-> suite `full`, seed `42`, generated 2026-10-15T06:42:34.663430Z  
+> suite `full`, seed `42`, generated 2026-10-15T06:58:03.733334Z  
 > Spread = max − min acoustic (ground-truth) position error across devices at the same instant, sampled every 50 ms. "Steady" excludes 3 s after each timeline change.
 
 | scenario | n | network | spread p50 | spread p95 | spread p99 | spread max | start skew p50 | start skew max | last-min p95 | cmd→audible p50 | clock err p95 (µs) | unc. coverage | recovery max | resyncs | failed |
@@ -27,11 +27,18 @@
 | matrix-hotspot-n5 | 5 | hotspot | 10.7 | 13.9 | 23.6 | 31.6 | 19.8 | 34.9 | 19.3 | 620.0 | 1982.0 | 1.0 | – | 0 | 0 |
 | matrix-hotspot-n10 | 10 | hotspot | 9.1 | 16.6 | 25.8 | 29.8 | 31.1 | 34.0 | 28.3 | 500.0 | 2443.0 | 0.9991 | – | 0 | 0 |
 | partition-recovery-n5 | 5 | wifi-typical | 8.6 | 10.3 | 16.4 | 23.8 | 27.4 | 27.4 | 8.6 | 640.0 | 1454.0 | 1.0 | 50.0 | 0 | 0 |
-| coordinator-failure-n3 | 3 | wifi-good | 8.1 | 16.8 | 23.3 | 24.9 | 28.5 | 28.5 | 28.4 | 620.0 | 947.0 | 1.0 | – | 0 | 3 |
+| coordinator-failure-n3 | 3 | wifi-good | 8.1 | 16.8 | 23.3 | 24.9 | 28.5 | 28.5 | 28.4 | 620.0 | 947.0 | 1.0 | – | 0 | 2 |
+| coordinator-failover-n5 | 5 | wifi-typical | 4.5 | 11.0 | 17.6 | 23.8 | 23.9 | 27.4 | 18.8 | 500.0 | 1859.0 | 1.0 | – | 0 | 0 |
 | heterogeneous-devices-n5 | 5 | wifi-typical | 28.8 | 47.3 | 50.0 | 56.9 | 36.5 | 57.8 | 30.9 | 780.0 | 1371.0 | 1.0 | – | 0 | 0 |
 | bluetooth-uncalibrated-n2 | 2 | wifi-good | 184.9 | 186.1 | 186.2 | 186.2 | 5.1 | 5.1 | 185.9 | 600.0 | 622.0 | 1.0 | – | 0 | 0 |
 | bluetooth-calibrated-n2 | 2 | wifi-good | 3.6 | 4.9 | 5.0 | 5.0 | 5.1 | 5.1 | 4.2 | 600.0 | 654.0 | 1.0 | – | 0 | 0 |
 | drift-uncorrected-n3 | 3 | wifi-good | 65.2 | 134.7 | 146.2 | 149.3 | 19.1 | 28.3 | 149.0 | 620.0 | 258.0 | 1.0 | – | 0 | 0 |
 | drift-corrected-n3 | 3 | wifi-good | 3.7 | 6.6 | 7.7 | 24.6 | 18.3 | 28.3 | 5.9 | 620.0 | 248.0 | 1.0 | – | 0 | 0 |
+
+## Coordinator failover (SIMULATED)
+
+| scenario | final epoch | last promoted | promoted after kill (ms) | spread p95 / max in 15 s after promotion (ms) |
+|---|---|---|---|---|
+| coordinator-failover-n5 | 3 | device-4 | 2015 | 7.8 / 7.8 |
 
 All times in ms unless noted. Raw per-sample data: `<scenario>.samples.jsonl`; recompute with `tools/analyze_samples.py`.

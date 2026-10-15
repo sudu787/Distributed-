@@ -121,4 +121,64 @@ void main() {
     await hostSvc.leave();
     expect(hostSvc.inRoom, isFalse);
   });
+
+  test('host crash: first guest takes over as coordinator, the other follows, audio continues', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    Future<(RoomService, DeviceIdentity)> device(String name, {List<LibraryTrack> tracks = const []}) async {
+      final store = MemoryAppStore();
+      for (final t in tracks) {
+        await store.upsertTrack(t);
+      }
+      final svc = RoomService(
+        store: store,
+        cacheDir: Directory('${tmp.path}/cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+      );
+      return (svc, await store.loadIdentity(defaultName: name));
+    }
+
+    final hostLib = LibraryService(store: MemoryAppStore(), libraryDir: Directory('${tmp.path}/lib'), log: EventLog(clock: clock));
+    final track = await hostLib.import(await audioFile('t.mp3', 3));
+    final (host, hostId) = await device('host', tracks: [track]);
+    final (a, aId) = await device('a', tracks: [track]);
+    final (b, bId) = await device('b', tracks: [track]);
+    final info = await host.host(identity: hostId, roomName: 'Crashy', tracks: [track], port: 0, openControl: true);
+    await a.join(identity: aId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await b.join(identity: bId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    expect((await b.session!.control(ControlAction.play)).accepted, isTrue);
+
+    Future<void> waitFor(bool Function() cond, String what, {int seconds = 20}) async {
+      final deadline = DateTime.now().add(Duration(seconds: seconds));
+      while (!cond()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    await waitFor(() {
+      final g = host.coordinator?.state.timeline;
+      return g != null && g.isPlaying && a.session!.engine.status.activeGeneration == g.generation &&
+          b.session!.engine.status.activeGeneration == g.generation;
+    }, 'synchronized start');
+    final gen = host.coordinator!.state.timeline.generation;
+
+    await host.crashForTesting();
+    await waitFor(() => a.promotedByFailover, 'promotion of guest a');
+    await waitFor(() => b.session!.state?.coordinatorEpoch == 2 && b.session!.isLive, 'guest b following the successor');
+    expect(a.coordinator!.state.coordinatorEpoch, 2);
+    expect(a.coordinator!.state.timeline.generation, gen, reason: 'same timeline, no restart');
+    expect(a.session!.engine.status.activeGeneration, gen);
+    expect(b.session!.engine.status.activeGeneration, gen);
+    expect(a.info!.isHost, isTrue);
+    // The successor accepts control and schedules new segments.
+    expect((await b.session!.control(ControlAction.seek, positionUs: 30000000)).accepted, isTrue);
+    await waitFor(() => b.session!.engine.status.activeGeneration == a.coordinator!.state.timeline.generation &&
+        a.coordinator!.state.timeline.generation > gen, 'seek on successor');
+
+    await b.leave();
+    await a.leave();
+  });
 }

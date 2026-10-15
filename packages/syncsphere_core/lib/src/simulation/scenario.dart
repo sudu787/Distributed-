@@ -23,7 +23,9 @@ import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
 import '../observability/stats.dart';
+import '../participant/failover.dart';
 import '../participant/participant_session.dart';
+import '../transport/transport.dart';
 import '../protocol/messages.dart';
 import '../time/clock.dart';
 import '../transport/memory_transport.dart';
@@ -108,7 +110,8 @@ class PartitionAction extends SimAction {
   String get label => 'partition(p$participant, ${duration.inSeconds}s)';
 }
 
-/// Kills the coordinator process; participants must detect and report it.
+/// Kills the host device (coordinator process and the host's own player).
+/// Participants must detect it and either fail over or report it.
 class KillCoordinatorAction extends SimAction {
   const KillCoordinatorAction();
   @override
@@ -140,6 +143,9 @@ class Scenario {
   /// Per-participant acoustic calibration (µs), cycled like [profiles].
   final List<int> outputCalibrationUs;
 
+  /// Enables coordinator failover by succession on all non-host devices.
+  final bool failover;
+
   const Scenario({
     required this.name,
     required this.participants,
@@ -154,6 +160,7 @@ class Scenario {
     this.trackCount = 3,
     this.trackDuration = const Duration(minutes: 30),
     this.outputCalibrationUs = const [0],
+    this.failover = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -166,6 +173,7 @@ class Scenario {
         'clockSkewPpmRange': clockSkewPpmRange,
         'audioPpmRange': audioPpmRange,
         'seed': seed,
+        if (failover) 'failover': true,
       };
 }
 
@@ -251,7 +259,8 @@ class SimulationRunner {
     final hostClock = DerivedClock(
         referenceMicros: trueNow, offsetMicros: rnd.nextInt(1 << 30), skewPpm: uniform(sc.clockSkewPpmRange));
     final coordLog = EventLog(clock: hostClock, source: 'coordinator');
-    final coordinator = RoomCoordinator(
+    var coordClock = hostClock;
+    var coordinator = RoomCoordinator(
       options: CoordinatorOptions(
         roomId: 'sim-room',
         roomName: sc.name,
@@ -268,6 +277,29 @@ class SimulationRunner {
     coordinator.serve(net.listen('coordinator'));
     coordinator.start();
 
+    final timelines = <int, (PlaybackTimeline, int, DerivedClock)>{};
+    final tlSubs = <StreamSubscription<RoomState>>[];
+    void watchTimelines(RoomCoordinator c, DerivedClock clk) {
+      tlSubs.add(c.stateStream.listen((st) {
+        final tl = st.timeline;
+        if (tl.isPlaying && !timelines.containsKey(tl.generation)) {
+          timelines[tl.generation] = (tl, trueNow(), clk);
+        }
+      }));
+    }
+
+    var coordinatorKilled = false;
+    var coordAddress = 'coordinator';
+    var coordDeviceIndex = 0;
+    int? killedAtUs;
+    int? promotedAtUs;
+    String? promotedDevice;
+    final simEvents = <Map<String, Object?>>[];
+    void logEvent(String what, [Map<String, Object?> data = const {}]) {
+      simEvents.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'event': what, ...data});
+    }
+
+    const loopback = LinkProfile(base: Duration(microseconds: 80));
     final devices = <_SimDevice>[];
     for (var i = 0; i < sc.participants; i++) {
       final id = 'device-$i';
@@ -286,12 +318,50 @@ class SimulationRunner {
               downlink: const LinkProfile(base: Duration(microseconds: 80)))
           : Link(uplink: sc.network.uplink, downlink: sc.network.downlink);
       final log = EventLog(clock: clk, source: id);
+      final failover = sc.failover && i > 0
+          ? _SimFailover(
+              id: id,
+              net: net,
+              link: link,
+              onPromote: (req) {
+                final c = RoomCoordinator(
+                  options: CoordinatorOptions(
+                    roomId: req.state.roomId,
+                    roomName: req.state.roomName,
+                    coordinatorId: id,
+                    joinKey: req.joinKey,
+                    kdfIterations: req.roomKey.iterations,
+                    roomKey: req.roomKey,
+                    config: sc.config,
+                    defaultRole: ParticipantRole.controller,
+                    coordinatorEpoch: req.epoch,
+                  ),
+                  clock: clk,
+                  log: EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer),
+                  restoredState: req.state,
+                );
+                c.serve(net.listen('coord-$id'));
+                c.start();
+                coordinator = c;
+                coordClock = clk;
+                coordAddress = 'coord-$id';
+                coordDeviceIndex = i;
+                coordinatorKilled = false;
+                promotedAtUs = trueNow();
+                promotedDevice = id;
+                watchTimelines(c, clk);
+                logEvent('promoted', {'device': id, 'epoch': req.epoch});
+                return net.connector(id, 'coord-$id', Link(uplink: loopback, downlink: loopback));
+              },
+            )
+          : null;
       final session = ParticipantSession(
         options: ParticipantOptions(
           deviceId: id,
           displayName: 'Device $i',
           joinKey: 'SIMKEY01',
           outputCalibrationUs: sc.outputCalibrationUs[i % sc.outputCalibrationUs.length],
+          failover: failover,
         ),
         connector: net.connector(id, 'coordinator', link),
         clock: clk,
@@ -316,13 +386,8 @@ class SimulationRunner {
     }
 
     // Record every playing timeline and the true time it was published.
-    final timelines = <int, (PlaybackTimeline, int)>{};
-    final tlSub = coordinator.stateStream.listen((st) {
-      final tl = st.timeline;
-      if (tl.isPlaying && !timelines.containsKey(tl.generation)) {
-        timelines[tl.generation] = (tl, trueNow());
-      }
-    });
+    watchTimelines(coordinator, hostClock);
+    final dead = <String>{};
 
     for (final d in devices) {
       unawaited(d.session.start().catchError((Object e) {
@@ -337,24 +402,19 @@ class SimulationRunner {
     final clockUnc = SampleStats();
     var clockCovered = 0, clockTotal = 0;
     final commandLatency = SampleStats();
-    final simEvents = <Map<String, Object?>>[];
-    var coordinatorKilled = false;
     final partitionHeal = <String, int>{};
     final recovery = SampleStats();
-
-    void logEvent(String what, [Map<String, Object?> data = const {}]) {
-      simEvents.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'event': what, ...data});
-    }
 
     final sampler = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (coordinatorKilled) return;
       final tl = coordinator.state.timeline;
       final t = trueNow();
       if (tl.isPlaying) {
-        final coordNow = hostClock.nowMicros();
+        final coordNow = coordClock.nowMicros();
         final expected = tl.expectedPositionAt(coordNow);
         final errs = <String, int>{};
         for (final d in devices) {
+          if (dead.contains(d.id)) continue;
           final seg = d.backend.activeSegment;
           if (seg == null) continue;
           final eng = d.session.engine.status;
@@ -371,11 +431,12 @@ class SimulationRunner {
 
     final clockSampler = Timer.periodic(const Duration(seconds: 1), (_) {
       if (coordinatorKilled) return;
-      for (final d in devices.skip(1)) {
+      for (final d in devices) {
+        if (dead.contains(d.id) || identical(d.clock, coordClock)) continue;
         final e = d.session.estimate;
         if (e == null) continue;
         final localNow = d.clock.nowMicros();
-        final trueOffset = hostClock.nowMicros() - localNow;
+        final trueOffset = coordClock.nowMicros() - localNow;
         final err = (e.offsetAt(localNow) - trueOffset).abs();
         final unc = e.uncertaintyAt(localNow);
         clockErr.add(err);
@@ -394,7 +455,7 @@ class SimulationRunner {
       if (tl.generation < (pendingCommandGen ?? 0)) return;
       final t = trueNow();
       final allAudible = devices.every((d) {
-        if (!d.session.isLive) return true;
+        if (dead.contains(d.id) || !d.session.isLive) return true;
         return d.session.engine.status.activeGeneration == tl.generation &&
             d.backend.acousticPositionAt(t) != null;
       });
@@ -423,8 +484,10 @@ class SimulationRunner {
       }
     });
 
-    final host = devices.first.session;
+    ParticipantSession controller() =>
+        devices.firstWhere((d) => !dead.contains(d.id) && d.session.isLive, orElse: () => devices.first).session;
     void control(ControlAction a, {int? pos}) {
+      final host = controller();
       pendingCommandAt = trueNow();
       pendingCommandGen = coordinator.state.timeline.generation + 1;
       unawaited(host.control(a, positionUs: pos).then((ack) {
@@ -457,15 +520,23 @@ class SimulationRunner {
           });
         case KillCoordinatorAction():
           coordinatorKilled = true;
-          net.killServer('coordinator');
+          killedAtUs = trueNow();
+          promotedAtUs = null;
+          final hostDev = devices[coordDeviceIndex];
+          dead.add(hostDev.id);
+          logEvent('killed', {'device': hostDev.id});
+          net.killServer(coordAddress);
           unawaited(coordinator.close(reason: 'killed'));
+          unawaited(hostDev.session.close());
       }
     }
     final remaining = sc.duration - (fa.elapsed - start);
     if (remaining > Duration.zero) fa.elapse(remaining);
 
     sampler.cancel();
-    unawaited(tlSub.cancel());
+    for (final sub in tlSubs) {
+      unawaited(sub.cancel());
+    }
     clockSampler.cancel();
     latencyWatcher.cancel();
     recoveryWatcher.cancel();
@@ -505,13 +576,13 @@ class SimulationRunner {
     final startErrors = SampleStats();
     final gens = timelines.keys.toList()..sort();
     for (var gi = 0; gi < gens.length; gi++) {
-      final (tl, published) = timelines[gens[gi]]!;
+      final (tl, published, clk) = timelines[gens[gi]]!;
       final until = gi + 1 < gens.length ? timelines[gens[gi + 1]]!.$2 : 1 << 62;
       final errs = <int>[];
       for (final d in devices) {
         for (final (_, outTrue, pos) in d.backend.outputStarts) {
           if (outTrue < published || outTrue >= until) continue;
-          final expectedTrue = hostClock.toReference(tl.coordTimeForPosition(pos));
+          final expectedTrue = clk.toReference(tl.coordTimeForPosition(pos));
           errs.add(outTrue - expectedTrue);
           break;
         }
@@ -540,7 +611,26 @@ class SimulationRunner {
       }
     }
 
-    final failedSessions = devices.where((d) => d.session.phase == SessionPhase.failed).map((d) => d.id).toList();
+    // Failover: disturbance (spread) in the 15 s after promotion, and
+    // time from the kill until every surviving device is audible on the
+    // successor's timeline.
+    final failoverSpread = SampleStats();
+    int? failoverRecoveryMs;
+    if (promotedAtUs != null && killedAtUs != null) {
+      final survivors = devices.where((d) => !dead.contains(d.id)).map((d) => d.id).toSet();
+      for (final smp in samples) {
+        if (smp.trueUs < promotedAtUs! || smp.trueUs > promotedAtUs! + 15000000) continue;
+        final sp = smp.spread;
+        if (sp != null) failoverSpread.add(sp / 1000);
+        if (failoverRecoveryMs == null && smp.errors.keys.toSet().containsAll(survivors)) {
+          failoverRecoveryMs = (smp.trueUs - killedAtUs) ~/ 1000;
+        }
+      }
+    }
+    final failedSessions = devices
+        .where((d) => !dead.contains(d.id) && d.session.phase == SessionPhase.failed)
+        .map((d) => d.id)
+        .toList();
     final metrics = <String, Object?>{
       'interDeviceSpreadMs_all': spread.summary(),
       'interDeviceSpreadMs_steady': spreadSteady.summary(),
@@ -566,13 +656,24 @@ class SimulationRunner {
           ? 0
           : (net.bytesSent / sc.participants / max(1, sc.duration.inSeconds)).round(),
       'failedSessions': failedSessions,
-      'failureReasons': {for (final d in devices) if (d.session.lastFailure != null) d.id: d.session.lastFailure},
+      'killedDevices': dead.toList(),
+      if (promotedDevice != null) 'failover': {
+        'promoted': promotedDevice,
+        'promotedAfterKillMs': (promotedAtUs! - killedAtUs!) ~/ 1000,
+        'allSurvivorsAudibleAfterKillMs': failoverRecoveryMs,
+        'spreadMs_15sAfterPromotion': failoverSpread.summary(),
+        'finalEpoch': coordinator.state.coordinatorEpoch,
+      },
+      'failureReasons': {
+        for (final d in devices)
+          if (!dead.contains(d.id) && d.session.lastFailure != null) d.id: d.session.lastFailure
+      },
       'coordinatorWarnings': coordLog.events.where((e) => e.level.index >= EventLevel.warn.index).length,
     };
 
     // Tear down inside fake time.
     for (final d in devices) {
-      unawaited(d.session.close());
+      if (!dead.contains(d.id)) unawaited(d.session.close());
     }
     if (!coordinatorKilled) unawaited(coordinator.close());
     fa.elapse(const Duration(seconds: 1));
@@ -581,6 +682,26 @@ class SimulationRunner {
     return SimulationResult(sc, metrics, samples, simEvents);
   }
 
+}
+
+class _SimFailover implements FailoverDelegate {
+  final String id;
+  final MemoryNetwork net;
+  final Link link;
+  final Connector Function(PromotionRequest req) onPromote;
+  _SimFailover({required this.id, required this.net, required this.link, required this.onPromote});
+
+  @override
+  int get failoverPort => 47800;
+
+  @override
+  Future<Connector> promote(PromotionRequest request) async => onPromote(request);
+
+  @override
+  Connector connectorFor(String endpoint) {
+    final host = endpoint.split(':').first;
+    return net.connector(id, 'coord-$host', link);
+  }
 }
 
 class _FnClock implements MonotonicClock {

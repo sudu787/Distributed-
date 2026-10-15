@@ -4,6 +4,8 @@ Status words: **done**, **partial**, **designed** (written down, not implemented
 
 ## Near term (to reach a validated release)
 
+The coordinator failover milestone below is done in software; the items in this table remain.
+
 | Item | Status | Next step |
 |---|---|---|
 | Real-device validation with 2 → 10 phones | designed ([benchmarking.md](benchmarking.md)) | Run the acoustic protocol and commit raw data |
@@ -14,17 +16,23 @@ Status words: **done**, **partial**, **designed** (written down, not implemented
 
 ## Coordinator failover milestone
 
-Current behavior is detection plus an explicit "room needs to be recreated" message (tested). The design below is
-**not implemented**, and SyncSphere does not claim leader election.
+**Status: done (succession-based), with limitations below.** Implemented in
+`packages/syncsphere_core/lib/src/participant/failover.dart` and `ParticipantSession`. Tests:
 
-### Succession protocol (designed)
+- simulation: host killed, then the successor killed too (chained), 4–5 devices
+- real sockets: an app-level host crash over loopback
 
-1. **Candidates.** The coordinator includes `canHost` in each participant summary. A device sets it when it can
-   serve audio, meaning it has every playlist track (`avail = available` for all of them). The succession order is
-   the order of admission among connected `canHost` devices. It is published in every `state`, so all members hold
-   the same list (up to the latest version they received).
-2. **Detection.** A participant suspects the coordinator after 3 s and fails it after 8 s, as today. After `failAfter`
-   plus a stagger of `rank × 2 s`, the first live candidate in the list it last saw promotes itself.
+Without a `FailoverDelegate`, sessions keep the older behavior: report "room needs to be recreated". The app enables
+failover for guests. This is **succession, not consensus-based leader election**.
+
+### Succession protocol (implemented)
+
+1. **Candidates.** Guests advertise a failover port (`caps.fport`). The coordinator combines it with the address it
+   sees them connect from, and publishes `canHost` plus `ep` in every participant summary. The succession order is
+   the admission order among connected candidates, excluding the coordinator. Every member derives it from the last
+   `state` it received.
+2. **Detection.** The link drops (immediately on a crash, or after 8 s of silence). After `failoverAfter` (2 s) the
+   session stops retrying the old coordinator.
 3. **Promotion.** The successor:
    1. creates a coordinator with the same room id and key, and `epoch = oldEpoch + 1`;
    2. restores the last state;
@@ -33,18 +41,24 @@ Current behavior is detection plus an explicit "room needs to be recreated" mess
    4. drops any pending segment;
    5. keeps `generation`, so devices that are already playing do not restart;
    6. starts beaconing with the new epoch.
-4. **Rejoin.** The other participants try the successor's address. To make this possible, participant summaries need
-   to carry the address the device would listen on if promoted. They re-authenticate with the same key and accept the
-   state because `epoch` is higher. Their engines keep the active segment, since its generation is unchanged, and
-   re-estimate the clock against the new instance.
+4. **Rejoin.** The others connect to candidate 0's endpoint. After 3 failed attempts they move to the next
+   candidate, and promote themselves if they are next. They re-authenticate with the same key and accept the state
+   because `epoch` is higher. Their engines keep the active segment, since its generation is unchanged, while the
+   session discards clock samples from the old instance and re-estimates against the new one.
 5. **Split brain.** If the old coordinator returns, or two candidates promote during a partition, members follow the
    highest `(epoch, coordinatorId)`. A coordinator that sees a higher epoch in a beacon shuts down and tells its members
    (`bye{superseded}`). This is not consensus: during a partition two sides can play independently, and they converge
    when it heals. A Raft-style elected leader would stop the minority side from playing; that trade-off was judged
    wrong for a music app.
-6. **Tests to write.** Simulator scenarios already include `KillCoordinatorAction`. Add assertions that playback
-   continues with less than 50 ms of disturbance and that exactly one coordinator holds the highest epoch after
-   healing.
+6. **Measured in simulation** (`coordinator-failover-n5`, two consecutive host deaths): promotion about 2 s after
+   the kill, inter-device spread ≤ 8 ms in the 15 s after promotion, and no session failures. Real devices: not yet.
+
+Limitations:
+
+- No automatic merge after a partition (split brain), as described above.
+- The successor serves only tracks in its own library. With LAN delivery, guests may lack a track it does not have.
+- The successor needs its failover port (47800) to be free.
+- An intentional "close room" by the host (`bye`) ends the room for everyone, by design.
 
 ## Precision backend (sub-5 ms target)
 

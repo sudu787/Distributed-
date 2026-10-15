@@ -3,7 +3,7 @@
   "suite": "full",
   "seed": 42,
   "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"linux_x64\"",
-  "generatedAt": "2026-10-15T06:42:34.663430Z",
+  "generatedAt": "2026-10-15T06:58:03.733334Z",
   "results": [
     {
       "scenario": "matrix-lan-ideal-n2",
@@ -1548,7 +1548,91 @@
       "resyncs": 0,
       "stalls": 0,
       "bytesPerDevPerS": 98,
-      "failed": 3
+      "failed": 2
+    },
+    {
+      "scenario": "coordinator-failover-n5",
+      "n": 5,
+      "network": "wifi-typical",
+      "durationS": 120,
+      "spreadSteady": {
+        "n": 2120,
+        "median": 4.51,
+        "p95": 11.04,
+        "p99": 17.62,
+        "max": 23.83,
+        "mean": 6.23
+      },
+      "spreadAll": {
+        "n": 2242,
+        "median": 4.54,
+        "p95": 20.32,
+        "p99": 27.35,
+        "max": 27.38,
+        "mean": 7.17
+      },
+      "startSkew": {
+        "n": 2,
+        "median": 23.87,
+        "p95": 27.03,
+        "p99": 27.31,
+        "max": 27.38,
+        "mean": 23.87
+      },
+      "driftLastMinute": {
+        "n": 1154,
+        "median": 4.19,
+        "p95": 18.79,
+        "p99": 20.34,
+        "max": 20.35,
+        "mean": 5.97
+      },
+      "commandLatency": {
+        "n": 2,
+        "median": 500.0,
+        "p95": 626.0,
+        "p99": 637.2,
+        "max": 640.0,
+        "mean": 500.0
+      },
+      "clockErrUs": {
+        "n": 350,
+        "median": 610.0,
+        "p95": 1859.0,
+        "p99": 2115.0,
+        "max": 2656.0,
+        "mean": 752.0
+      },
+      "clockUncUs": {
+        "n": 350,
+        "median": 4533.0,
+        "p95": 5440.0,
+        "p99": 5695.0,
+        "max": 5962.0,
+        "mean": 4592.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 1086,
+      "failed": 0,
+      "failover": {
+        "promoted": "device-4",
+        "promotedAfterKillMs": 2015,
+        "allSurvivorsAudibleAfterKillMs": 2050,
+        "spreadMs_15sAfterPromotion": {
+          "n": 300,
+          "median": 7.15,
+          "p95": 7.84,
+          "p99": 7.85,
+          "max": 7.85,
+          "mean": 5.05
+        },
+        "finalEpoch": 3
+      }
     },
     {
       "scenario": "heterogeneous-devices-n5",

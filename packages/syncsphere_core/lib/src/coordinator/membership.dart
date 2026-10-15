@@ -25,6 +25,9 @@ class Member {
   DeviceCapabilities caps;
   String sessionId;
   SessionKeys keys;
+
+  /// Failover endpoint (`host:port`), if the device offered one.
+  String? endpoint;
   int lastSeenUs;
   final int joinedAtUs;
   int? disconnectedAtUs;
@@ -68,6 +71,7 @@ class Member {
             ? TrackAvailability.unknown
             : (availability[currentTrackId] ?? TrackAvailability.unknown),
         canHost: caps.canHost,
+        endpoint: caps.canHost ? endpoint : null,
       );
 }
 

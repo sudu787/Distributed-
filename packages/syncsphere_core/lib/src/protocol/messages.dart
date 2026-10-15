@@ -90,11 +90,16 @@ class DeviceCapabilities {
   /// Device is able to take over as coordinator (failover candidate).
   final bool canHost;
 
+  /// Port this device would serve the room on if promoted. The coordinator
+  /// combines it with the address it sees the device connect from.
+  final int? failoverPort;
+
   const DeviceCapabilities({
     required this.rateControl,
     required this.backend,
     this.lanDownload = true,
     this.canHost = false,
+    this.failoverPort,
   });
 
   Map<String, Object?> toJson() => {
@@ -102,6 +107,7 @@ class DeviceCapabilities {
         'backend': backend,
         'lan': lanDownload,
         'canHost': canHost,
+        if (failoverPort != null) 'fport': failoverPort,
       };
 
   factory DeviceCapabilities.fromJson(Map<String, Object?> j) {
@@ -111,6 +117,7 @@ class DeviceCapabilities {
       backend: r.string('backend', maxLength: 64),
       lanDownload: r.optBoolean('lan') ?? false,
       canHost: r.optBoolean('canHost') ?? false,
+      failoverPort: r.optInteger('fport', min: 1, max: 65535),
     );
   }
 }

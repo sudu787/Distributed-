@@ -71,6 +71,10 @@ class RoomService {
   final Map<String, File> _served = {};
   DeviceIdentity? _identity;
 
+  /// True once this device took over as coordinator after the original
+  /// host disappeared.
+  bool promotedByFailover = false;
+
   RoomService({
     required this.store,
     required this.backendFactory,
@@ -155,6 +159,68 @@ class RoomService {
     }
   }
 
+  /// Failover: this device was elected successor. Starts serving the room
+  /// with the translated last state and returns a connector for our own
+  /// session.
+  Future<Connector> _promote(PromotionRequest req, DeviceIdentity identity) async {
+    final library = await store.libraryTracks();
+    _served
+      ..clear()
+      ..addEntries(library.map((t) => MapEntry(t.id, File(t.path))));
+    final state = req.state.copyWith(playlist: [
+      for (final t in req.state.playlist) t.copyWith(hostServes: _served.containsKey(t.id)),
+    ]);
+    final coord = RoomCoordinator(
+      options: CoordinatorOptions(
+        roomId: state.roomId,
+        roomName: state.roomName,
+        coordinatorId: identity.deviceId,
+        joinKey: req.joinKey,
+        kdfIterations: req.roomKey.iterations,
+        roomKey: req.roomKey,
+        coordinatorEpoch: req.epoch,
+        distribution: state.distribution,
+        defaultRole: ParticipantRole.listener,
+      ),
+      clock: clock,
+      log: log,
+      restoredState: state,
+    );
+    coordinator = coord;
+    _files = TrackFileServer(
+      fileForTrack: (id) => _served[id],
+      keysForSession: coord.transferKeysForSession,
+      nowMs: () => clock.nowMicros() ~/ 1000,
+      log: log,
+    );
+    _server = await _bind(kDefaultRoomPort);
+    if (_server!.port != kDefaultRoomPort) {
+      log.warn('failover.port', 'port $kDefaultRoomPort busy; other members may not find this successor');
+    }
+    coord.serve(_server!);
+    coord.start();
+    _beacon = BeaconBroadcaster(
+      beacon: () => RoomBeacon(
+        roomId: state.roomId,
+        roomName: coord.state.roomName,
+        coordinatorId: identity.deviceId,
+        coordinatorEpoch: coord.state.coordinatorEpoch,
+        port: _server!.port,
+        participants: coord.state.participants.length,
+      ),
+    );
+    try {
+      await _beacon!.start();
+    } on SocketException catch (e) {
+      log.warn('discovery.beacon', 'cannot broadcast discovery beacons: ${e.message}');
+    }
+    promotedByFailover = true;
+    info = RoomInfo(
+        isHost: true, roomId: state.roomId, roomName: state.roomName, joinKey: req.joinKey, host: '127.0.0.1', port: _server!.port);
+    log.warn('failover.host', 'this device is now the room coordinator (epoch ${req.epoch})');
+    return webSocketConnector('127.0.0.1', _server!.port);
+  }
+
   Future<WebSocketServer> _bind(int port) async {
     try {
       return await WebSocketServer.bind(port: port, httpHandler: _files!.handle, onError: _serverError);
@@ -214,6 +280,9 @@ class RoomService {
         keyDeriver: (r, k, i) => key != null && key.roomId == r && key.iterations == i
             ? Future.value(key)
             : keyDeriver(r, k, i),
+        // Guests can take over if the host disappears (see docs/roadmap.md);
+        // the host itself has nobody to fail over to.
+        failover: key == null ? _AppFailover(this, identity) : null,
       ),
       connector: webSocketConnector(host, port),
       clock: clock,
@@ -229,6 +298,22 @@ class RoomService {
     session = s;
     await s.start();
     await hooks.enterRoom();
+  }
+
+  /// Test hook: kills hosting abruptly (no `bye`), as if the app crashed,
+  /// so guests exercise failover.
+  Future<void> crashForTesting() async {
+    final c = coordinator;
+    coordinator = null;
+    await c?.abort();
+    _beacon?.stop();
+    _beacon = null;
+    await _server?.close();
+    _server = null;
+    final s = session;
+    session = null;
+    await s?.close();
+    info = null;
   }
 
   /// Host only: offers more library tracks to the room.
@@ -272,6 +357,26 @@ class RoomService {
     _downloader?.close();
     _downloader = null;
     info = null;
+    promotedByFailover = false;
     await hooks.leaveRoom();
+  }
+}
+
+class _AppFailover implements FailoverDelegate {
+  final RoomService service;
+  final DeviceIdentity identity;
+  _AppFailover(this.service, this.identity);
+
+  @override
+  int get failoverPort => kDefaultRoomPort;
+
+  @override
+  Future<Connector> promote(PromotionRequest request) => service._promote(request, identity);
+
+  @override
+  Connector connectorFor(String endpoint) {
+    final i = endpoint.lastIndexOf(':');
+    final port = int.tryParse(endpoint.substring(i + 1)) ?? kDefaultRoomPort;
+    return webSocketConnector(endpoint.substring(0, i), port);
   }
 }

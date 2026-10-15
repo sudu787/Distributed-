@@ -14,7 +14,8 @@ stateDiagram-v2
   syncing --> reconnecting: link closed
   connecting --> reconnecting: connect error
   reconnecting --> connecting: backoff elapsed
-  reconnecting --> failed: attempts exhausted ("room may need to be recreated")
+  reconnecting --> connecting: failover — connect to successor / promote self (epoch + 1)
+  reconnecting --> failed: attempts exhausted, no candidate ("room may need to be recreated")
   joined --> failed: bye from coordinator (room closed)
   joined --> closed: leave()
   failed --> [*]
@@ -147,19 +148,25 @@ sequenceDiagram
   P->>C: evt rejoined {recoveryUs, errorUs}
 ```
 
-## Sequence: coordinator loss (current behavior)
+## Sequence: coordinator loss and failover
 
 ```mermaid
 sequenceDiagram
-  participant C as Coordinator (host)
-  participant P as Participants
-  C--xP: host process killed / host leaves Wi-Fi
-  P->>P: free-run on last timeline, show "Reconnecting"
-  loop up to 30 attempts with backoff (≈ 3–4 min)
-    P->>C: connect
-  end
-  P->>P: phase failed: "coordinator unreachable; the room may need to be recreated"
+  participant C as Coordinator (host, epoch 1)
+  participant A as Guest A (candidate #0)
+  participant B as Guest B
+  C--xA: host crashes (or leaves Wi-Fi: detected after 8 s of silence)
+  C--xB: link lost
+  A->>A: free-run on last timeline; after failoverAfter (2 s): candidate #0 is me
+  A->>A: translate timeline: anchor_A = toLocal(anchor_C); keep generation; epoch 2
+  A->>A: start coordinator (same room id and key), serve tracks, beacon
+  A->>A: own session joins via loopback (audio keeps playing)
+  B->>B: after 2 s: candidate #0 is A
+  B->>A: hello / auth (same key)
+  A->>B: welcome {state epoch 2, same generation}
+  B->>B: discard old clock samples, new burst; keep active segment
+  B->>A: evt rejoined
 ```
 
-Automatic succession to a new coordinator is designed in [roadmap.md](roadmap.md#coordinator-failover-milestone).
-It is not claimed as implemented.
+If no candidate exists (or failover is disabled), participants retry with backoff for ~3–4 minutes and then report
+"coordinator unreachable; the room may need to be recreated".

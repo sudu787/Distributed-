@@ -78,9 +78,10 @@ void main() {
         ScheduledAction(Duration(seconds: 20), KillCoordinatorAction()),
       ],
     )).run();
-    // Without failover every session eventually gives up and says why.
+    // Without failover every surviving session eventually gives up and
+    // says why (the host device itself was killed).
     final failed = r.metrics['failedSessions'] as List;
-    expect(failed.length, 3);
+    expect(failed.length, 2);
     final reasons = (r.metrics['failureReasons'] as Map).values.join(' ');
     expect(reasons, contains('room may need to be recreated'));
   });

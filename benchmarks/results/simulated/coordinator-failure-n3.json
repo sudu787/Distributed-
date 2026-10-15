@@ -119,16 +119,17 @@
     "networkBytes": 105520,
     "networkBytesPerDevicePerSecond": 98,
     "failedSessions": [
-      "device-0",
       "device-1",
       "device-2"
     ],
+    "killedDevices": [
+      "device-0"
+    ],
     "failureReasons": {
-      "device-0": "unreachable: coordinator unreachable; the room may need to be recreated",
       "device-1": "unreachable: coordinator unreachable; the room may need to be recreated",
       "device-2": "unreachable: coordinator unreachable; the room may need to be recreated"
     },
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 52
+  "wallClockMs": 46
 }

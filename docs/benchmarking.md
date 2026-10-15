@@ -24,7 +24,8 @@ The suite is deterministic for a given `--seed` (default 42). It covers:
   spikes up to 250 ms) and `hotspot`.
 - **Standard script:** play at 3 s, pause at 40 s, resume at 46 s, seek to 3:00 at 70 s, next track at 95 s,
   120 s total.
-- **Faults:** 5 s and 20 s silent partitions; coordinator process killed.
+- **Faults:** 5 s and 20 s silent partitions; host device killed without failover; two consecutive host deaths with
+  succession failover.
 - **Device heterogeneity:** flagship, midrange and low-end profiles (the low-end one has no rate control and
   stalls 6 times an hour).
 - **Output latency:** uncalibrated vs. calibrated Bluetooth (180 ms of unreported latency).

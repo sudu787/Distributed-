@@ -139,6 +139,7 @@ class RoomController extends Notifier<RoomViewState> {
       final sess = _svc.session;
       if (sess == null) return;
       state = state.copyWith(
+        info: _svc.info,
         clock: sess.estimate,
         rttP95Us: sess.rttP95Us,
         coordinatorSuspect: sess.coordinatorSuspect,
