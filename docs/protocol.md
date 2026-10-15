@@ -226,7 +226,8 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 ### Failover (succession)
 
 1. **Candidates.** `successionOrder(state)` lists the participants with `canHost` and an `ep` whose `conn` is not
-   `disconnected`, excluding `coord`, in list (admission) order. Every member computes it from its last state.
+   `disconnected`, excluding `coord`: the `pref` device (original host) first when eligible, then list (admission)
+   order. Every member computes it from its last state, so no election messages are needed.
 2. **Trigger.** A member that lost its coordinator link and could not re-establish it for 2 s (`failoverAfter`) picks
    candidate *k*, starting at 0.
    - If *k* is itself, it starts a coordinator with the same `room` and key, `epoch + 1` and a new `inst`. It restores
@@ -236,8 +237,42 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 3. **Rejoin.** Members re-authenticate normally. A `challenge` with a higher `epoch` and a new `inst` means failover:
    clock samples are discarded, but the playing segment is kept, because the generation is unchanged.
 4. **Roles.** The new coordinator re-applies the previous roles; the old host becomes `controller`.
-5. **Not consensus.** Under a partition both sides may run coordinators. Members follow the highest
-   `(epoch, version)` they have seen.
+5. **Fencing.** `epoch` is a fencing token: members follow the highest `(epoch, version)` they have seen and ignore
+   state, redirects and handovers from lower epochs.
+
+### Handback to the original host and planned transfers
+
+`state.pref` names the device that should coordinate whenever it is present: the device that created the room.
+
+| `t` | dir | body | purpose |
+|---|---|---|---|
+| `handover` | S→C | `{epoch, state}` | "Start a coordinator for this room at `epoch` with `state` (sender's clock domain)." |
+| `handover.ack` | C→S | `{epoch, ok, err?}` | `ok`: already serving at `epoch` on its advertised `ep` port. |
+| `redirect` | S→C | `{epoch, ep, reason}` | The room is now served at `ep` (`reason`: `handover` or `stepdown`). Reconnect immediately. |
+
+1. **Handback** (preferred-leader rebalancing). A coordinator with `coord ≠ pref` checks every 100 ms: the `pref`
+   member is connected, has `canHost` and `ep`, has been connected *without interruption* for `stableFor` (10 s;
+   a suspect/disconnect restarts the window), reports clock uncertainty ≤ 20 ms, and there is no `pending` segment,
+   open readiness barrier or calibration. It then sends `handover{epoch + 1, state}`.
+2. The preferred device translates the timeline into its own clock (as in failover; generation kept), starts serving
+   at `epoch + 1`, and answers `handover.ack{ok}`. It declines (`ok:false`) without a clock estimate or the ability to
+   host.
+3. On `ok`, the old coordinator sends `redirect{epoch + 1, ep}` to every other member, waits 0.5 s and closes the
+   links **without** `bye` (a `bye` would end member sessions). Members reconnect at once; their audio keeps
+   playing because the generation is unchanged. The old coordinator's own device becomes a guest.
+4. On `ok:false` or no answer within 5 s: retry after 60 s, doubling up to 10 min (no flapping).
+5. **Graceful leave.** A coordinator that is only standing in (after failover) and leaves hands the room to the
+   first succession candidate the same way instead of closing it. The original host leaving ends the room (`bye`).
+6. **Step-down** (split-brain resolution). A coordinator that sees a discovery beacon of its own room with a higher
+   `epoch` (typically after its Wi-Fi came back) sends `redirect{thatEpoch, beacon address:port, stepdown}` to its
+   members, closes without `bye`, and its own device joins the higher-epoch coordinator as a guest. The handback
+   rule then returns the role to `pref`.
+7. **Rejoin after a crash.** The app stores the room id, name and join key of a room it created (app-private
+   storage; deleted when the user ends or leaves the party). When that room's beacon is seen, the home screen offers
+   "Rejoin your party"; the device joins as a guest and step 1 applies.
+8. **Not consensus.** Coordinator choice is deterministic priority (`pref`, then admission order) plus epoch
+   fencing; there are no quorums. During a partition both sides keep playing; they converge when beacons cross
+   again (step 6).
 
 ## 8. Track delivery (HTTP)
 

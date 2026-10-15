@@ -41,7 +41,11 @@ class Fixture {
   late final MemoryNetwork net = MemoryNetwork(clock: clock);
   late final RoomCoordinator coord;
 
-  Fixture(this.fa, {ParticipantRole defaultRole = ParticipantRole.listener, int maxParticipants = 16}) {
+  Fixture(this.fa,
+      {ParticipantRole defaultRole = ParticipantRole.listener,
+      int maxParticipants = 16,
+      String? preferredCoordinator,
+      int epoch = 1}) {
     coord = RoomCoordinator(
       options: CoordinatorOptions(
         roomId: 'room-1',
@@ -51,6 +55,8 @@ class Fixture {
         kdfIterations: 5,
         defaultRole: defaultRole,
         config: SyncConfig(membership: MembershipConfig(maxParticipants: maxParticipants)),
+        preferredCoordinator: preferredCoordinator,
+        coordinatorEpoch: epoch,
       ),
       clock: clock,
     );
@@ -69,16 +75,17 @@ class Fixture {
   }
 
   /// Completes the handshake; returns the client and the welcome.
-  (RawClient, WelcomeMsg?) join(String deviceId, {String key = kKey}) {
+  (RawClient, WelcomeMsg?) join(String deviceId,
+      {String key = kKey, DeviceCapabilities caps = const DeviceCapabilities(rateControl: true, backend: 'test')}) {
     final c = raw(deviceId);
     const nonce = 'client-nonce-123456';
-    c.send(const HelloMsg(
-      deviceId: 'x',
-      displayName: 'x',
+    c.send(HelloMsg(
+      deviceId: deviceId,
+      displayName: deviceId,
       platform: 'test',
       clientNonce: nonce,
-      caps: DeviceCapabilities(rateControl: true, backend: 'test'),
-    ).withDevice(deviceId));
+      caps: caps,
+    ));
     fa.elapse(const Duration(milliseconds: 10));
     final ch = c.last<ChallengeMsg>();
     if (ch == null) return (c, null);
@@ -98,14 +105,6 @@ class ManualClockFromFake implements MonotonicClock {
   int nowMicros() => fa.elapsed.inMicroseconds + 1000000;
 }
 
-extension on HelloMsg {
-  HelloMsg withDevice(String id) => HelloMsg(
-      deviceId: id,
-      displayName: id,
-      platform: platform,
-      clientNonce: clientNonce,
-      caps: caps);
-}
 
 void main() {
   test('join handshake: welcome with state, mutual proof and role', () {

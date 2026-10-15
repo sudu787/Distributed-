@@ -73,6 +73,17 @@ class RoomService {
   final RecorderFactory? recorderFor;
   final ConverterFactory? converterFor;
 
+  /// Port this device serves on if it becomes coordinator through failover or
+  /// handback (advertised to the room when joining).
+  final int failoverPort;
+
+  /// While coordinating, listen for discovery beacons of the same room with
+  /// a higher epoch and step down (split-brain resolution). Off in tests.
+  final bool watchForNewerCoordinator;
+
+  /// When a temporary host hands the role back to the original host.
+  final HandbackPolicy handbackPolicy;
+
   final EventLog log;
   RoomCoordinator? coordinator;
   ParticipantSession? session;
@@ -84,6 +95,8 @@ class RoomService {
   final Map<String, File> _served = {};
   DeviceIdentity? _identity;
   final List<StreamSubscription<Object?>> _subs = [];
+  RoomDiscovery? _watch;
+  StreamSubscription<List<RoomBeacon>>? _watchSub;
 
   /// True once this device took over as coordinator after the original
   /// host disappeared.
@@ -99,6 +112,9 @@ class RoomService {
     this.kdfIterations = kDefaultKdfIterations,
     this.recorderFor,
     this.converterFor,
+    this.failoverPort = kDefaultRoomPort,
+    this.watchForNewerCoordinator = true,
+    this.handbackPolicy = const HandbackPolicy(),
     EventLog? log,
   })  : clock = clock ?? SystemMonotonicClock.instance,
         log = log ?? EventLog(clock: clock ?? SystemMonotonicClock.instance, source: 'room', capacity: 3000);
@@ -130,6 +146,7 @@ class RoomService {
           defaultRole: openControl ? ParticipantRole.controller : ParticipantRole.listener,
           distribution: distribution,
           roomKey: key,
+          handback: handbackPolicy,
         ),
         clock: clock,
         log: log,
@@ -164,6 +181,10 @@ class RoomService {
         log.warn('discovery.beacon', 'cannot broadcast discovery beacons: ${e.message}');
       }
       info = RoomInfo(isHost: true, roomId: roomId, roomName: roomName, joinKey: joinKey, host: '127.0.0.1', port: _server!.port);
+      _attachCoordinator(coord);
+      // Remembered so this phone can rejoin and get the host role back if the
+      // app is closed or crashes (cleared when the party is ended on purpose).
+      await store.saveHostedRoom(HostedRoom(roomId: roomId, roomName: roomName, joinKey: joinKey, startedAt: DateTime.now()));
       await _startSession(identity, joinKey: joinKey, host: '127.0.0.1', port: _server!.port, roomId: roomId, key: key);
       await store.addRoomHistory(RoomHistoryEntry(
           roomId: roomId, roomName: roomName, host: 'this device', port: _server!.port, hosted: true, at: DateTime.now()));
@@ -175,9 +196,10 @@ class RoomService {
     }
   }
 
-  /// Failover: this device was elected successor. Starts serving the room
-  /// with the translated last state and returns a connector for our own
-  /// session.
+  /// Failover (this device was elected successor) or handback (this device
+  /// is the preferred host and the current coordinator handed the role
+  /// back). Starts serving the room with the translated last state and
+  /// returns a connector for our own session.
   Future<Connector> _promote(PromotionRequest req, DeviceIdentity identity) async {
     final library = await store.libraryTracks();
     _served
@@ -197,6 +219,7 @@ class RoomService {
         coordinatorEpoch: req.epoch,
         distribution: state.distribution,
         defaultRole: ParticipantRole.listener,
+        handback: handbackPolicy,
       ),
       clock: clock,
       log: log,
@@ -209,9 +232,9 @@ class RoomService {
       nowMs: () => clock.nowMicros() ~/ 1000,
       log: log,
     );
-    _server = await _bind(kDefaultRoomPort);
-    if (_server!.port != kDefaultRoomPort) {
-      log.warn('failover.port', 'port $kDefaultRoomPort busy; other members may not find this successor');
+    _server = await _bind(failoverPort);
+    if (_server!.port != failoverPort) {
+      log.warn('failover.port', 'port $failoverPort busy; other members may not find this coordinator');
     }
     coord.serve(_server!);
     coord.start();
@@ -230,11 +253,82 @@ class RoomService {
     } on SocketException catch (e) {
       log.warn('discovery.beacon', 'cannot broadcast discovery beacons: ${e.message}');
     }
-    promotedByFailover = true;
+    final preferred = state.preferredCoordinator == identity.deviceId;
+    promotedByFailover = !preferred;
     info = RoomInfo(
         isHost: true, roomId: state.roomId, roomName: state.roomName, joinKey: req.joinKey, host: '127.0.0.1', port: _server!.port);
-    log.warn('failover.host', 'this device is now the room coordinator (epoch ${req.epoch})');
+    _attachCoordinator(coord);
+    log.warn(
+        preferred ? 'handback.host' : 'failover.host',
+        preferred
+            ? 'this device is the host again (epoch ${req.epoch})'
+            : 'this device is now the room coordinator (epoch ${req.epoch})');
     return webSocketConnector('127.0.0.1', _server!.port);
+  }
+
+  /// Wiring shared by a hosted, a failed-over and a handed-back coordinator.
+  void _attachCoordinator(RoomCoordinator coord) {
+    coord.onSteppedDown = (endpoint, epoch, reason) => _onSteppedDown(coord, endpoint, epoch, reason);
+    _stopWatch();
+    if (!watchForNewerCoordinator) return;
+    final d = RoomDiscovery();
+    _watch = d;
+    unawaited(() async {
+      try {
+        await d.start();
+        if (!identical(_watch, d)) return;
+        _watchSub = d.rooms.listen((rooms) => rooms.forEach(handleBeacon));
+      } catch (e) {
+        log.warn('discovery.watch', 'cannot watch for other coordinators: $e');
+      }
+    }());
+  }
+
+  void _stopWatch() {
+    unawaited(_watchSub?.cancel());
+    _watchSub = null;
+    final w = _watch;
+    _watch = null;
+    if (w != null) unawaited(w.stop());
+  }
+
+  /// Split-brain resolution: a beacon for our room from a coordinator with a
+  /// higher epoch (e.g. after our Wi-Fi came back) means we must step down
+  /// and follow it.
+  void handleBeacon(RoomBeacon b) {
+    final c = coordinator;
+    final host = b.host;
+    if (c == null || host == null) return;
+    if (b.roomId != c.state.roomId || b.coordinatorEpoch <= c.state.coordinatorEpoch) return;
+    c.stepDown(endpoint: '$host:${b.port}', epoch: b.coordinatorEpoch);
+  }
+
+  /// The coordinator on this device redirected everyone elsewhere (handover
+  /// or step-down): stop serving, keep playing as a guest.
+  void _onSteppedDown(RoomCoordinator coord, String endpoint, int epoch, String reason) {
+    if (!identical(coordinator, coord)) return;
+    log.warn('room.stepdown',
+        reason == 'handover' ? 'host role handed to $endpoint (epoch $epoch)' : 'a newer coordinator runs at $endpoint; following it');
+    _stopWatch();
+    coordinator = null;
+    promotedByFailover = false;
+    _beacon?.stop();
+    _beacon = null;
+    final server = _server;
+    _server = null;
+    // Give the redirects time to flush before the listening socket goes away.
+    Timer(const Duration(seconds: 2), () => unawaited(server?.close()));
+    final i = info;
+    final sep = endpoint.lastIndexOf(':');
+    if (i != null) {
+      info = RoomInfo(
+        isHost: false,
+        roomId: i.roomId,
+        roomName: i.roomName,
+        host: endpoint.substring(0, sep),
+        port: int.tryParse(endpoint.substring(sep + 1)) ?? failoverPort,
+      );
+    }
   }
 
   Future<WebSocketServer> _bind(int port) async {
@@ -304,9 +398,9 @@ class RoomService {
         keyDeriver: (r, k, i) => key != null && key.roomId == r && key.iterations == i
             ? Future.value(key)
             : keyDeriver(r, k, i),
-        // Guests can take over if the host disappears (see docs/roadmap.md);
-        // the host itself has nobody to fail over to.
-        failover: key == null ? _AppFailover(this, identity) : null,
+        // Every phone can take over if the coordinator disappears, follow a
+        // redirect, and receive the role back (handback); see failover.dart.
+        failover: _AppFailover(this, identity),
         recorder: recorderFor?.call(backend),
         calibrationTracks: FileCalibrationTrackFactory(Directory('${cacheDir.path}/calibration')),
       ),
@@ -374,6 +468,7 @@ class RoomService {
   /// Test hook: kills hosting abruptly (no `bye`), as if the app crashed,
   /// so guests exercise failover.
   Future<void> crashForTesting() async {
+    _stopWatch();
     _cancelSubs();
     final c = coordinator;
     coordinator = null;
@@ -413,19 +508,39 @@ class RoomService {
     return _identity;
   }
 
-  Future<void> leave() async {
+  /// Leaves the party. The original host ends it for everyone ([endParty]);
+  /// a temporary host (after failover) hands it to another phone first.
+  Future<void> leave({bool endParty = true}) async {
     try {
       await persistCalibration();
     } catch (e) {
       log.warn('room.persist', 'could not save calibration: $e');
     }
+    final c = coordinator;
+    // A phone that only stepped in for the host hands the party on rather
+    // than ending it (planned leadership transfer).
+    if (c != null && (promotedByFailover || !endParty)) {
+      try {
+        if (await c.handOff().timeout(const Duration(seconds: 8), onTimeout: () => false)) {
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+        }
+      } catch (e) {
+        log.warn('room.handoff', 'hand-off failed: $e');
+      }
+    }
+    // Leaving on purpose: no "Rejoin your party" offer afterwards. (A crash
+    // or a closed app never gets here, so the offer survives those.)
+    final hosted = await store.hostedRoom();
+    if (endParty && hosted != null && hosted.roomId == info?.roomId) {
+      await store.saveHostedRoom(null);
+    }
+    _stopWatch();
     _cancelSubs();
     final s = session;
     session = null;
     if (s != null) await s.leave();
     _beacon?.stop();
     _beacon = null;
-    final c = coordinator;
     coordinator = null;
     if (c != null) await c.close(reason: 'host left; room closed');
     await _server?.close();
@@ -444,7 +559,7 @@ class _AppFailover implements FailoverDelegate {
   _AppFailover(this.service, this.identity);
 
   @override
-  int get failoverPort => kDefaultRoomPort;
+  int get failoverPort => service.failoverPort;
 
   @override
   Future<Connector> promote(PromotionRequest request) => service._promote(request, identity);

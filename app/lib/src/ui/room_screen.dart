@@ -176,6 +176,11 @@ class SpeakersView extends ConsumerWidget {
       padding: const EdgeInsets.only(bottom: 24),
       children: [
         if (s.isHost && others == 0) const _InviteBanner(),
+        if (room.preferredCoordinator != null && room.preferredCoordinator != room.coordinatorId)
+          _TemporaryHostNote(
+            hostName: room.participant(room.coordinatorId)?.displayName ?? 'Another phone',
+            ownerName: room.participant(room.preferredCoordinator!)?.displayName,
+          ),
         const _ListeningSpot(),
         const SectionHeader('Phones'),
         for (final p in room.participants)
@@ -191,6 +196,26 @@ class SpeakersView extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// Shown after a takeover: who is hosting now and that the original host
+/// gets the role back when it returns.
+class _TemporaryHostNote extends StatelessWidget {
+  final String hostName;
+  final String? ownerName;
+  const _TemporaryHostNote({required this.hostName, required this.ownerName});
+
+  @override
+  Widget build(BuildContext context) => Card(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: ListTile(
+          leading: const Icon(Icons.swap_horiz),
+          title: Text('$hostName is hosting for now'),
+          subtitle: Text(ownerName == null
+              ? 'The phone that started the party is away. It gets the host role back automatically when it rejoins.'
+              : '$ownerName is back and will take over again in a few seconds.'),
+        ),
+      );
 }
 
 class _InviteBanner extends ConsumerWidget {

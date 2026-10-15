@@ -64,15 +64,53 @@ class FailoverPolicy {
   });
 }
 
-/// Ordered failover candidates as seen in [s] (admission order).
-List<ParticipantSummary> successionOrder(RoomState s) => [
-      for (final p in s.participants)
-        if (p.canHost &&
-            p.endpoint != null &&
-            p.deviceId != s.coordinatorId &&
-            p.connection != ConnectionStatus.disconnected)
-          p
-    ];
+/// Ordered failover candidates as seen in [s]: the preferred coordinator
+/// (original host) first if eligible, then admission order. Every member
+/// derives the same order from the same replicated state, so no election
+/// messages are needed (a Bully-style priority order).
+List<ParticipantSummary> successionOrder(RoomState s) {
+  final eligible = [
+    for (final p in s.participants)
+      if (p.canHost &&
+          p.endpoint != null &&
+          p.deviceId != s.coordinatorId &&
+          p.connection != ConnectionStatus.disconnected)
+        p
+  ];
+  final pref = s.preferredCoordinator;
+  final i = pref == null ? -1 : eligible.indexWhere((p) => p.deviceId == pref);
+  if (i > 0) eligible.insert(0, eligible.removeAt(i));
+  return eligible;
+}
+
+/// When a successor hands the coordinator role back to the preferred device.
+class HandbackPolicy {
+  /// The preferred device must have been connected without interruption
+  /// for this long (hysteresis against a flaky device bouncing the role).
+  final Duration stableFor;
+
+  /// Its reported clock uncertainty must be below this (when it reports).
+  final Duration maxUncertainty;
+
+  /// How long to wait for [HandoverAckMsg] before giving up.
+  final Duration ackTimeout;
+
+  /// Wait after a failed attempt; doubles on every failure (capped).
+  final Duration backoff;
+  final Duration maxBackoff;
+
+  /// Grace between redirecting members and closing the old coordinator.
+  final Duration closeDelay;
+
+  const HandbackPolicy({
+    this.stableFor = const Duration(seconds: 10),
+    this.maxUncertainty = const Duration(milliseconds: 20),
+    this.ackTimeout = const Duration(seconds: 5),
+    this.backoff = const Duration(seconds: 60),
+    this.maxBackoff = const Duration(minutes: 10),
+    this.closeDelay = const Duration(milliseconds: 500),
+  });
+}
 
 /// Translates [s] for a coordinator running on the device whose clock
 /// estimate of the *old* coordinator is [estimate]: coordinator-domain

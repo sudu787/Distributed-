@@ -86,6 +86,7 @@ flowchart LR
 | 7. Audio Distribution | `distribution/` (hashing, HTTP server, resumable downloader, cache, resolver). |
 | 8. Observability | `observability/event_log.dart` and `stats.dart`, sync reports, the diagnostics broadcast, and the simulator's ground-truth metrics. |
 | Acoustic calibration | `calibration/` (click tracks, onset detection, `combineCalibration`, `CalibrationListener`), `model/calibration_plan.dart`, and the coordinator's calibration mode ([protocol §5.1](protocol.md#51-acoustic-calibration)). Android: `MicRecorder.kt` + `AndroidCalibrationRecorder`. |
+| Failover and handback | `participant/failover.dart` (succession order, translation, `HandbackPolicy`), `RoomCoordinator` (`_maybeHandback`, `handOff`, `stepDown`), `ParticipantSession` (`handover`, `redirect`); app: `RoomService` (promotion, step-down via beacons, rejoin), "Rejoin your party" card. |
 | Exact seeking | `distribution/exact_seek.dart` (`ConvertingTrackResolver`, format sniffing); Android `TrackTranscoder.kt` decodes MP3/ADTS to PCM WAV ([why](android-audio.md#seeking-accuracy-and-exact-seek-copies)). |
 | Join links | `discovery/join_link.dart` (format, strict parser, LAN address ranking); QR display, scanner and deep-link route in the app. |
 | Background playback | `PlaybackService.kt` (foreground service + notification), `BackgroundPlayback` (Dart), wired through the app's `PlatformHooks`. |

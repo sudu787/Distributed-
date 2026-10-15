@@ -22,6 +22,7 @@ import '../calibration/calibration_analysis.dart';
 import '../model/calibration_plan.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
+import '../participant/failover.dart' show HandbackPolicy, successionOrder;
 import '../protocol/auth.dart';
 import '../protocol/codec.dart';
 import '../protocol/messages.dart';
@@ -52,6 +53,14 @@ class CoordinatorOptions {
   /// background isolate and pass it here to keep the UI responsive.
   final RoomKey? roomKey;
 
+  /// Device that should coordinate whenever present (default for a new
+  /// room: [coordinatorId]). A restored state keeps its own preference.
+  final String? preferredCoordinator;
+
+  /// When to hand the role back to [preferredCoordinator] (if this
+  /// coordinator is a successor).
+  final HandbackPolicy handback;
+
   const CoordinatorOptions({
     required this.roomId,
     required this.roomName,
@@ -65,6 +74,8 @@ class CoordinatorOptions {
     this.coordinatorEpoch = 1,
     this.maxPendingHandshakes = 32,
     this.roomKey,
+    this.preferredCoordinator,
+    this.handback = const HandbackPolicy(),
   });
 }
 
@@ -150,6 +161,17 @@ class RoomCoordinator {
   final Random _random;
   List<String> _shuffleOrder = const [];
 
+  // Handback (planned leadership transfer to the preferred coordinator).
+  ({String deviceId, int epoch, int deadlineUs, Completer<bool>? done})? _handover;
+  int _handbackNotBeforeUs = 0;
+  Duration? _handbackBackoff;
+  bool _redirected = false;
+
+  /// Called once this coordinator has redirected its members to another
+  /// coordinator (handover completed or split-brain step-down) and is about
+  /// to close. The app tears down its server and keeps playing as a guest.
+  void Function(String endpoint, int epoch, String reason)? onSteppedDown;
+
   RoomCoordinator({
     required this.options,
     required this.clock,
@@ -183,6 +205,7 @@ class RoomCoordinator {
           version: 1,
           timeline: const PlaybackTimeline.idle(),
           distribution: options.distribution,
+          preferredCoordinator: options.preferredCoordinator ?? options.coordinatorId,
         );
     _timelineVersion = _state.version;
     if (restoredState != null) {
@@ -252,14 +275,21 @@ class RoomCoordinator {
     _tickTimer?.cancel();
     _diagTimer?.cancel();
     _calibrationTimer?.cancel();
+    // Stop accepting, but do not wait for it: closing the member links must
+    // not depend on the acceptor (a stuck cancel kept a handed-over
+    // coordinator half-open).
     for (final s in _acceptorSubs) {
-      await s.cancel();
+      unawaited(s.cancel());
     }
     for (final l in _links.toList()) {
-      if (l.hs == _Hs.active) _send(l, ByeMsg(reason));
+      // After a redirect members reconnect elsewhere; a bye would end their
+      // session.
+      if (l.hs == _Hs.active && !_redirected) _send(l, ByeMsg(reason));
       l.handshakeTimer?.cancel();
-      await l.sub?.cancel();
-      await l.conn.close(reason);
+      l.hs = _Hs.closed;
+      // Fire and forget: closing must not hang on a subscription cancel.
+      unawaited(l.sub?.cancel());
+      unawaited(l.conn.close(reason));
     }
     _links.clear();
     log.info('room.close', 'room closed: $reason');
@@ -277,13 +307,13 @@ class RoomCoordinator {
     _diagTimer?.cancel();
     _calibrationTimer?.cancel();
     for (final s in _acceptorSubs) {
-      await s.cancel();
+      unawaited(s.cancel());
     }
     for (final l in _links.toList()) {
       l.hs = _Hs.closed;
       l.handshakeTimer?.cancel();
-      await l.sub?.cancel();
-      await l.conn.close('aborted');
+      unawaited(l.sub?.cancel());
+      unawaited(l.conn.close('aborted'));
     }
     _links.clear();
     log.warn('room.abort', 'coordinator aborted');
@@ -336,7 +366,7 @@ class RoomCoordinator {
 
   void _onFrame(_PeerLink link, String frame) {
     final t2 = clock.nowMicros(); // receive timestamp, before any parsing
-    if (link.hs == _Hs.closed) return;
+    if (_closed || link.hs == _Hs.closed) return;
     final Message msg;
     try {
       msg = link.codec.decode(frame);
@@ -581,6 +611,8 @@ class RoomCoordinator {
         }
       case CalibrationResultMsg():
         _onCalibrationResult(m, msg);
+      case HandoverAckMsg():
+        _onHandoverAck(m, msg);
       case PlaybackEventMsg():
         _onPlaybackEvent(m, msg);
       case AvailabilityMsg():
@@ -1119,6 +1151,122 @@ class RoomCoordinator {
   void _tick() {
     _checkBarrier();
     _autoAdvance();
+    _maybeHandback();
+  }
+
+  // ------------------------------------------------------------ handback
+
+  /// Preferred-leader rebalancing: when this coordinator is a successor and
+  /// the preferred device (original host) has been back and healthy for
+  /// [HandbackPolicy.stableFor], transfer the role to it without stopping
+  /// playback (the timeline and generation carry over, like in failover).
+  void _maybeHandback() {
+    if (_closed || _redirected) return;
+    final now = clock.nowMicros();
+    final h = _handover;
+    if (h != null) {
+      if (now >= h.deadlineUs) _handbackFailed('no answer from the preferred host');
+      return;
+    }
+    final pref = _state.preferredCoordinator;
+    if (pref == null || pref == options.coordinatorId || now < _handbackNotBeforeUs) return;
+    final m = _members.byDevice(pref);
+    if (m == null || m.connection != ConnectionStatus.connected || m.endpoint == null || !m.caps.canHost) return;
+    final policy = options.handback;
+    final since = m.stableSinceUs;
+    if (since == null || now - since < policy.stableFor.inMicroseconds) return;
+    // Not while a start is being negotiated or a calibration runs.
+    if (_state.pending != null || _barrier != null || _state.calibration != null) return;
+    if (m.lastReportAtUs != null && m.uncertaintyUs > policy.maxUncertainty.inMicroseconds) return;
+    log.info('handback.start', 'handing the host role back to ${m.displayName} (epoch ${options.coordinatorEpoch + 1})',
+        {'device': m.deviceId});
+    _startHandover(m);
+  }
+
+  bool _startHandover(Member m, {Completer<bool>? done}) {
+    final link = _linkOf(m);
+    if (link == null) return false;
+    final epoch = options.coordinatorEpoch + 1;
+    _handover = (
+      deviceId: m.deviceId,
+      epoch: epoch,
+      deadlineUs: clock.nowMicros() + options.handback.ackTimeout.inMicroseconds,
+      done: done,
+    );
+    _send(link, HandoverMsg(epoch: epoch, state: _state));
+    return true;
+  }
+
+  /// Graceful leave of a coordinator: hands the room to the next device in
+  /// succession order (the preferred host first) instead of closing it.
+  /// Completes with true once members were redirected; false if no device
+  /// could take over (the caller then closes the room).
+  Future<bool> handOff() async {
+    if (_closed || _redirected) return false;
+    if (_handover != null) _handbackFailed('superseded by hand-off');
+    for (final p in successionOrder(_state)) {
+      final m = _members.byDevice(p.deviceId);
+      if (m == null || m.connection != ConnectionStatus.connected) continue;
+      final done = Completer<bool>();
+      if (!_startHandover(m, done: done)) continue;
+      log.info('handoff.start', 'leaving: handing the room to ${m.displayName}', {'device': m.deviceId});
+      if (await done.future) return true;
+    }
+    return false;
+  }
+
+  void _onHandoverAck(Member m, HandoverAckMsg a) {
+    final h = _handover;
+    if (h == null || h.deviceId != m.deviceId || h.epoch != a.epoch) return;
+    if (!a.ok) {
+      _handbackFailed('${m.displayName} declined: ${a.error ?? 'unknown reason'}');
+      return;
+    }
+    _handover = null;
+    _handbackBackoff = null;
+    log.info('handback.done', '${m.displayName} is the coordinator now (epoch ${a.epoch})', {'device': m.deviceId});
+    h.done?.complete(true);
+    _redirectAndClose(m.endpoint!, a.epoch, 'handover', except: m.deviceId);
+  }
+
+  void _handbackFailed(String why) {
+    final policy = options.handback;
+    final backoff = _handbackBackoff == null
+        ? policy.backoff
+        : Duration(microseconds: min(_handbackBackoff!.inMicroseconds * 2, policy.maxBackoff.inMicroseconds));
+    _handbackBackoff = backoff;
+    _handover?.done?.complete(false);
+    _handover = null;
+    _handbackNotBeforeUs = clock.nowMicros() + backoff.inMicroseconds;
+    log.warn('handback.failed', 'handback failed ($why); retrying in ${backoff.inSeconds} s');
+  }
+
+  /// Split-brain resolution: another coordinator for this room runs at a
+  /// higher [epoch] (e.g. learned from its discovery beacon after a network
+  /// partition healed). Redirects every member there and closes.
+  void stepDown({required String endpoint, required int epoch, String reason = 'stepdown'}) {
+    if (_closed || _redirected || epoch <= options.coordinatorEpoch) return;
+    log.warn('coordinator.stepdown', 'coordinator epoch $epoch is active at $endpoint; stepping down from epoch ${options.coordinatorEpoch}');
+    _redirectAndClose(endpoint, epoch, reason);
+  }
+
+  void _redirectAndClose(String endpoint, int epoch, String reason, {String? except}) {
+    _redirected = true;
+    for (final l in _links.toList()) {
+      if (l.hs == _Hs.active && l.member?.deviceId != except) {
+        _send(l, RedirectMsg(epoch: epoch, endpoint: endpoint, reason: reason));
+      }
+    }
+    _flushPublish();
+    onSteppedDown?.call(endpoint, epoch, reason);
+    Timer(options.handback.closeDelay, () => close(reason: reason));
+  }
+
+  _PeerLink? _linkOf(Member m) {
+    for (final l in _links) {
+      if (l.hs == _Hs.active && l.member?.deviceId == m.deviceId && l.memberEpoch == m.linkEpoch) return l;
+    }
+    return null;
   }
 
   /// Prepares the next track shortly before the current one ends and starts

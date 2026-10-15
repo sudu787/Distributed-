@@ -239,6 +239,136 @@ void main() {
     expect(hooks.left, 1);
     expect((await store.loadIdentity(defaultName: 'x')).outputCalibrationUs, -30000);
   });
+
+  test('3 phones: host crashes, next phone hosts, host rejoins and gets the role back (real sockets)', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    final hostStore = MemoryAppStore();
+    Future<(RoomService, DeviceIdentity)> device(String name, int port, {AppStore? store, List<LibraryTrack> tracks = const []}) async {
+      final st = store ?? MemoryAppStore();
+      for (final t in tracks) {
+        await st.upsertTrack(t);
+      }
+      final svc = RoomService(
+        store: st,
+        cacheDir: Directory('${tmp.path}/fb-cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+        failoverPort: port,
+        watchForNewerCoordinator: false,
+        handbackPolicy: const HandbackPolicy(stableFor: Duration(seconds: 2)),
+      );
+      return (svc, await st.loadIdentity(defaultName: name));
+    }
+
+    Future<void> waitFor(bool Function() cond, String what, {int seconds = 25}) async {
+      final deadline = DateTime.now().add(Duration(seconds: seconds));
+      while (!cond()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    final lib = LibraryService(store: MemoryAppStore(), libraryDir: Directory('${tmp.path}/fb-lib'), log: EventLog(clock: clock));
+    final track = await lib.import(await audioFile('fb.mp3', 9));
+    var (host, hostId) = await device('host', 47921, store: hostStore, tracks: [track]);
+    final (b, bId) = await device('b', 47922, tracks: [track]);
+    final (c, cId) = await device('c', 47923, tracks: [track]);
+    final info = await host.host(identity: hostId, roomName: 'Comeback', tracks: [track], port: 0, openControl: true);
+    expect((await hostStore.hostedRoom())!.roomId, info.roomId, reason: 'remembered for rejoining');
+    await b.join(identity: bId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await c.join(identity: cId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    expect((await c.session!.control(ControlAction.play)).accepted, isTrue);
+    await waitFor(() {
+      final g = host.coordinator?.state.timeline;
+      return g != null && g.isPlaying && b.session!.engine.status.activeGeneration == g.generation &&
+          c.session!.engine.status.activeGeneration == g.generation;
+    }, 'synchronized start');
+    final gen = host.coordinator!.state.timeline.generation;
+
+    // The host phone dies (app crash): the next phone takes over.
+    await host.crashForTesting();
+    await waitFor(() => b.coordinator != null && c.session!.state?.coordinatorEpoch == 2 && c.session!.isLive, 'takeover by b');
+    expect(b.info!.isHost, isTrue);
+
+    // The host app restarts (same identity and saved party) and rejoins.
+    (host, _) = await device('host', 47921, store: hostStore, tracks: [track]);
+    final saved = (await hostStore.hostedRoom())!;
+    await host.join(identity: hostId, host: '127.0.0.1', port: 47922, joinKey: saved.joinKey, roomId: saved.roomId);
+    await waitFor(
+        () => host.coordinator != null &&
+            b.coordinator == null &&
+            b.session!.state?.coordinatorEpoch == 3 &&
+            c.session!.state?.coordinatorEpoch == 3 &&
+            b.session!.isLive &&
+            c.session!.isLive &&
+            host.session!.isLive &&
+            host.session!.state?.coordinatorEpoch == 3,
+        'handback to the original host');
+    expect(host.info!.isHost, isTrue);
+    expect(b.info!.isHost, isFalse);
+    expect(host.coordinator!.state.coordinatorId, hostId.deviceId);
+    expect(host.coordinator!.state.timeline.generation, gen, reason: 'same timeline: music never restarted');
+    expect(c.session!.engine.status.activeGeneration, gen);
+    final roles = {for (final p in host.coordinator!.state.participants) p.deviceId: p.role};
+    expect(roles[hostId.deviceId], ParticipantRole.host);
+
+    // Control works through the original host again.
+    expect((await c.session!.control(ControlAction.seek, positionUs: 20000000)).accepted, isTrue);
+    await waitFor(() => c.session!.engine.status.activeGeneration == host.coordinator!.state.timeline.generation &&
+        host.coordinator!.state.timeline.generation > gen, 'seek after handback');
+
+    await c.leave();
+    await b.leave();
+    await host.leave();
+    expect(await hostStore.hostedRoom(), isNull, reason: 'ending the party on purpose forgets it');
+  });
+
+  test('a temporary host that leaves hands the party on instead of ending it', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    Future<(RoomService, DeviceIdentity)> device(String name, int port, List<LibraryTrack> tracks) async {
+      final st = MemoryAppStore();
+      for (final t in tracks) {
+        await st.upsertTrack(t);
+      }
+      final svc = RoomService(
+        store: st,
+        cacheDir: Directory('${tmp.path}/ho-cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+        failoverPort: port,
+        watchForNewerCoordinator: false,
+      );
+      return (svc, await st.loadIdentity(defaultName: name));
+    }
+
+    Future<void> waitFor(bool Function() cond, String what) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 25));
+      while (!cond()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    final lib = LibraryService(store: MemoryAppStore(), libraryDir: Directory('${tmp.path}/ho-lib'), log: EventLog(clock: clock));
+    final track = await lib.import(await audioFile('ho.mp3', 11));
+    final (host, hostId) = await device('host', 47931, [track]);
+    final (b, bId) = await device('b', 47932, [track]);
+    final (c, cId) = await device('c', 47933, [track]);
+    final info = await host.host(identity: hostId, roomName: 'Relay', tracks: [track], port: 0, openControl: true);
+    await b.join(identity: bId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await c.join(identity: cId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await host.crashForTesting();
+    await waitFor(() => b.coordinator != null && c.session!.state?.coordinatorEpoch == 2 && c.session!.isLive, 'takeover by b');
+
+    await b.leave(); // temporary host leaves: c takes over (epoch 3), party continues
+    await waitFor(() => c.coordinator != null && c.session!.isLive && c.session!.state?.coordinatorEpoch == 3, 'hand-off to c');
+    expect(c.session!.phase, isNot(SessionPhase.failed));
+    await c.leave();
+  });
 }
 
 class _RecordingHooks extends PlatformHooks {

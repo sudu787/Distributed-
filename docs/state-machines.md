@@ -170,3 +170,36 @@ sequenceDiagram
 
 If no candidate exists (or failover is disabled), participants retry with backoff for ~3–4 minutes and then report
 "coordinator unreachable; the room may need to be recreated".
+
+## Sequence: original host returns (handback)
+
+```mermaid
+sequenceDiagram
+  participant H as Original host (pref)
+  participant A as Stand-in coordinator A (epoch 2)
+  participant B as Guest B
+  H->>A: rejoins as a guest (one tap "Rejoin your party"; or its Wi-Fi came back and it stepped down)
+  A->>A: H connected, synced, no pending start, 10 s without interruption
+  A->>H: handover {epoch 3, state}
+  H->>H: translate timeline into own clock, keep generation, start coordinator (epoch 3)
+  H->>A: handover.ack {ok}
+  A->>B: redirect {epoch 3, H:47800}
+  A--xB: close (no bye) after 0.5 s; A's own device is now a guest
+  B->>H: hello / auth; welcome {epoch 3, same generation}: audio never stopped
+  A->>H: hello / auth (guest)
+```
+
+Coordinator role of one device:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Guest
+  [*] --> Host: creates the room (pref = this device)
+  Guest --> StandIn: coordinator lost and first in succession order (epoch+1)
+  Guest --> Host: handover from a stand-in (pref = this device, epoch+1)
+  StandIn --> Guest: handback / hand-off to another device (redirect)
+  Host --> Guest: higher epoch seen in a beacon (step-down)
+  StandIn --> Guest: higher epoch seen in a beacon (step-down)
+  Host --> [*]: ends the party (bye)
+```
+

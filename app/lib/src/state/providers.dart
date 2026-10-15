@@ -62,6 +62,9 @@ final libraryProvider = AsyncNotifierProvider<LibraryNotifier, List<LibraryTrack
 
 final roomHistoryProvider = FutureProvider<List<RoomHistoryEntry>>((ref) => ref.read(appStoreProvider).roomHistory());
 
+/// The party this phone created and has not ended (for "Rejoin your party").
+final hostedRoomProvider = FutureProvider<HostedRoom?>((ref) => ref.read(appStoreProvider).hostedRoom());
+
 final networkSummaryProvider = FutureProvider<NetworkSummary>((ref) => readNetworkSummary());
 
 /// Live list of rooms announced on the LAN. Listening stops when no screen

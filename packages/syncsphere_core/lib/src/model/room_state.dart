@@ -381,6 +381,11 @@ class RoomState {
   /// playlist).
   final CalibrationPlan? calibration;
 
+  /// The device that should be coordinator whenever it is present (the
+  /// original host). A successor hands the role back to it (see
+  /// `participant/failover.dart`). Null: no preference.
+  final String? preferredCoordinator;
+
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -396,6 +401,7 @@ class RoomState {
     this.repeat = PlaylistRepeat.off,
     this.shuffle = false,
     this.calibration,
+    this.preferredCoordinator,
   });
 
   TrackInfo? trackById(String? id) {
@@ -437,6 +443,7 @@ class RoomState {
     bool? shuffle,
     CalibrationPlan? calibration,
     bool clearCalibration = false,
+    String? preferredCoordinator,
   }) =>
       RoomState(
         roomId: roomId,
@@ -453,6 +460,7 @@ class RoomState {
         repeat: repeat ?? this.repeat,
         shuffle: shuffle ?? this.shuffle,
         calibration: clearCalibration ? null : (calibration ?? this.calibration),
+        preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
       );
 
   Map<String, Object?> toJson() => {
@@ -470,6 +478,7 @@ class RoomState {
         if (repeat != PlaylistRepeat.off) 'rep': repeat.name,
         if (shuffle) 'shuf': true,
         if (calibration != null) 'cal': calibration!.toJson(),
+        if (preferredCoordinator != null) 'pref': preferredCoordinator,
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -497,6 +506,7 @@ class RoomState {
       repeat: r.optEnum('rep', PlaylistRepeat.values) ?? PlaylistRepeat.off,
       shuffle: r.optBoolean('shuf') ?? false,
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
+      preferredCoordinator: r.optString('pref', maxLength: 64),
     );
   }
 }

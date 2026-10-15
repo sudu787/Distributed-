@@ -132,6 +132,14 @@ class ChannelRoleAction extends SimAction {
   String get label => 'channel(p$participant, ${role.name})';
 }
 
+/// The killed original host (device 0) comes back and rejoins as a guest; with
+/// failover enabled the current coordinator hands the role back to it.
+class ReviveCoordinatorAction extends SimAction {
+  const ReviveCoordinatorAction();
+  @override
+  String get label => 'revive-host';
+}
+
 /// Kills the host device (coordinator process and the host's own player).
 /// Participants must detect it and either fail over or report it.
 class KillCoordinatorAction extends SimAction {
@@ -165,8 +173,12 @@ class Scenario {
   /// Per-participant acoustic calibration (µs), cycled like [profiles].
   final List<int> outputCalibrationUs;
 
-  /// Enables coordinator failover by succession on all non-host devices.
+  /// Enables coordinator failover by succession (and handback to the
+  /// original host when it returns).
   final bool failover;
+
+  /// When a successor hands the role back to the original host.
+  final HandbackPolicy handback;
 
   /// Device whose position defines "what the listener hears": it gets a
   /// (simulated) microphone, and ground truth additionally reports the
@@ -191,6 +203,7 @@ class Scenario {
     this.trackDuration = const Duration(minutes: 30),
     this.outputCalibrationUs = const [0],
     this.failover = false,
+    this.handback = const HandbackPolicy(),
     this.listenerIndex,
     this.distancesM = const [1.0],
   });
@@ -206,6 +219,7 @@ class Scenario {
         'audioPpmRange': audioPpmRange,
         'seed': seed,
         if (failover) 'failover': true,
+        if (failover) 'handbackStableForS': handback.stableFor.inSeconds,
         if (listenerIndex != null) 'listener': listenerIndex,
         if (listenerIndex != null) 'distancesM': distancesM,
       };
@@ -215,11 +229,12 @@ class _SimDevice {
   final int index;
   final String id;
   final DerivedClock clock;
+  final DeviceAudioProfile profile;
   final SimulatedAudioBackend backend;
   final Link link;
   final ParticipantSession session;
   final EventLog log;
-  _SimDevice(this.index, this.id, this.clock, this.backend, this.link, this.session, this.log);
+  _SimDevice(this.index, this.id, this.clock, this.profile, this.backend, this.link, this.session, this.log);
 }
 
 /// One ground-truth sample of the room at a true instant.
@@ -328,6 +343,11 @@ class SimulationRunner {
     int? killedAtUs;
     int? promotedAtUs;
     String? promotedDevice;
+    int? handbackAtUs;
+    String? handbackDevice;
+    final coordinatorHistory = <Map<String, Object?>>[
+      {'trueMs': 0, 'device': 'device-0', 'epoch': 1}
+    ];
     final simEvents = <Map<String, Object?>>[];
     void logEvent(String what, [Map<String, Object?> data = const {}]) {
       simEvents.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'event': what, ...data});
@@ -335,24 +355,14 @@ class SimulationRunner {
 
     const loopback = LinkProfile(base: Duration(microseconds: 80));
     final devices = <_SimDevice>[];
-    for (var i = 0; i < sc.participants; i++) {
+    // Builds device [i]'s player and session. Used at start and when a
+    // killed device comes back (ReviveCoordinatorAction).
+    _SimDevice buildDevice(int i, DerivedClock clk, DeviceAudioProfile profile, Link link, String address) {
       final id = 'device-$i';
-      final clk = i == 0
-          ? hostClock
-          : DerivedClock(
-              referenceMicros: trueNow,
-              offsetMicros: rnd.nextInt(1 << 30),
-              skewPpm: uniform(sc.clockSkewPpmRange));
-      final profile = sc.profiles[i % sc.profiles.length].withClockPpm(uniform(sc.audioPpmRange));
       final backend = SimulatedAudioBackend(
-          profile: profile, trueNowUs: trueNow, localClock: clk, random: Random(sc.seed * 100 + i));
-      final link = i == 0
-          ? Link(
-              uplink: const LinkProfile(base: Duration(microseconds: 80)),
-              downlink: const LinkProfile(base: Duration(microseconds: 80)))
-          : Link(uplink: sc.network.uplink, downlink: sc.network.downlink);
+          profile: profile, trueNowUs: trueNow, localClock: clk, random: Random(sc.seed * 100 + i + 17 * devices.length));
       final log = EventLog(clock: clk, source: id);
-      final failover = sc.failover && i > 0
+      final failover = sc.failover
           ? _SimFailover(
               id: id,
               net: net,
@@ -369,22 +379,31 @@ class SimulationRunner {
                     config: sc.config,
                     defaultRole: ParticipantRole.controller,
                     coordinatorEpoch: req.epoch,
+                    handback: sc.handback,
                   ),
                   clock: clk,
                   log: EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer),
                   restoredState: req.state,
                 );
+                final previous = coordinator;
                 c.serve(net.listen('coord-$id'));
                 c.start();
                 coordinator = c;
                 coordClock = clk;
                 coordAddress = 'coord-$id';
                 coordDeviceIndex = i;
+                final planned = !coordinatorKilled && !identical(previous, c);
                 coordinatorKilled = false;
-                promotedAtUs = trueNow();
-                promotedDevice = id;
+                if (planned) {
+                  handbackAtUs = trueNow();
+                  handbackDevice = id;
+                } else {
+                  promotedAtUs = trueNow();
+                  promotedDevice = id;
+                }
+                coordinatorHistory.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'device': id, 'epoch': req.epoch});
                 watchTimelines(c, clk);
-                logEvent('promoted', {'device': id, 'epoch': req.epoch});
+                logEvent(planned ? 'handback' : 'promoted', {'device': id, 'epoch': req.epoch});
                 return net.connector(id, 'coord-$id', Link(uplink: loopback, downlink: loopback));
               },
             )
@@ -409,12 +428,12 @@ class SimulationRunner {
               : null,
           calibrationTracks: const _SimCalibrationTracks(),
         ),
-        connector: net.connector(id, 'coordinator', link),
+        connector: net.connector(id, address, link),
         clock: clk,
         backend: backend,
         resolver: StaticTrackResolver(localFiles),
         log: log,
-        random: Random(sc.seed * 1000 + i),
+        random: Random(sc.seed * 1000 + i + 31 * devices.length),
       );
       if (verbose) {
         log.printer = (src, e) {
@@ -422,7 +441,23 @@ class SimulationRunner {
           if (e.level.index >= EventLevel.info.index) print('$src $e');
         };
       }
-      devices.add(_SimDevice(i, id, clk, backend, link, session, log));
+      return _SimDevice(i, id, clk, profile, backend, link, session, log);
+    }
+
+    for (var i = 0; i < sc.participants; i++) {
+      final clk = i == 0
+          ? hostClock
+          : DerivedClock(
+              referenceMicros: trueNow,
+              offsetMicros: rnd.nextInt(1 << 30),
+              skewPpm: uniform(sc.clockSkewPpmRange));
+      final profile = sc.profiles[i % sc.profiles.length].withClockPpm(uniform(sc.audioPpmRange));
+      final link = i == 0
+          ? Link(
+              uplink: const LinkProfile(base: Duration(microseconds: 80)),
+              downlink: const LinkProfile(base: Duration(microseconds: 80)))
+          : Link(uplink: sc.network.uplink, downlink: sc.network.downlink);
+      devices.add(buildDevice(i, clk, profile, link, 'coordinator'));
     }
     if (verbose) {
       coordLog.printer = (src, e) {
@@ -583,8 +618,20 @@ class SimulationRunner {
           dead.add(hostDev.id);
           logEvent('killed', {'device': hostDev.id});
           net.killServer(coordAddress);
-          unawaited(coordinator.close(reason: 'killed'));
+          unawaited(coordinator.abort());
           unawaited(hostDev.session.close());
+        case ReviveCoordinatorAction():
+          // The original host (device 0) comes back, like an app restart:
+          // fresh session, joins the current coordinator as a guest.
+          final old = devices[0];
+          if (!dead.remove(old.id)) throw StateError('ReviveCoordinatorAction: device-0 is not dead');
+          final revived = buildDevice(0, old.clock, old.profile,
+              Link(uplink: sc.network.uplink, downlink: sc.network.downlink), coordAddress);
+          devices[0] = revived;
+          logEvent('revived', {'device': old.id});
+          unawaited(revived.session.start().catchError((Object e) {
+            revived.log.error('sim', 'session failed: $e');
+          }));
       }
     }
     final remaining = sc.duration - (fa.elapsed - start);
@@ -702,6 +749,15 @@ class SimulationRunner {
         }
       }
     }
+    // Handback: disturbance in the 15 s after the planned transfer.
+    final handbackSpread = SampleStats();
+    if (handbackAtUs != null) {
+      for (final smp in samples) {
+        if (smp.trueUs < handbackAtUs! || smp.trueUs > handbackAtUs! + 15000000) continue;
+        final sp = smp.spread;
+        if (sp != null) handbackSpread.add(sp / 1000);
+      }
+    }
     final failedSessions = devices
         .where((d) => !dead.contains(d.id) && d.session.phase == SessionPhase.failed)
         .map((d) => d.id)
@@ -741,6 +797,10 @@ class SimulationRunner {
         'allSurvivorsAudibleAfterKillMs': failoverRecoveryMs,
         'spreadMs_15sAfterPromotion': failoverSpread.summary(),
         'finalEpoch': coordinator.state.coordinatorEpoch,
+        'finalCoordinator': coordinator.options.coordinatorId,
+        'history': coordinatorHistory,
+        if (handbackAtUs != null) 'handbackDevice': handbackDevice,
+        if (handbackAtUs != null) 'spreadMs_15sAfterHandback': handbackSpread.summary(),
       },
       'failureReasons': {
         for (final d in devices)

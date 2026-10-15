@@ -21,6 +21,16 @@
 | Resource exhaustion | Floods connections, huge frames, many downloads | Max 32 pending handshakes, 5 s handshake timeout, 256 KiB frame limit (checked after receipt; WebSocket compression disabled), malformed-message budget, participant cap (16), transfer concurrency (2 per session, 8 total), 512 MiB file cap, bounded caches and logs | A determined LAN attacker can still saturate Wi-Fi airtime; no software defense exists for that |
 | Malformed or hostile input | Invalid JSON, wrong types, out-of-range values, malicious config | Strict `Reader` validation with typed errors. Config values are clamped (a malicious `maxRateDelta` cannot exceed 25 %). Fuzz-style tests check that malformed input never throws anything except `ProtocolException`. | Bugs in the JSON/WebSocket stack of the Dart VM |
 
+### Failover, handback and redirects
+
+`handover`, `handover.ack` and `redirect` travel only on authenticated, MAC'd, replay-protected channels, and only a
+coordinator can send `handover`/`redirect` (participants never accept them from anyone else). Discovery beacons are
+**not** authenticated: a forged beacon with a higher epoch could make a coordinator step down and redirect its
+members to an attacker's address. The members then fail the handshake there (no room key), fall back to the
+succession order and promote a real member, so the impact is a short disruption, not a takeover; a fix (signing
+beacons with the room key) is on the roadmap. The original host keeps its room's join key in app-private storage to
+rejoin after a crash; it is deleted when the user ends or leaves the party.
+
 ### Invite QR codes and join links
 
 `syncsphere://app/join?h=…&p=…&r=…&k=…` contains the join key, so it is exactly as sensitive as the key: anyone who

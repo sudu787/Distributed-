@@ -61,6 +61,12 @@ sealed class Message {
         return CalibrationResultMsg.read(r);
       case ErrorMsg.kType:
         return ErrorMsg.read(r);
+      case HandoverMsg.kType:
+        return HandoverMsg.read(r, limits);
+      case HandoverAckMsg.kType:
+        return HandoverAckMsg.read(r);
+      case RedirectMsg.kType:
+        return RedirectMsg.read(r);
       default:
         return UnknownMessage(type, body);
     }
@@ -876,6 +882,64 @@ class ByeMsg extends Message {
   @override
   Map<String, Object?> toBody() => {'reason': reason};
   static ByeMsg read(Reader r) => ByeMsg(r.string('reason', maxLength: 256));
+}
+
+/// Coordinator → preferred device: planned leadership transfer. "Start a
+/// coordinator for this room at [epoch] with [state] (in the sender's clock
+/// domain), then answer [HandoverAckMsg]."
+class HandoverMsg extends Message {
+  static const kType = 'handover';
+  @override
+  String get type => kType;
+  final int epoch;
+  final RoomState state;
+  const HandoverMsg({required this.epoch, required this.state});
+  @override
+  Map<String, Object?> toBody() => {'epoch': epoch, 'state': state.toJson()};
+  static HandoverMsg read(Reader r, ProtocolLimits limits) => HandoverMsg(
+        epoch: r.integer('epoch', min: 1),
+        state: RoomState.fromJson(r.map('state'), maxPlaylist: limits.maxPlaylistLength),
+      );
+}
+
+/// Preferred device → coordinator: result of a [HandoverMsg]. When [ok], the
+/// device is already serving the room at [epoch].
+class HandoverAckMsg extends Message {
+  static const kType = 'handover.ack';
+  @override
+  String get type => kType;
+  final int epoch;
+  final bool ok;
+  final String? error;
+  const HandoverAckMsg({required this.epoch, required this.ok, this.error});
+  @override
+  Map<String, Object?> toBody() => {'epoch': epoch, 'ok': ok, if (error != null) 'err': error};
+  static HandoverAckMsg read(Reader r) => HandoverAckMsg(
+        epoch: r.integer('epoch', min: 1),
+        ok: r.boolean('ok'),
+        error: r.optString('err', maxLength: 200),
+      );
+}
+
+/// Coordinator → members: the room is now served by the coordinator at
+/// [endpoint] (`host:port`) with [epoch]; reconnect there now. Sent after a
+/// handover, or when a coordinator steps down because it learned of a
+/// higher epoch (split-brain resolution).
+class RedirectMsg extends Message {
+  static const kType = 'redirect';
+  @override
+  String get type => kType;
+  final int epoch;
+  final String endpoint;
+  final String reason;
+  const RedirectMsg({required this.epoch, required this.endpoint, required this.reason});
+  @override
+  Map<String, Object?> toBody() => {'epoch': epoch, 'ep': endpoint, 'reason': reason};
+  static RedirectMsg read(Reader r) => RedirectMsg(
+        epoch: r.integer('epoch', min: 1),
+        endpoint: r.string('ep', maxLength: 128),
+        reason: r.string('reason', maxLength: 64),
+      );
 }
 
 class ErrorMsg extends Message {

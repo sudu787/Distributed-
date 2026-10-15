@@ -46,6 +46,7 @@ class HomeScreen extends ConsumerWidget {
                 padding: const EdgeInsets.only(bottom: 32),
                 children: const [
                   _NetworkBanner(),
+                  _RejoinCard(),
                   _MainActions(),
                   _NearbyRooms(),
                   _LibrarySection(),
@@ -330,6 +331,58 @@ class _BigAction extends StatelessWidget {
             Text(subtitle, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: fg)),
           ]),
         ),
+      ),
+    );
+  }
+}
+
+/// "Rejoin your party": shown when the party this phone created is still
+/// running nearby (another phone took over while this app was closed). One
+/// tap rejoins; the host role comes back automatically after ~10 s.
+class _RejoinCard extends ConsumerWidget {
+  const _RejoinCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hosted = ref.watch(hostedRoomProvider).value;
+    if (hosted == null) return const SizedBox.shrink();
+    final beacons = ref.watch(discoveryProvider).value ?? const <RoomBeacon>[];
+    RoomBeacon? beacon;
+    for (final b in beacons) {
+      if (b.roomId == hosted.roomId && b.host != null) beacon = b;
+    }
+    if (beacon == null) return const SizedBox.shrink();
+    final b = beacon;
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      color: cs.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.celebration, color: cs.onPrimaryContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Your party "${hosted.roomName}" is still playing',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: cs.onPrimaryContainer)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text('Another phone kept it going. Rejoin and you will be the host again in a few seconds.',
+              style: TextStyle(color: cs.onPrimaryContainer)),
+          OverflowBar(alignment: MainAxisAlignment.end, spacing: 8, children: [
+            TextButton(
+              onPressed: () => ref.read(roomControllerProvider.notifier).forgetHostedRoom(),
+              child: const Text('Forget'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.login),
+              label: const Text('Rejoin your party'),
+              onPressed: () => ref.read(roomControllerProvider.notifier).rejoinHostedRoom(hosted, b),
+            ),
+          ]),
+        ]),
       ),
     );
   }

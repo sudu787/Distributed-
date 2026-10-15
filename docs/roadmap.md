@@ -46,8 +46,8 @@ failover for guests. This is **succession, not consensus-based leader election**
    because `epoch` is higher. Their engines keep the active segment, since its generation is unchanged, while the
    session discards clock samples from the old instance and re-estimates against the new one.
 5. **Split brain.** If the old coordinator returns, or two candidates promote during a partition, members follow the
-   highest `(epoch, coordinatorId)`. A coordinator that sees a higher epoch in a beacon shuts down and tells its members
-   (`bye{superseded}`). This is not consensus: during a partition two sides can play independently, and they converge
+   highest `(epoch, coordinatorId)`. A coordinator that sees a higher epoch in a beacon steps down: it redirects its members
+   to the higher-epoch coordinator (`redirect`, no `bye`) and joins it as a guest. This is not consensus: during a partition two sides can play independently, and they converge
    when it heals. A Raft-style elected leader would stop the minority side from playing; that trade-off was judged
    wrong for a music app.
 6. **Measured in simulation** (`coordinator-failover-n5`, two consecutive host deaths): promotion about 2 s after
@@ -55,10 +55,28 @@ failover for guests. This is **succession, not consensus-based leader election**
 
 Limitations:
 
-- No automatic merge after a partition (split brain), as described above.
 - The successor serves only tracks in its own library. With LAN delivery, guests may lack a track it does not have.
 - The successor needs its failover port (47800) to be free.
-- An intentional "close room" by the host (`bye`) ends the room for everyone, by design.
+- An intentional "end party" by the original host (`bye`) ends the room for everyone, by design.
+
+### Handback to the original host (implemented)
+
+Distributed-systems building blocks used ([protocol §7](protocol.md#handback-to-the-original-host-and-planned-transfers)):
+
+| Principle | Where |
+|---|---|
+| Epoch as a fencing token (like a Raft term): every coordinator change increments it; lower epochs are ignored | state, `redirect`, `handover` |
+| Priority-based succession without election messages (Bully-style): `pref` first, then admission order, computed by everyone from the same replicated state | `successionOrder` |
+| Heartbeat failure detection | membership timeouts, 2 s `failoverAfter` |
+| Preferred-leader rebalancing with hysteresis (like Kafka's preferred replica election): hand back only after 10 s of uninterrupted connection; exponential backoff after a failed attempt | `RoomCoordinator._maybeHandback` |
+| Planned leadership transfer (like Raft's leadership transfer): the new leader confirms it is serving before the old one redirects followers and steps down; state is transferred, timeline translated, generation kept, so playback never restarts | `handover` / `handover.ack` / `redirect` |
+| Split-brain resolution by step-down: a lower-epoch coordinator that learns of a higher epoch redirects its members and joins it | `RoomCoordinator.stepDown`, beacons |
+| Graceful leave: a stand-in coordinator hands off instead of closing | `RoomCoordinator.handOff` |
+
+Measured in simulation (`failover-failback-n3`, 3 phones, wifi-typical): takeover about 2 s after the host is killed,
+handback about 10.5 s after the host rejoins, inter-device spread ≤ 6 ms in the 15 s after the handback, no session
+failures. Also tested over real sockets (app test: crash → takeover → rejoin → handback → control via the original
+host; and a stand-in host leaving hands off). Real phones: not yet.
 
 ## Precision backend (sub-5 ms target)
 

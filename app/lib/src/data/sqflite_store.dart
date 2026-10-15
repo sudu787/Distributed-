@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import 'app_store.dart';
@@ -98,6 +100,20 @@ class SqfliteAppStore implements AppStore {
   @override
   Future<void> addRoomHistory(RoomHistoryEntry entry) =>
       db.insert('room_history', entry.toRow(), conflictAlgorithm: ConflictAlgorithm.replace);
+
+  @override
+  Future<HostedRoom?> hostedRoom() async {
+    final raw = await _get('hosted_room');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return HostedRoom.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+    } on FormatException {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> saveHostedRoom(HostedRoom? room) => _set('hosted_room', room == null ? '' : jsonEncode(room.toJson()));
 
   @override
   Future<void> close() => db.close();

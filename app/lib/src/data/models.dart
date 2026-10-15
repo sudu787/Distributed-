@@ -121,3 +121,23 @@ class RoomHistoryEntry {
         at: DateTime.fromMillisecondsSinceEpoch(r['at']! as int),
       );
 }
+
+/// The party this device created, remembered so the host can rejoin (and get
+/// the host role back) after the app was closed or crashed. Contains the
+/// join key; stored only in app-private storage.
+class HostedRoom {
+  final String roomId;
+  final String roomName;
+  final String joinKey;
+  final DateTime startedAt;
+  const HostedRoom({required this.roomId, required this.roomName, required this.joinKey, required this.startedAt});
+
+  Map<String, Object?> toJson() =>
+      {'room': roomId, 'name': roomName, 'key': joinKey, 'at': startedAt.millisecondsSinceEpoch};
+
+  static HostedRoom? fromJson(Map<String, Object?> j) {
+    final room = j['room'], name = j['name'], key = j['key'], at = j['at'];
+    if (room is! String || name is! String || key is! String || at is! int) return null;
+    return HostedRoom(roomId: room, roomName: name, joinKey: key, startedAt: DateTime.fromMillisecondsSinceEpoch(at));
+  }
+}

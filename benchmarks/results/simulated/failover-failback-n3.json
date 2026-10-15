@@ -1,0 +1,172 @@
+{
+  "environment": "SIMULATED (virtual time; modelled clocks, network and audio devices; not hardware)",
+  "scenario": {
+    "name": "failover-failback-n3",
+    "participants": 3,
+    "network": "wifi-typical",
+    "durationS": 100,
+    "actions": [
+      "3000ms:play",
+      "25000ms:kill-coordinator",
+      "45000ms:revive-host",
+      "80000ms:seek(120s)"
+    ],
+    "profiles": [
+      "flagship",
+      "midrange"
+    ],
+    "clockSkewPpmRange": 50.0,
+    "audioPpmRange": 30.0,
+    "seed": 42,
+    "failover": true,
+    "handbackStableForS": 10
+  },
+  "metrics": {
+    "interDeviceSpreadMs_all": {
+      "n": 1879,
+      "median": 5.99,
+      "p95": 8.51,
+      "p99": 8.63,
+      "max": 8.66,
+      "mean": 5.88
+    },
+    "interDeviceSpreadMs_steady": {
+      "n": 1757,
+      "median": 5.89,
+      "p95": 8.52,
+      "p99": 8.63,
+      "max": 8.66,
+      "mean": 5.74
+    },
+    "pairwiseErrorMs": {
+      "n": 4883,
+      "median": 3.56,
+      "p95": 8.26,
+      "p99": 8.58,
+      "max": 8.66,
+      "mean": 4.33
+    },
+    "absErrorVsTimelineMs": {
+      "n": 5260,
+      "median": 1.89,
+      "p95": 8.3,
+      "p99": 16.11,
+      "max": 16.5,
+      "mean": 3.19
+    },
+    "startSkewMs": {
+      "n": 2,
+      "median": 13.75,
+      "p95": 18.89,
+      "p99": 19.35,
+      "max": 19.46,
+      "mean": 13.75
+    },
+    "startErrorMs": {
+      "n": 6,
+      "median": 4.83,
+      "p95": 15.59,
+      "p99": 16.32,
+      "max": 16.5,
+      "mean": 6.8
+    },
+    "driftSpreadFirstMinuteMs": {
+      "n": 1059,
+      "median": 5.4,
+      "p95": 7.35,
+      "p99": 7.36,
+      "max": 7.37,
+      "mean": 4.92
+    },
+    "driftSpreadLastMinuteMs": {
+      "n": 1192,
+      "median": 5.96,
+      "p95": 8.56,
+      "p99": 8.64,
+      "max": 8.66,
+      "mean": 6.29
+    },
+    "commandToAudibleLatencyMs": {
+      "n": 2,
+      "median": 520.0,
+      "p95": 682.0,
+      "p99": 696.4,
+      "max": 700.0,
+      "mean": 520.0
+    },
+    "clockOffsetErrorUs": {
+      "n": 178,
+      "median": 724.0,
+      "p95": 1812.0,
+      "p99": 2653.0,
+      "max": 2970.0,
+      "mean": 863.0
+    },
+    "clockUncertaintyUs": {
+      "n": 178,
+      "median": 4770.0,
+      "p95": 5779.0,
+      "p99": 6119.0,
+      "max": 6398.0,
+      "mean": 4818.0
+    },
+    "clockUncertaintyCoverage": 1.0,
+    "recoveryAfterPartitionMs": {
+      "n": 0
+    },
+    "unrecoveredDevices": [],
+    "resyncSeeks": 0,
+    "rateChanges": 14,
+    "bufferingStalls": 0,
+    "playCalls": 6,
+    "networkFrames": 1677,
+    "networkBytes": 334993,
+    "networkBytesPerDevicePerSecond": 1117,
+    "failedSessions": [],
+    "killedDevices": [],
+    "failover": {
+      "promoted": "device-1",
+      "promotedAfterKillMs": 2045,
+      "allSurvivorsAudibleAfterKillMs": null,
+      "spreadMs_15sAfterPromotion": {
+        "n": 300,
+        "median": 2.5,
+        "p95": 2.69,
+        "p99": 2.71,
+        "max": 2.71,
+        "mean": 2.5
+      },
+      "finalEpoch": 3,
+      "finalCoordinator": "device-0",
+      "history": [
+        {
+          "trueMs": 0,
+          "device": "device-0",
+          "epoch": 1
+        },
+        {
+          "trueMs": 27645,
+          "device": "device-1",
+          "epoch": 2
+        },
+        {
+          "trueMs": 55755,
+          "device": "device-0",
+          "epoch": 3
+        }
+      ],
+      "handbackDevice": "device-0",
+      "spreadMs_15sAfterHandback": {
+        "n": 300,
+        "median": 5.73,
+        "p95": 5.95,
+        "p99": 5.97,
+        "max": 5.97,
+        "mean": 5.73
+      }
+    },
+    "failureReasons": {},
+    "coordinatorWarnings": 1
+  },
+  "wallClockMs": 162
+}

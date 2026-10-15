@@ -81,6 +81,22 @@ List<Scenario> _suite(String name, int seed) {
       ],
       seed: seed,
     ),
+    // Host dies, the next phone takes over, the host comes back and gets the
+    // role back after 10 s of stable connection (planned handover).
+    Scenario(
+      name: 'failover-failback-n3',
+      participants: 3,
+      network: NetworkCondition.wifiTypical,
+      duration: const Duration(seconds: 100),
+      failover: true,
+      actions: const [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 25), KillCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 45), ReviveCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 80), SeekAction(Duration(minutes: 2))),
+      ],
+      seed: seed,
+    ),
     Scenario(
       name: 'heterogeneous-devices-n5',
       participants: 5,
@@ -270,13 +286,15 @@ String _markdown(Map<String, Object?> meta, List<Map<String, Object?>> rows) {
       ..writeln()
       ..writeln('## Coordinator failover (SIMULATED)')
       ..writeln()
-      ..writeln('| scenario | final epoch | last promoted | promoted after kill (ms) | spread p95 / max in 15 s after promotion (ms) |')
-      ..writeln('|---|---|---|---|---|');
+      ..writeln('| scenario | final epoch | final coordinator | last promoted | promoted after kill (ms) | spread p95 / max in 15 s after promotion (ms) | handed back to | spread p95 / max in 15 s after handback (ms) |')
+      ..writeln('|---|---|---|---|---|---|---|---|');
     for (final r in fo) {
       final f = r['failover'] as Map<String, Object?>;
       final sp = f['spreadMs_15sAfterPromotion'] as Map<String, Object?>;
-      b.writeln('| ${r['scenario']} | ${f['finalEpoch']} | ${f['promoted']} | ${f['promotedAfterKillMs']} | '
-          '${_f(sp, 'p95')} / ${_f(sp, 'max')} |');
+      final hb = f['spreadMs_15sAfterHandback'] as Map<String, Object?>?;
+      b.writeln('| ${r['scenario']} | ${f['finalEpoch']} | ${f['finalCoordinator']} | ${f['promoted']} | ${f['promotedAfterKillMs']} | '
+          '${_f(sp, 'p95')} / ${_f(sp, 'max')} | ${f['handbackDevice'] ?? '–'} | '
+          '${hb == null ? '–' : '${_f(hb, 'p95')} / ${_f(hb, 'max')}'} |');
     }
   }
   final ls = rows.where((r) => r['listenerSpread'] != null).toList();

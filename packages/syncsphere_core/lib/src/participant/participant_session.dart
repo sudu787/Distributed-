@@ -162,7 +162,13 @@ class ParticipantSession implements ClockSource {
   /// True while [_target] points at a failover candidate we have not yet
   /// joined (as opposed to the coordinator we last joined).
   bool _tryingCandidate = false;
+
+  /// Set when the coordinator redirected us elsewhere (handover/step-down).
+  bool _redirected = false;
   int failoverCount = 0;
+
+  /// Planned handovers this device accepted (it became coordinator).
+  int handoverCount = 0;
   Completer<void>? _linkClosed;
   int reconnectCount = 0;
 
@@ -334,6 +340,61 @@ class ParticipantSession implements ClockSource {
     _target = d.connectorFor(cand.endpoint!);
     _tryingCandidate = true;
     return true;
+  }
+
+  /// Planned leadership transfer to this device (the preferred host): start
+  /// a coordinator at the given epoch with the current state translated into
+  /// our clock, then confirm. The old coordinator redirects everyone here.
+  Future<void> _onHandover(HandoverMsg h) async {
+    final d = options.failover;
+    final est = estimate;
+    final key = _roomKey;
+    final cur = _state;
+    void nack(String why) {
+      log.warn('handback.decline', 'declining host role: $why');
+      _sendIfActive(HandoverAckMsg(epoch: h.epoch, ok: false, error: why));
+    }
+
+    if (d == null) return nack('this device cannot host');
+    if (est == null || key == null) return nack('clock not synchronized yet');
+    if (_promoted) return nack('already promoting');
+    if (cur != null && h.epoch <= cur.coordinatorEpoch) return nack('stale epoch ${h.epoch}');
+    try {
+      final translated = translateForSuccessor(h.state, estimate: est, newCoordinatorId: options.deviceId, newEpoch: h.epoch);
+      final connector = await d.promote(PromotionRequest(state: translated, epoch: h.epoch, roomKey: key, joinKey: options.joinKey));
+      _target = connector;
+      _promoted = true;
+      handoverCount++;
+      log.info('handback.promoted', 'this device is the host again (epoch ${h.epoch})');
+      _sendIfActive(HandoverAckMsg(epoch: h.epoch, ok: true));
+    } catch (e) {
+      nack('could not start: $e'.length > 200 ? 'could not start' : 'could not start: $e');
+    }
+  }
+
+  /// The coordinator moved (handover or step-down): reconnect to [r] now
+  /// instead of waiting for failure detection.
+  void _onRedirect(RedirectMsg r) {
+    final cur = _state;
+    if (cur != null && r.epoch <= cur.coordinatorEpoch) {
+      log.warn('session.redirect', 'ignoring redirect to older epoch ${r.epoch}');
+      return;
+    }
+    if (_promoted) return; // we are the new coordinator
+    final d = options.failover;
+    if (d == null) {
+      log.warn('session.redirect', 'coordinator moved to ${r.endpoint} but this device cannot follow automatically');
+      return;
+    }
+    log.warn('session.redirect', 'coordinator moved to ${r.endpoint} (epoch ${r.epoch}, ${r.reason}); audio keeps playing');
+    _target = d.connectorFor(r.endpoint);
+    // Treated like a failover candidate: if it stays unreachable, fall back
+    // to the succession order (starting with its first entry).
+    _tryingCandidate = true;
+    _candidateIndex = -1;
+    _candidateAttempts = 0;
+    _redirected = true;
+    _linkDown('redirected to ${r.endpoint}');
   }
 
   void _fatal(SessionFailure f) {
@@ -544,6 +605,7 @@ class ParticipantSession implements ClockSource {
     _candidateAttempts = 0;
     _promoted = false;
     _tryingCandidate = false;
+    _redirected = false;
     if (_sessionId != null) reconnectCount++;
     _sessionId = w.sessionId;
     _role = w.role;
@@ -601,7 +663,12 @@ class ParticipantSession implements ClockSource {
       case DiagnosticsMsg():
         _diagnostics = msg;
         if (!_diagCtl.isClosed) _diagCtl.add(msg);
+      case HandoverMsg():
+        unawaited(_onHandover(msg));
+      case RedirectMsg():
+        _onRedirect(msg);
       case ByeMsg(:final reason):
+        if (_redirected) return; // moving to another coordinator
         log.warn('session.bye', 'coordinator said bye: $reason');
         _completeLink();
         _fatal(SessionFailure(RejectCode.roomClosed, reason));

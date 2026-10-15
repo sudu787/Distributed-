@@ -116,6 +116,17 @@ class RoomController extends Notifier<RoomViewState> {
     if (err != null) state = RoomViewState(error: _describe(err));
   }
 
+  /// Rejoins the party this phone created (after the app was closed or
+  /// crashed). It joins as a guest; the current host hands the host role
+  /// back automatically once this phone has been stable for ~10 s.
+  Future<void> rejoinHostedRoom(HostedRoom room, RoomBeacon beacon) =>
+      join(host: beacon.host!, port: beacon.port, joinKey: room.joinKey, roomId: room.roomId);
+
+  Future<void> forgetHostedRoom() async {
+    await ref.read(appStoreProvider).saveHostedRoom(null);
+    ref.invalidate(hostedRoomProvider);
+  }
+
   /// Joins via a link, trying each advertised address until one answers.
   Future<void> joinWithLink(JoinLink link) async {
     state = const RoomViewState(status: RoomStatus.starting);
@@ -190,6 +201,7 @@ class RoomController extends Notifier<RoomViewState> {
     }
     await _svc.leave();
     ref.invalidate(roomHistoryProvider);
+    ref.invalidate(hostedRoomProvider);
     state = const RoomViewState();
   }
 

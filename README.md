@@ -34,6 +34,9 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   - role-based control authorization and per-address rate limits
   - **coordinator failover by succession**: if the host crashes, the first eligible guest takes over at epoch + 1,
     with the timeline translated into its clock, and playback keeps running
+  - **handback**: when the original host comes back ("Rejoin your party" after a crash, or its Wi-Fi returns), the
+    stand-in hands the host role back after 10 s of stable connection, without interrupting the music; a stand-in
+    that leaves hands the party on instead of ending it
   - an explicit "room needs to be recreated" when no successor is available
 - **Audio distribution:** tracks are identified by SHA-256. Either every phone has the file ("matching local files"),
   or the host serves it over HTTP with `Range` resume, per-session signed URLs, verification and an LRU cache.
@@ -163,9 +166,9 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
    then 3–10. Commit raw data to `benchmarks/results/real/`.
 2. **Native code on hardware.** The Kotlin plugin is compiled and unit-tested in CI only. Verify start-latency learning
    and position sampling on a few device models.
-3. **Coordinator failover on hardware.** Succession failover is implemented and tested in simulation and over
-   loopback sockets, but not on phones. It is not consensus: a network partition can split a room
-   ([roadmap](docs/roadmap.md#coordinator-failover-milestone)).
+3. **Failover and handback on hardware.** Takeover, handback to the original host, hand-off and step-down are
+   implemented and tested in simulation and over loopback sockets, but not on phones. It is not consensus: during a
+   partition both sides keep playing until beacons cross again ([roadmap](docs/roadmap.md#coordinator-failover-milestone)).
 4. **New features on hardware.** Acoustic calibration, channel roles, background playback and QR invites are
    unit-tested and simulated (calibration, roles) but have not run on phones. Calibration in particular needs
    checking against microphones with heavy built-in processing.

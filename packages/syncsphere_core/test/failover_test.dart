@@ -102,6 +102,69 @@ void main() {
     expect(f['promotedAfterKillMs'] as int, lessThan(6000));
   });
 
+  test('succession order puts the preferred (original) host first when it is back', () {
+    final s = _state([_p('b'), _p('c'), _p('orig')]).copyWith(preferredCoordinator: 'orig');
+    expect(successionOrder(s).map((p) => p.deviceId), ['orig', 'b', 'c']);
+    final gone = _state([_p('b'), _p('orig', c: ConnectionStatus.disconnected)]).copyWith(preferredCoordinator: 'orig');
+    expect(successionOrder(gone).map((p) => p.deviceId), ['b']);
+  });
+
+  test('3 phones: host dies, next phone hosts, original host returns and gets the role back seamlessly', () {
+    final r = SimulationRunner(const Scenario(
+      name: 'failover-failback',
+      participants: 3,
+      network: NetworkCondition.wifiGood,
+      duration: Duration(seconds: 90),
+      failover: true,
+      actions: [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 20), KillCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 40), ReviveCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 75), SeekAction(Duration(minutes: 2))),
+      ],
+    )).run();
+    expect(r.metrics['failedSessions'], isEmpty);
+    final f = r.metrics['failover'] as Map<String, Object?>;
+    expect(f['promoted'], 'device-1', reason: 'next phone takes over');
+    expect(f['handbackDevice'], 'device-0', reason: 'original host gets the role back');
+    expect(f['finalCoordinator'], 'device-0');
+    expect(f['finalEpoch'], 3);
+    final history = (f['history'] as List).cast<Map<String, Object?>>();
+    expect(history.map((h) => h['epoch']), [1, 2, 3]);
+    final backAt = history.last['trueMs'] as int;
+    // Revived at 40 s, rejoins within about a second, then 10 s of stability.
+    expect(backAt, inInclusiveRange(50000, 55000));
+    final spread = f['spreadMs_15sAfterHandback'] as Map<String, Object?>;
+    expect(spread['n'] as int, greaterThan(100));
+    expect(spread['max'] as num, lessThan(50), reason: 'planned handback must not disturb alignment');
+    // The seek after the handback goes through the original host again.
+    expect((r.metrics['commandToAudibleLatencyMs'] as Map)['n'], 2);
+  });
+
+  test('flaky returning host: a link drop restarts the 10 s stability window (no flapping)', () {
+    final r = SimulationRunner(const Scenario(
+      name: 'failback-flaky',
+      participants: 3,
+      network: NetworkCondition.wifiGood,
+      duration: Duration(seconds: 100),
+      failover: true,
+      actions: [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 20), KillCoordinatorAction()),
+        ScheduledAction(Duration(seconds: 40), ReviveCoordinatorAction()),
+        // Back at ~41 s, but drops out for 6 s at 46 s (before 10 s of stability).
+        ScheduledAction(Duration(seconds: 46), PartitionAction(0, Duration(seconds: 6))),
+      ],
+    )).run();
+    expect(r.metrics['failedSessions'], isEmpty);
+    final f = r.metrics['failover'] as Map<String, Object?>;
+    final history = (f['history'] as List).cast<Map<String, Object?>>();
+    expect(history.map((h) => h['epoch']), [1, 2, 3], reason: 'exactly one handback, no ping-pong');
+    expect(f['finalCoordinator'], 'device-0');
+    // Heal at 52 s, then a fresh 10 s window.
+    expect(history.last['trueMs'] as int, greaterThanOrEqualTo(62000));
+  });
+
   test('without failover enabled the room reports that it must be recreated', () {
     final r = SimulationRunner(const Scenario(
       name: 'no-failover',

@@ -35,6 +35,10 @@ class Member {
   int? calibrationUs;
   int lastSeenUs;
   final int joinedAtUs;
+
+  /// Start of the current uninterrupted healthy connection (null while
+  /// suspect or disconnected). Used for handback hysteresis.
+  int? stableSinceUs;
   int? disconnectedAtUs;
 
   /// Increments every time this member authenticates a new link; lets the
@@ -138,7 +142,8 @@ class MembershipManager {
         ..linkEpoch += 1
         ..readyGeneration = null
         ..lastReport = null
-        ..lastReportAtUs = null;
+        ..lastReportAtUs = null
+        ..stableSinceUs = nowUs;
       return existing;
     }
     if (!hasCapacity) return null;
@@ -150,7 +155,9 @@ class MembershipManager {
       sessionId: sessionId,
       keys: keys,
       lastSeenUs: nowUs,
-    )..linkEpoch = 1;
+    )
+      ..linkEpoch = 1
+      ..stableSinceUs = nowUs;
     _members[deviceId] = m;
     return m;
   }
@@ -160,6 +167,7 @@ class MembershipManager {
     m.lastSeenUs = nowUs;
     if (m.connection == ConnectionStatus.suspect) {
       m.connection = ConnectionStatus.connected;
+      m.stableSinceUs = nowUs;
       return true;
     }
     return false;
@@ -169,6 +177,7 @@ class MembershipManager {
     if (m.connection == ConnectionStatus.disconnected) return;
     m.connection = ConnectionStatus.disconnected;
     m.disconnectedAtUs = nowUs;
+    m.stableSinceUs = null;
     m.readyGeneration = null;
   }
 
@@ -184,6 +193,7 @@ class MembershipManager {
             failed.add(m);
           } else if (silent >= config.suspectAfter.inMicroseconds) {
             m.connection = ConnectionStatus.suspect;
+            m.stableSinceUs = null;
             suspect.add(m);
           }
         case ConnectionStatus.suspect:

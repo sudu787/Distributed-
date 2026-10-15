@@ -15,6 +15,10 @@ abstract class AppStore {
   Future<List<RoomHistoryEntry>> roomHistory({int limit = 20});
   Future<void> addRoomHistory(RoomHistoryEntry entry);
 
+  /// The party this device hosts (null when none / ended on purpose).
+  Future<HostedRoom?> hostedRoom();
+  Future<void> saveHostedRoom(HostedRoom? room);
+
   Future<void> close();
 }
 
@@ -25,6 +29,7 @@ class MemoryAppStore implements AppStore {
   DeviceIdentity? _identity;
   final Map<String, LibraryTrack> _tracks = {};
   final List<RoomHistoryEntry> _history = [];
+  HostedRoom? _hosted;
 
   @override
   Future<DeviceIdentity> loadIdentity({required String defaultName}) async =>
@@ -49,6 +54,12 @@ class MemoryAppStore implements AppStore {
 
   @override
   Future<void> addRoomHistory(RoomHistoryEntry entry) async => _history.add(entry);
+
+  @override
+  Future<HostedRoom?> hostedRoom() async => _hosted;
+
+  @override
+  Future<void> saveHostedRoom(HostedRoom? room) async => _hosted = room;
 
   @override
   Future<void> close() async {}

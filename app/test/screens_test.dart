@@ -81,8 +81,8 @@ class _FakeRoomController extends RoomController {
       JoinLink(hosts: ['192.168.1.20'], port: 47800, joinKey: 'ABCD2345', roomId: 'K7Q2M9');
 }
 
-List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller}) {
-  final store = MemoryAppStore();
+List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller, MemoryAppStore? appStore}) {
+  final store = appStore ?? MemoryAppStore();
   return [
     appStoreProvider.overrideWithValue(store),
     initialIdentityProvider.overrideWithValue(_identity),
@@ -246,5 +246,18 @@ void main() {
     expect(report['kind'], 'syncsphere-diagnostics-v1');
     expect((report['room'] as Map)['name'], isNotNull);
     expect(copied, isNot(contains('ABCD2345')), reason: 'no join key in reports');
+  });
+
+  testWidgets('home offers "Rejoin your party" when the party this phone created is still running', (tester) async {
+    _phone(tester);
+    final store = MemoryAppStore();
+    await store.saveHostedRoom(HostedRoom(roomId: 'R2D2C3', roomName: 'Garden party', joinKey: 'ABCD2345', startedAt: DateTime(2026)));
+    await tester.pumpWidget(_wrap(const HomeScreen(), _overrides(const RoomViewState(), appStore: store)));
+    await tester.pumpAndSettle();
+    expect(find.text('Rejoin your party'), findsOneWidget);
+    expect(find.textContaining('host again'), findsOneWidget);
+    await tester.tap(find.text('Forget'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rejoin your party'), findsNothing);
   });
 }
