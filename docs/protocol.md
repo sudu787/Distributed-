@@ -63,7 +63,7 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `plat` | string ≤32 | e.g. `android` |
 | `nonce` | string 16–64 | Random, base64url |
 | `room` | string? | Expected room id (from discovery) |
-| `caps` | object | `{rate: bool, backend: string, lan: bool, canHost: bool, fport?: int}`. `fport` is the port this device would serve on if promoted (failover). |
+| `caps` | object | `{rate: bool, backend: string, lan: bool, canHost: bool, fport?: int, mic?: bool, cal?: int}`. `fport` is the port this device would serve on if promoted (failover). `mic`: the device can record for acoustic calibration. `cal`: its saved output calibration offset (µs, ±2 s), adopted as the member's room value when it first joins. |
 
 ### challenge (S→C)
 `proto` (chosen version), `room`, `name`, `coord` (coordinator device id), `epoch` (coordinator epoch),
@@ -90,11 +90,12 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `clk.res` | S→C | `{id, t1, t2, t3}` | `t2` is stamped before parsing, `t3` just before sending |
 | `state` | S→C | `{state}` | Full authoritative snapshot (§4) |
 | `ready` | C→S | `{gen, track, ok, err?, lat, rtt, unc}` | Result of preparing pending segment `gen`. `lat` = start-latency compensation (µs), `rtt` = clock RTT p95 (µs), `unc` = clock uncertainty (µs). `err` ∈ `missing_track`, `hash_mismatch`, `download_failed`, `decode_error`, `prepare_error`, `too_large`. |
-| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?}` | Control request (§5) |
+| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?, mode?, off?}` | Control request (§5). `mode` ≤16 chars, `off` signed µs within ±1 000 000. |
 | `ctl.ack` | S→C | `{rid, ok, err?, ver}` | Result. `ver` = state version after applying it. |
 | `rep` | C→S | `{gen, at, pos, exp, err, rate, buf, off, unc, rtt, mode, ps}` | Sync report: coordinator-domain measurement time, rendered and expected position, error = pos − exp (µs), current rate, buffered µs, clock offset and uncertainty, RTT p95, correction mode (`idle|waiting|inSync|rateCorrecting|resyncing`), player state |
 | `evt` | C→S | `{kind, gen, detail?, data}` | `started` (data: `startErrorUs`, `playCallLateUs`, `latencyCompUs`), `lateJoin` (`lateUs`), `resync` (`posUs`), `stall`, `rejoined` (`recoveryUs`, `errorUs`), `error` |
 | `avail` | C→S | `{tracks:[{id, a}]}` | Track availability: `unknown|available|fetching|missing|mismatch`. Partial updates allowed. |
+| `cal.res` | C→S | `{id, arr: {dev: {slot: µs}}, missing?: [dev], err?}` | Acoustic calibration result from the plan's listener (§5.1): per device, each detected click's arrival minus its scheduled time (common recorder offset included). Slots are string keys; ≤256 devices, ≤100 slots each. |
 | `diag` | S→C | `{parts:[{id, err?, unc?, off?, rtt?, mode, age?, rate, ps, be}], maxPair?}` | Aggregated diagnostics, about 1 Hz. Not versioned state. |
 | `bye` | both | `{reason}` | Graceful leave (C→S removes the member) or room closed (S→C, fatal for the client) |
 | `err` | S→C | `{code, reason}` | Non-fatal error report |
@@ -112,12 +113,22 @@ All positions and times are integer microseconds. Every reported timing value is
                 "mime": "audio/mpeg", "serves": true, "avail": 3}],
   "mvol": 0.8,
   "parts": [{"id": "dev-abc", "name": "Host", "role": "host", "conn": "connected", "vol": 1.0,
-             "track": "available", "canHost": false},
+             "track": "available", "canHost": false, "cal": 0},
             {"id": "dev-def", "name": "Kitchen", "role": "controller", "conn": "connected", "vol": 1.0,
-             "track": "available", "canHost": true, "ep": "192.168.1.31:47800"}],
-  "dist": "auto"
+             "track": "available", "canHost": true, "ep": "192.168.1.31:47800", "ch": "left", "cal": 182000}],
+  "dist": "auto",
+  "rep": "all", "shuf": true,
+  "cal": {"id": 3, "listener": "dev-abc", "order": ["dev-abc", "dev-def"], "leadUs": 6000000, "ivUs": 600000,
+          "rounds": 3, "hz": 2000, "ms": 4}
 }
 ```
+
+- `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
+- Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`); `cal` is the
+  output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
+- `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its click track id is
+  `sha256("syncsphere-calibration-v1|<id>|<listener>")`; `trackById` resolves it to a synthetic track that every device
+  generates locally.
 
 - `ver` increases on every change. A receiver applies a snapshot only when `(epoch, ver)` is newer than what it holds.
   A higher `epoch` always wins, and a lower one is ignored.
@@ -144,12 +155,40 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `masterVolume` | `val` 0–1 | Room volume | never |
 | `deviceVolume` | `val`, `dev?` | Per-device volume (default: the sender's) | never |
 | `setRole` | `dev`, `role` | Promote or demote | never |
+| `setRepeat` | `mode` `off\|all\|one` | Playlist repeat | never |
+| `setShuffle` | `val` (≥0.5 = on) | Shuffle order (reshuffled when turned on or when the playlist changes) | never |
+| `setChannelRole` | `mode` `stereo\|left\|right\|mono`, `dev?` | Channel role. A device may always change its own; others need control rights. | never |
+| `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
+| `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
+
+While a calibration runs, `play`, `pause`, `seek`, `setTrack`, `next`, `previous` and `calibrate` are refused with
+`busy`.
 
 `base` is the state version the sender's UI showed. `timelineVersion` is the version at which the timeline, the pending
 segment or the playlist last changed. An action that could overwrite a newer conflicting intent (seeking within a track
 that someone else has just replaced) is refused with `stale_version`; the UI refreshes and the user retries. Membership
 and volume churn do not make playback commands stale. Ack error codes: `unauthorized`, `stale_version`, `invalid`,
-`unknown_track`, `nothing_to_play`, `not_connected`, `timeout` (client side).
+`unknown_track`, `nothing_to_play`, `busy`, `not_connected`, `timeout` (client side).
+
+### 5.1 Acoustic calibration
+
+1. A device with a microphone sends `calibrate`. The coordinator remembers the current timeline, publishes the plan in
+   `state.cal` (connected devices in `order`) and schedules the calibration track like any other segment (readiness
+   barrier, future start).
+2. Every device renders its *own* click track: silence except a 4 ms 2 kHz burst at
+   `slot = round × |order| + index`, position `leadUs + slot × ivUs`. Devices click one at a time.
+3. The listener records from `leadUs − 0.5 s` to the last slot `+ 0.8 s`, finds each click's onset in a window around
+   its scheduled time and sends `cal.res` with raw arrivals. The recording never leaves the phone.
+4. The coordinator adds each device's own software error at each click time (from its `rep` reports during the
+   calibration) to the raw arrival, takes the median per device and subtracts the median across devices. The result
+   is added to each member's `cal` (clamped to ±1 s). A device that is still converging therefore does not bias its
+   correction.
+5. The coordinator restores the previous track as paused at the position it had reached (or idle if nothing was
+   loaded). If no result arrives within the track length plus readiness timeout, maximum lead and 20 s, the
+   calibration is cancelled the same way, with no offsets changed.
+
+The corrections align sound **at the listener's position**, including propagation delay (about 2.9 ms per metre) and
+Bluetooth or speaker latency that software estimates cannot see. Other positions in the room are not aligned by this.
 
 ## 6. Synchronization configuration (`welcome.config`)
 
@@ -234,5 +273,8 @@ malformed or over 1 KiB is dropped.
 
 - New optional fields can be added within v1 (receivers ignore unknown keys).
 - New message types can be added within v1 (receivers ignore unknown types).
+- New enum values (control actions such as `setRepeat`, `setShuffle`, `setChannelRole`, `calibrate`,
+  `setCalibration`) are also added within v1, but an older coordinator rejects a control it cannot parse, so every
+  device in a room should run the same app version.
 - Changing the meaning or the requiredness of an existing field requires a new protocol version, negotiated through
   `pmin`/`pmax` and `challenge.proto`.

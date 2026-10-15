@@ -3,7 +3,7 @@
   "suite": "full",
   "seed": 42,
   "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"linux_x64\"",
-  "generatedAt": "2026-10-15T06:58:03.733334Z",
+  "generatedAt": "2026-10-15T08:21:32.055594Z",
   "results": [
     {
       "scenario": "matrix-lan-ideal-n2",
@@ -72,7 +72,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 815,
+      "bytesPerDevPerS": 817,
       "failed": 0
     },
     {
@@ -142,7 +142,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 969,
+      "bytesPerDevPerS": 971,
       "failed": 0
     },
     {
@@ -212,7 +212,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1310,
+      "bytesPerDevPerS": 1314,
       "failed": 0
     },
     {
@@ -282,7 +282,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2167,
+      "bytesPerDevPerS": 2178,
       "failed": 0
     },
     {
@@ -352,7 +352,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 816,
+      "bytesPerDevPerS": 818,
       "failed": 0
     },
     {
@@ -422,7 +422,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 977,
+      "bytesPerDevPerS": 980,
       "failed": 0
     },
     {
@@ -492,7 +492,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1326,
+      "bytesPerDevPerS": 1330,
       "failed": 0
     },
     {
@@ -562,7 +562,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2189,
+      "bytesPerDevPerS": 2201,
       "failed": 0
     },
     {
@@ -632,7 +632,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 881,
+      "bytesPerDevPerS": 883,
       "failed": 0
     },
     {
@@ -702,7 +702,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1061,
+      "bytesPerDevPerS": 1063,
       "failed": 0
     },
     {
@@ -772,7 +772,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1419,
+      "bytesPerDevPerS": 1423,
       "failed": 0
     },
     {
@@ -842,7 +842,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2292,
+      "bytesPerDevPerS": 2303,
       "failed": 0
     },
     {
@@ -912,7 +912,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 888,
+      "bytesPerDevPerS": 890,
       "failed": 0
     },
     {
@@ -982,7 +982,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1063,
+      "bytesPerDevPerS": 1066,
       "failed": 0
     },
     {
@@ -1052,7 +1052,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1446,
+      "bytesPerDevPerS": 1451,
       "failed": 0
     },
     {
@@ -1122,7 +1122,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2309,
+      "bytesPerDevPerS": 2320,
       "failed": 0
     },
     {
@@ -1192,7 +1192,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 880,
+      "bytesPerDevPerS": 881,
       "failed": 0
     },
     {
@@ -1262,7 +1262,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1065,
+      "bytesPerDevPerS": 1068,
       "failed": 0
     },
     {
@@ -1332,7 +1332,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1427,
+      "bytesPerDevPerS": 1432,
       "failed": 0
     },
     {
@@ -1402,7 +1402,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2296,
+      "bytesPerDevPerS": 2307,
       "failed": 0
     },
     {
@@ -1477,7 +1477,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1341,
+      "bytesPerDevPerS": 1344,
       "failed": 0
     },
     {
@@ -1617,7 +1617,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1086,
+      "bytesPerDevPerS": 1090,
       "failed": 0,
       "failover": {
         "promoted": "device-4",
@@ -1701,7 +1701,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1292,
+      "bytesPerDevPerS": 1294,
       "failed": 0
     },
     {
@@ -1710,20 +1710,20 @@
       "network": "wifi-good",
       "durationS": 90,
       "spreadSteady": {
-        "n": 1668,
-        "median": 184.91,
-        "p95": 186.09,
-        "p99": 186.19,
-        "max": 186.22,
-        "mean": 172.82
+        "n": 1665,
+        "median": 185.92,
+        "p95": 187.11,
+        "p99": 187.21,
+        "max": 187.24,
+        "mean": 182.03
       },
       "spreadAll": {
-        "n": 1729,
-        "median": 184.86,
-        "p95": 186.08,
-        "p99": 186.19,
-        "max": 186.22,
-        "mean": 166.92
+        "n": 1726,
+        "median": 185.88,
+        "p95": 187.1,
+        "p99": 187.21,
+        "max": 187.24,
+        "mean": 175.8
       },
       "startSkew": {
         "n": 1,
@@ -1735,11 +1735,11 @@
       },
       "driftLastMinute": {
         "n": 1200,
-        "median": 185.02,
-        "p95": 185.9,
-        "p99": 185.98,
-        "max": 186.0,
-        "mean": 185.02
+        "median": 185.85,
+        "p95": 186.72,
+        "p99": 186.8,
+        "max": 186.82,
+        "mean": 185.85
       },
       "commandLatency": {
         "n": 1,
@@ -1751,27 +1751,27 @@
       },
       "clockErrUs": {
         "n": 90,
-        "median": 211.0,
-        "p95": 622.0,
-        "p99": 690.0,
-        "max": 732.0,
-        "mean": 266.0
+        "median": 244.0,
+        "p95": 1151.0,
+        "p99": 1281.0,
+        "max": 1285.0,
+        "mean": 396.0
       },
       "clockUncUs": {
         "n": 90,
-        "median": 2607.0,
-        "p95": 3420.0,
-        "p99": 3794.0,
-        "max": 3972.0,
-        "mean": 2691.0
+        "median": 2425.0,
+        "p95": 3449.0,
+        "p99": 3784.0,
+        "max": 3848.0,
+        "mean": 2584.0
       },
       "coverage": 1.0,
       "recovery": {
         "n": 0
       },
-      "resyncs": 0,
+      "resyncs": 1,
       "stalls": 0,
-      "bytesPerDevPerS": 801,
+      "bytesPerDevPerS": 788,
       "failed": 0
     },
     {
@@ -1841,7 +1841,233 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 766,
+      "bytesPerDevPerS": 767,
+      "failed": 0
+    },
+    {
+      "scenario": "listening-spot-uncalibrated-n4",
+      "n": 4,
+      "network": "wifi-good",
+      "durationS": 70,
+      "spreadSteady": {
+        "n": 628,
+        "median": 186.31,
+        "p95": 186.75,
+        "p99": 186.79,
+        "max": 186.8,
+        "mean": 175.58
+      },
+      "spreadAll": {
+        "n": 689,
+        "median": 186.26,
+        "p95": 186.74,
+        "p99": 186.79,
+        "max": 186.8,
+        "mean": 160.75
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 7.28,
+        "p95": 7.28,
+        "p99": 7.28,
+        "max": 7.28,
+        "mean": 7.28
+      },
+      "driftLastMinute": {
+        "n": 689,
+        "median": 186.26,
+        "p95": 186.74,
+        "p99": 186.79,
+        "max": 186.8,
+        "mean": 160.75
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 600.0,
+        "p95": 600.0,
+        "p99": 600.0,
+        "max": 600.0,
+        "mean": 600.0
+      },
+      "clockErrUs": {
+        "n": 210,
+        "median": 216.0,
+        "p95": 582.0,
+        "p99": 689.0,
+        "max": 738.0,
+        "mean": 244.0
+      },
+      "clockUncUs": {
+        "n": 210,
+        "median": 2696.0,
+        "p95": 3468.0,
+        "p99": 3745.0,
+        "max": 3902.0,
+        "mean": 2737.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 0
+      },
+      "resyncs": 1,
+      "stalls": 0,
+      "bytesPerDevPerS": 991,
+      "failed": 0,
+      "listenerSpread": {
+        "n": 628,
+        "median": 191.26,
+        "p95": 191.71,
+        "p99": 191.74,
+        "max": 191.76,
+        "mean": 180.6
+      }
+    },
+    {
+      "scenario": "listening-spot-calibrated-n4",
+      "n": 4,
+      "network": "wifi-good",
+      "durationS": 70,
+      "spreadSteady": {
+        "n": 627,
+        "median": 19.01,
+        "p95": 29.48,
+        "p99": 46.63,
+        "max": 51.0,
+        "mean": 20.24
+      },
+      "spreadAll": {
+        "n": 688,
+        "median": 19.04,
+        "p95": 58.59,
+        "p99": 58.63,
+        "max": 58.64,
+        "mean": 23.59
+      },
+      "startSkew": {
+        "n": 2,
+        "median": 32.85,
+        "p95": 55.99,
+        "p99": 58.05,
+        "max": 58.56,
+        "mean": 32.85
+      },
+      "driftLastMinute": {
+        "n": 688,
+        "median": 19.04,
+        "p95": 58.59,
+        "p99": 58.63,
+        "max": 58.64,
+        "mean": 23.59
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 620.0,
+        "p95": 620.0,
+        "p99": 620.0,
+        "max": 620.0,
+        "mean": 620.0
+      },
+      "clockErrUs": {
+        "n": 210,
+        "median": 225.0,
+        "p95": 627.0,
+        "p99": 777.0,
+        "max": 1325.0,
+        "mean": 261.0
+      },
+      "clockUncUs": {
+        "n": 210,
+        "median": 2626.0,
+        "p95": 3527.0,
+        "p99": 3748.0,
+        "max": 3846.0,
+        "mean": 2713.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 0
+      },
+      "resyncs": 1,
+      "stalls": 0,
+      "bytesPerDevPerS": 1295,
+      "failed": 0,
+      "listenerSpread": {
+        "n": 627,
+        "median": 2.01,
+        "p95": 25.37,
+        "p99": 42.55,
+        "max": 46.93,
+        "mean": 4.85
+      }
+    },
+    {
+      "scenario": "channel-role-switch-n3",
+      "n": 3,
+      "network": "wifi-good",
+      "durationS": 60,
+      "spreadSteady": {
+        "n": 1068,
+        "median": 7.49,
+        "p95": 11.89,
+        "p99": 21.16,
+        "max": 24.91,
+        "mean": 8.03
+      },
+      "spreadAll": {
+        "n": 1129,
+        "median": 7.54,
+        "p95": 26.18,
+        "p99": 28.46,
+        "max": 28.47,
+        "mean": 9.1
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 28.48,
+        "p95": 28.48,
+        "p99": 28.48,
+        "max": 28.48,
+        "mean": 28.48
+      },
+      "driftLastMinute": {
+        "n": 1129,
+        "median": 7.54,
+        "p95": 26.18,
+        "p99": 28.46,
+        "max": 28.47,
+        "mean": 9.1
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 620.0,
+        "p95": 620.0,
+        "p99": 620.0,
+        "max": 620.0,
+        "mean": 620.0
+      },
+      "clockErrUs": {
+        "n": 120,
+        "median": 238.0,
+        "p95": 931.0,
+        "p99": 1163.0,
+        "max": 1183.0,
+        "mean": 306.0
+      },
+      "clockUncUs": {
+        "n": 120,
+        "median": 2830.0,
+        "p95": 3575.0,
+        "p99": 3831.0,
+        "max": 3971.0,
+        "mean": 2864.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 1038,
       "failed": 0
     },
     {

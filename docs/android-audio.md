@@ -52,12 +52,41 @@ measurements from [benchmarking.md](benchmarking.md).
 
 1. **Bluetooth and some USB/HDMI outputs** add latency that `AudioTrack` timestamps may not include (often 100–250 ms
    for A2DP, varying by codec and device). Software alignment cannot see it. The app warns when a Bluetooth output is
-   present and offers a per-device acoustic calibration offset. Simulation shows a ~185 ms error without calibration
-   and ~4 ms with it.
+   present; **Calibrate to this spot** (room screen) measures it with a microphone, and a manual per-device offset is
+   still available. Simulation shows a ~185 ms error without calibration and ~4 ms with it.
 2. **Phone speaker DSP** (loudness, virtualizers) can add a few ms that differs between models. This also needs
    acoustic calibration.
 3. **Start-latency variance per start** remains after learning (assumed ±6–35 ms). Rate correction removes it within
    seconds; the initial seconds of each start carry it.
 4. **Devices without usable speed change** fall back to seeks above 45 ms. Every seek is audible.
-5. **OEM battery optimizations** can throttle the app if the screen turns off. Keep the app in the foreground for
-   now.
+5. **OEM battery optimizations** can still throttle the app with the screen off, even with the foreground service
+   below. Some vendors (aggressive "app killers") need the app exempted from battery optimization by hand.
+
+## Background playback
+
+While in a room the plugin runs `PlaybackService`, a foreground service of type `mediaPlayback` with an ongoing
+notification (room name, current track, previous / play-pause / next). It keeps the process, the Dart isolate, the
+sockets and the audio thread alive with the screen off. Notification buttons send *room* controls through the
+coordinator (so "pause" pauses the whole room) and need control rights like any other control.
+
+Permissions: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, and `POST_NOTIFICATIONS` (Android 13+,
+requested at runtime; if denied the service still runs but its notification is hidden). It is deliberately not a
+Media3 `MediaSessionService`: a media session would let headset buttons and the system "media output" panel drive the
+*local* player and desynchronize this device from the room.
+
+## Channel roles (experimental)
+
+`RoleRenderersFactory` overrides `DefaultRenderersFactory.buildAudioSink` and puts a `ChannelMixingAudioProcessor`
+in front of the default processors (Media3 still appends silence skipping and Sonic, so rate correction works).
+For stereo input the 2×2 matrix is `left` `[1,1,0,0]`, `right` `[0,0,1,1]`, `mono` `[0.5,0.5,0.5,0.5]`; other channel
+counts pass through unchanged. The role is fixed when a player is built, so a change takes effect with the next
+segment, which the engine schedules immediately.
+
+## Calibration recording
+
+`MicRecorder` records mono PCM16 at 48 kHz with `AudioRecord`, from the `UNPROCESSED` source when
+`PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED` is true and `VOICE_RECOGNITION` otherwise (AGC, noise suppression and
+echo cancellation would smear click onsets). The first sample's time comes from `AudioRecord.getTimestamp`
+(`TIMEBASE_MONOTONIC`) when available, else from the start call. That timestamp only positions the search windows:
+corrections use arrival *differences* between devices, so a constant input latency cancels out. `RECORD_AUDIO` is
+requested at runtime when a calibration starts; the WAV is deleted right after analysis.

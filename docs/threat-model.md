@@ -21,6 +21,14 @@
 | Resource exhaustion | Floods connections, huge frames, many downloads | Max 32 pending handshakes, 5 s handshake timeout, 256 KiB frame limit (checked after receipt; WebSocket compression disabled), malformed-message budget, participant cap (16), transfer concurrency (2 per session, 8 total), 512 MiB file cap, bounded caches and logs | A determined LAN attacker can still saturate Wi-Fi airtime; no software defense exists for that |
 | Malformed or hostile input | Invalid JSON, wrong types, out-of-range values, malicious config | Strict `Reader` validation with typed errors. Config values are clamped (a malicious `maxRateDelta` cannot exceed 25 %). Fuzz-style tests check that malformed input never throws anything except `ProtocolException`. | Bugs in the JSON/WebSocket stack of the Dart VM |
 
+### Invite QR codes and join links
+
+`syncsphere://app/join?h=…&p=…&r=…&k=…` contains the join key, so it is exactly as sensitive as the key: anyone who
+sees the QR code or gets the link can join. The QR is shown only on demand on the host, and the UI says so. Parsing is
+strict (`JoinLink.tryParse`: allowed characters, length limits, port range, at most 8 hosts) because links arrive from
+outside the app (camera apps, messengers). A link only fills in a join; it never skips authentication. When the app is
+already in a room, opening a link does nothing but show a message.
+
 ## Why not TLS yet
 
 TLS on a LAN needs certificate trust. A self-signed certificate would require pinning its fingerprint, transferred
@@ -29,6 +37,10 @@ guessing entirely and works with short typed keys. Until then, the protocol aims
 explicitly **not confidentiality**. The UI says to share the key only with people in the room.
 
 ## Privacy
+
+- **Microphone (acoustic calibration):** recording happens only on the listener's phone, only for the calibration
+  segment (15–30 s), after an explicit confirmation and the Android permission prompt. The recording is analyzed on
+  the phone and deleted; only per-click timing numbers (`cal.res`) are sent to the coordinator.
 
 - Device ids are random per installation, not hardware identifiers.
 - No data leaves the local network and nothing is sent to any server. There is no analytics.

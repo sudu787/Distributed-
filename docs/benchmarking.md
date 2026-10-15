@@ -29,6 +29,10 @@ The suite is deterministic for a given `--seed` (default 42). It covers:
 - **Device heterogeneity:** flagship, midrange and low-end profiles (the low-end one has no rate control and
   stalls 6 times an hour).
 - **Output latency:** uncalibrated vs. calibrated Bluetooth (180 ms of unreported latency).
+- **Listening-spot calibration:** 4 devices at 0.3, 2, 4.5 and 7 m from the listener (one on uncalibrated
+  Bluetooth), without and with "calibrate to this spot". A virtual microphone synthesizes the recording (propagation,
+  noise, 18 ms input timestamp error); the metric is the spread *at the listener*, propagation included.
+- **Channel-role switches** during playback (a fresh segment per switch).
 - **Drift over 60 min:** ±100 ppm clock skew and ±80 ppm audio-clock error, with correction disabled vs. enabled.
 
 **Metrics** (all from ground truth unless noted):
@@ -57,6 +61,10 @@ Highlights (SIMULATED):
 - Without drift correction, spread reaches 149 ms after 60 min. With correction, p95 is 6.6 ms.
 - An uncalibrated Bluetooth device sits ~185 ms behind acoustically while software reports it in sync. A calibration
   offset fixes this (spread ≈ 4 ms).
+- Listening-spot calibration: spread at the listener drops from 191 ms to 2.0 ms median (p95 25 ms, all from the first
+  ~10 s after music resumes). The devices' *output* spread rises to ~19 ms, which is intended: nearer speakers are
+  delayed by their distance difference.
+- A channel-role switch costs a short blip (≤25 ms max in `channel-role-switch-n3`), then rate correction recovers.
 - The reported clock uncertainty contained the true offset in ≥ 99.9 % of samples in every scenario. It is
   conservative. Actual offset error p95 ranged from 0.1 ms (`lan-ideal`) to 8.5 ms (`wifi-congested`); median
   reported uncertainty ranged from 0.7 ms to 11 ms.

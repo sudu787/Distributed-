@@ -85,6 +85,10 @@ flowchart LR
 | 6. Membership Manager | `coordinator/membership.dart`. |
 | 7. Audio Distribution | `distribution/` (hashing, HTTP server, resumable downloader, cache, resolver). |
 | 8. Observability | `observability/event_log.dart` and `stats.dart`, sync reports, the diagnostics broadcast, and the simulator's ground-truth metrics. |
+| Acoustic calibration | `calibration/` (click tracks, onset detection, `combineCalibration`, `CalibrationListener`), `model/calibration_plan.dart`, and the coordinator's calibration mode ([protocol §5.1](protocol.md#51-acoustic-calibration)). Android: `MicRecorder.kt` + `AndroidCalibrationRecorder`. |
+| Join links | `discovery/join_link.dart` (format, strict parser, LAN address ranking); QR display, scanner and deep-link route in the app. |
+| Background playback | `PlaybackService.kt` (foreground service + notification), `BackgroundPlayback` (Dart), wired through the app's `PlatformHooks`. |
+| Channel roles | `ChannelRole` in the participant summary; `ChannelRoleMixing.kt` (Media3 channel mixing) on Android. |
 
 Each component sits behind an interface (`MessageConnection`, `AudioBackend`, `TrackResolver`, `MonotonicClock`),
 so the simulator, the CLI and the app can swap implementations.
@@ -263,7 +267,7 @@ docs/                       this documentation
 | Risk | Mitigation | Status |
 |---|---|---|
 | ExoPlayer start latency varies per device and per start | Learned compensation, then closed-loop correction | Implemented. Needs real-device validation. |
-| Reported position ≠ acoustic output (Bluetooth, DSP) | Per-device calibration offset; flagged in the UI | Offset implemented; measuring it needs a microphone ([roadmap](roadmap.md)) |
+| Reported position ≠ acoustic output (Bluetooth, DSP) | Per-device calibration offset, measured by "calibrate to this spot" | Implemented and simulated; not yet validated on phones ([roadmap](roadmap.md#acoustic-calibration)) |
 | Wi-Fi power save and asymmetry | Low-latency WifiLock, min-delay filtering, honest uncertainty | Implemented |
 | Rate changes audible on some content | ±1.5 % cap, pitch preserved, dead band | Configurable |
 | VBR MP3 seek inaccuracy | Media3 index seeking enabled | Implemented |
@@ -281,4 +285,4 @@ docs/                       this documentation
 | 4 | Hash verification, availability, LAN delivery, cache, resume | Done (tests over loopback HTTP) |
 | 5 | Membership, malformed input, timeouts, coordinator loss, authorization | Done (tests) |
 | 6 | Benchmarks | Simulated harness and results done. Real-device protocol written; real-device data still to collect. |
-| 7 | Acoustic calibration, spatial audio, adaptive intervals, failover | Failover (succession), calibration offset and adaptive intervals done; in-app acoustic calibration and spatial audio are designed only. See the [roadmap](roadmap.md). |
+| 7 | Acoustic calibration, spatial audio, adaptive intervals, failover | Failover (succession), adaptive intervals, in-app acoustic calibration and experimental channel roles implemented (simulated and unit-tested, not yet on phones). Repeat/shuffle, background playback and QR invites added. Placement-based spatial audio remains an idea. See the [roadmap](roadmap.md). |

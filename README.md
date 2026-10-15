@@ -37,6 +37,16 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   - an explicit "room needs to be recreated" when no successor is available
 - **Audio distribution:** tracks are identified by SHA-256. Either every phone has the file ("matching local files"),
   or the host serves it over HTTP with `Range` resume, per-session signed URLs, verification and an LRU cache.
+- **Listening-spot calibration:** "Calibrate to this spot" makes every phone click in turn, records them with this
+  phone's microphone, and shifts each device so the sound lines up *where you are*, including Bluetooth and speaker
+  delays software cannot see. Simulated (4 phones at 0.3–7 m, one on Bluetooth): spread at the listener 191 ms →
+  2 ms median (p95 25 ms, from the first ~10 s while devices re-converge). Not yet run on phones.
+- **Experimental channel roles:** each phone can play stereo, left, right or a mono mix (Media3 channel mixing).
+- **Repeat (off/all/one) and shuffle**, coordinated by the room.
+- **Background playback:** a foreground media service with a notification (room name, track, previous/play/next)
+  keeps the room running with the screen off.
+- **QR invites:** the host shows a QR code / link containing address, port and key; guests scan it in the app,
+  open it from the camera (`syncsphere://` deep link) or paste it.
 - **Observability:** structured event log, per-device sync reports, a room-wide diagnostics broadcast, and a
   diagnostics screen that labels every estimate as an estimate.
 - **Benchmarks:** a deterministic simulated suite (2/3/5/10 devices × 5 network models, faults, drift, heterogeneous
@@ -92,11 +102,13 @@ Download that artifact and install it with `adb install` or a file manager.
 1. Install the app on 2+ phones on the same Wi-Fi or hotspot.
 2. On every phone, **Import** the same audio files. Identical files match by content. Alternatively, import only on the
    host and choose *"Local file, else download from host"*.
-3. Host: **Create room**. The room screen shows the join key and the host address.
-4. Others: tap the room under **Nearby rooms** (or **Join by address**) and enter the key.
+3. Host: **Create room**. The room screen shows the join key, the host address and **Invite with QR code**.
+4. Others: **Scan invite QR code**, or tap the room under **Nearby rooms** (or **Join by address**) and enter the key.
 5. Open **Player** and press play. All phones start together at a scheduled instant.
 6. **Diagnostics** shows clock offsets ± uncertainty, estimated playback error, correction mode and recent events per
    device.
+7. Optional: stand where you will listen and tap **Calibrate to this spot** on the room screen. Use a device's ⋮ menu
+   to give it a channel role.
 
 ### Headless node (laptop as coordinator or probe)
 
@@ -117,6 +129,10 @@ software-estimated sync data during real-device benchmarks.
 | `INTERNET`, `ACCESS_NETWORK_STATE` | Local control channel (WebSocket), track delivery (HTTP), discovery (UDP) |
 | `ACCESS_WIFI_STATE`, `CHANGE_WIFI_MULTICAST_STATE` | `MulticastLock` so broadcast discovery packets get through |
 | `WAKE_LOCK` | ExoPlayer wake mode, and a low-latency `WifiLock` while in a room |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Background playback service while in a room |
+| `POST_NOTIFICATIONS` | Shows that service's notification (Android 13+, asked at runtime; optional) |
+| `RECORD_AUDIO` | Only for "Calibrate to this spot", asked when you start one; the recording never leaves the phone |
+| `CAMERA` | Only for scanning an invite QR code (from `mobile_scanner`) |
 
 Ports:
 
@@ -147,6 +163,8 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
 3. **Coordinator failover on hardware.** Succession failover is implemented and tested in simulation and over
    loopback sockets, but not on phones. It is not consensus: a network partition can split a room
    ([roadmap](docs/roadmap.md#coordinator-failover-milestone)).
-4. **Background playback** via a foreground media service.
+4. **New features on hardware.** Acoustic calibration, channel roles, background playback and QR invites are
+   unit-tested and simulated (calibration, roles) but have not run on phones. Calibration in particular needs
+   checking against microphones with heavy built-in processing.
 
 Only share music you are authorized to share.

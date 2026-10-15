@@ -72,22 +72,26 @@ jitter. Cost: an owned decoder and resampler, plus format coverage.
 
 | Item | Status |
 |---|---|
-| Per-device calibration offset applied to the reported position | **done** (engine, UI field, persisted) |
+| Per-device calibration offset applied to the reported position | **done** (engine, UI field, kept by the room via `setCalibration`, persisted) |
 | Offline acoustic skew measurement with an external multichannel recorder | **done** (`tools/onset_skew.py`, `tools/make_click_track.py`) |
-| In-app calibration: the host plays a click train and each phone records it with its own microphone, cross-correlates, and solves for its own output latency (subtracting propagation, assuming known distance or co-location) | designed |
+| **"Calibrate to this spot"**: every device plays a personal click track in turn as a scheduled segment; the listener's microphone finds each onset; the coordinator removes each device's own software error at the click times and updates every member's offset ([protocol §5.1](protocol.md#51-acoustic-calibration)) | **implemented**: core, coordinator, Android recorder (`AudioRecord`, UNPROCESSED source when available), UI. Simulated with a virtual microphone (propagation, noise, 18 ms input timestamp error): spread at the listener 191 ms → 2.0 ms median, p95 25 ms (first ~10 s after music resumes), SIMULATED (`listening-spot-*-n4`). **Not yet run on phones.** |
+| Repeat calibrations from several spots and optimize for an area instead of a point | idea |
 | Bluetooth latency estimation via `AudioManager`/codec info | idea (unreliable across devices) |
 
 Digital alignment is not the same as what a listener hears. Sound needs about 2.9 ms per metre. Phones 3 m apart
-cannot all be aligned for every listener position; alignment can be optimized for one listening spot, by delaying
-the nearer speakers by `(d_far − d_near) / 343 m/s`.
+cannot all be aligned for every listener position; "calibrate to this spot" optimizes for one listening position by
+delaying the nearer speakers by `(d_far − d_near) / 343 m/s`, which makes other positions *worse* by up to the same
+amount.
 
 ## Experimental spatialized playback
 
 **idea**, not a prerequisite, and not "Dolby Atmos" or professional surround. Possible steps:
 
-1. **Channel roles.** Assign L, R or mono-sum per device: a downmix in the native pipeline, with the role carried in
-   the participant summary.
-2. **Per-device gain and delay trims** from the calibration above, for a chosen listening position.
+1. **Channel roles** — **implemented (experimental)**: `stereo`, `left`, `right` or `mono` per device, carried in the
+   participant summary (`ch`). On Android a Media3 `ChannelMixingAudioProcessor` in a custom audio sink routes one
+   source channel to all outputs. A role change while playing switches to a freshly prepared segment at a scheduled
+   instant (SIMULATED: a brief ~13 ms blip, then back in sync). Not yet listened to on hardware.
+2. **Per-device delay trims** for a chosen listening position: done via acoustic calibration above. Gain trims: idea.
 3. **Placement UI.** Drag devices on a floor plan; compute delays from distances.
 4. Limits to state honestly: phone speakers have very limited bass and differing frequency responses, phase
    interference between unsynchronized speakers produces comb filtering below roughly 1 kHz, and any device-to-device
