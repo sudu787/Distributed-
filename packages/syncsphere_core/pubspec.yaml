@@ -1,0 +1,19 @@
+name: syncsphere_core
+description: >-
+  Transport-agnostic distributed playback core for SyncSphere: clock
+  synchronization, coordinator state machine, participant playback engine,
+  drift correction, LAN audio distribution, discovery and simulation.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  crypto: ^3.0.6
+  fake_async: ^1.3.2
+  args: ^2.6.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0

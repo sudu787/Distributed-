@@ -1,0 +1,27 @@
+/// SyncSphere distributed playback core.
+library;
+
+export 'src/config/sync_config.dart';
+export 'src/time/clock.dart';
+export 'src/time/clock_sync.dart';
+export 'src/time/clock_domain_bridge.dart';
+export 'src/protocol/reader.dart';
+export 'src/protocol/messages.dart';
+export 'src/protocol/auth.dart';
+export 'src/protocol/codec.dart';
+export 'src/model/room_state.dart';
+export 'src/transport/transport.dart';
+export 'src/transport/memory_transport.dart';
+export 'src/transport/websocket_transport.dart';
+export 'src/observability/event_log.dart';
+export 'src/observability/stats.dart';
+export 'src/coordinator/lead_time.dart';
+export 'src/coordinator/membership.dart';
+export 'src/coordinator/room_coordinator.dart';
+export 'src/audio/audio_backend.dart';
+export 'src/distribution/track_resolver.dart';
+export 'src/participant/drift_controller.dart';
+export 'src/participant/playback_engine.dart';
+export 'src/participant/participant_session.dart';
+export 'src/simulation/sim_audio_backend.dart';
+export 'src/simulation/scenario.dart';

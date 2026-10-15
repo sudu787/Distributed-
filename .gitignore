@@ -1,0 +1,29 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+pubspec_overrides.yaml
+*.iml
+.idea/
+.vscode/
+.flutter-plugins
+.flutter-plugins-dependencies
+coverage/
+
+# Android
+local.properties
+*.keystore
+*.jks
+key.properties
+.gradle/
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+**/android/.kotlin/
+
+# Benchmark scratch output (committed results live in benchmarks/results)
+benchmarks/out/
+*.part
+
+# OS
+.DS_Store
