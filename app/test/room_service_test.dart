@@ -369,6 +369,52 @@ void main() {
     expect(c.session!.phase, isNot(SessionPhase.failed));
     await c.leave();
   });
+
+  test('host ends the party: guests stop for good (no failover) and can be told why', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    Future<(RoomService, DeviceIdentity)> device(String name, int port, List<LibraryTrack> tracks) async {
+      final st = MemoryAppStore();
+      for (final t in tracks) {
+        await st.upsertTrack(t);
+      }
+      final svc = RoomService(
+        store: st,
+        cacheDir: Directory('${tmp.path}/end-cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+        failoverPort: port,
+        watchForNewerCoordinator: false,
+      );
+      return (svc, await st.loadIdentity(defaultName: name));
+    }
+
+    final lib = LibraryService(store: MemoryAppStore(), libraryDir: Directory('${tmp.path}/end-lib'), log: EventLog(clock: clock));
+    final track = await lib.import(await audioFile('end.mp3', 13));
+    final (host, hostId) = await device('host', 47941, [track]);
+    final (b, bId) = await device('b', 47942, [track]);
+    final (c, cId) = await device('c', 47943, [track]);
+    final info = await host.host(identity: hostId, roomName: 'Over', tracks: [track], port: 0, openControl: true);
+    await b.join(identity: bId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await c.join(identity: cId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    expect((await c.session!.control(ControlAction.play)).accepted, isTrue);
+    await Future<void>.delayed(const Duration(seconds: 1));
+
+    await host.leave(); // "End party"
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (!(b.session!.phase == SessionPhase.failed && c.session!.phase == SessionPhase.failed)) {
+      if (DateTime.now().isAfter(deadline)) fail('guests did not learn that the party ended');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(b.session!.lastFailure, startsWith(RejectCode.roomClosed));
+    // Wait past the failover delay: nobody may take over an ended party.
+    await Future<void>.delayed(const Duration(seconds: 3));
+    expect(b.coordinator, isNull);
+    expect(c.coordinator, isNull);
+    await b.leave(endParty: false);
+    await c.leave(endParty: false);
+  });
 }
 
 class _RecordingHooks extends PlatformHooks {

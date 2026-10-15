@@ -160,11 +160,14 @@ class RoomController extends Notifier<RoomViewState> {
     state = RoomViewState(status: RoomStatus.active, info: info, room: s.state, phase: s.phase, role: s.role);
     _subs
       ..add(s.stateStream.listen((r) => state = state.copyWith(room: r, role: s.role)))
-      ..add(s.phaseStream.listen((p) => state = state.copyWith(
-            phase: p,
-            coordinatorSuspect: s.coordinatorSuspect,
-            error: p == SessionPhase.failed ? s.lastFailure : null,
-          )))
+      ..add(s.phaseStream.listen((p) {
+        state = state.copyWith(
+          phase: p,
+          coordinatorSuspect: s.coordinatorSuspect,
+          error: p == SessionPhase.failed ? s.lastFailure : null,
+        );
+        if (p == SessionPhase.failed) unawaited(_leaveAfterFailure(s.lastFailure));
+      }))
       ..add(s.diagnosticsStream.listen((d) => state = state.copyWith(diagnostics: d)))
       ..add(s.engine.statusStream.listen((e) => state = state.copyWith(engine: e)));
     _poll = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -187,6 +190,28 @@ class RoomController extends Notifier<RoomViewState> {
     _subs.clear();
     _poll?.cancel();
     _poll = null;
+  }
+
+  /// The session ended for good (host ended the party, rejected, or the
+  /// coordinator stayed unreachable): go back home and say why.
+  Future<void> _leaveAfterFailure(String? failure) async {
+    if (state.status == RoomStatus.leaving || state.status == RoomStatus.none) return;
+    final msg = failure == null
+        ? 'Disconnected from the party.'
+        : failure.startsWith(RejectCode.roomClosed)
+            ? 'The host ended the party.'
+            : failure.startsWith('unreachable')
+                ? 'Lost the connection to the party.'
+                : 'Disconnected from the party ($failure).';
+    state = state.copyWith(status: RoomStatus.leaving);
+    _detach();
+    try {
+      await _svc.leave(endParty: false);
+    } catch (_) {
+      // Already gone.
+    }
+    ref.invalidate(roomHistoryProvider);
+    state = RoomViewState(error: msg);
   }
 
   Future<void> leave() async {

@@ -1,7 +1,11 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
+import '../data/models.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
@@ -27,7 +31,7 @@ class QueueView extends ConsumerWidget {
               ? FilledButton.tonalIcon(
                   icon: const Icon(Icons.add),
                   label: const Text('Add songs'),
-                  onPressed: () => _addTracks(context, ref),
+                  onPressed: () => _chooseSource(context, ref),
                 )
               : null,
         ),
@@ -68,13 +72,70 @@ class QueueView extends ConsumerWidget {
     );
   }
 
+  Future<void> _chooseSource(BuildContext context, WidgetRef ref) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.phone_android),
+            title: const Text('From this phone…'),
+            subtitle: const Text('Pick audio files; they are added to My music and the queue'),
+            onTap: () => Navigator.pop(c, 'phone'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.library_music_outlined),
+            title: const Text('From My music'),
+            onTap: () => Navigator.pop(c, 'library'),
+          ),
+        ]),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    if (choice == 'phone') {
+      await _addFromPhone(context, ref);
+    } else {
+      await _addTracks(context, ref);
+    }
+  }
+
+  /// Imports new files during a party and queues them right away.
+  Future<void> _addFromPhone(BuildContext context, WidgetRef ref) async {
+    final picked = await FilePicker.pickFiles(type: FileType.audio, dialogTitle: 'Add songs');
+    final files = [for (final f in picked) if (f.path != null) File(f.path!)];
+    if (files.isEmpty) return;
+    final lib = ref.read(libraryServiceProvider);
+    final added = <LibraryTrack>[];
+    final errors = <String>[];
+    for (final f in files) {
+      try {
+        added.add(await lib.import(f));
+      } catch (e) {
+        errors.add('${f.uri.pathSegments.last}: $e');
+      }
+    }
+    ref.invalidate(libraryProvider);
+    final inRoom = ref.read(roomControllerProvider).room?.playlist.map((t) => t.id).toSet() ?? {};
+    final fresh = [for (final t in added) if (!inRoom.contains(t.id)) t];
+    if (fresh.isNotEmpty) ref.read(roomControllerProvider.notifier).addTracks(fresh);
+    if (!context.mounted) return;
+    showMessage(
+      context,
+      errors.isEmpty
+          ? 'Added ${fresh.length} song${fresh.length == 1 ? '' : 's'} to the queue.'
+          : 'Some files could not be added: ${errors.join('; ')}',
+      error: errors.isNotEmpty,
+    );
+  }
+
   Future<void> _addTracks(BuildContext context, WidgetRef ref) async {
     final lib = await ref.read(libraryProvider.future);
     final inRoom = ref.read(roomControllerProvider).room?.playlist.map((t) => t.id).toSet() ?? {};
     final candidates = lib.where((t) => !inRoom.contains(t.id)).toList();
     if (!context.mounted) return;
     if (candidates.isEmpty) {
-      showMessage(context, lib.isEmpty ? 'Add music on the home screen first (My music → Add).' : 'All your songs are already in the queue.');
+      showMessage(context, lib.isEmpty ? 'No songs in My music yet. Use "From this phone…".' : 'All your songs are already in the queue.');
       return;
     }
     final chosen = <String>{};

@@ -402,7 +402,10 @@ class ParticipantSession implements ClockSource {
     log.error('session.failed', lastFailure!);
     _detach();
     _setPhase(SessionPhase.failed);
-    engine.onConnectionChanged(false);
+    // The session is over (room ended, rejected, or unreachable for minutes):
+    // stop the music instead of free-running on the last timeline, which is
+    // only meant for temporary disconnects.
+    unawaited(engine.dispose());
     if (_firstJoin != null && !_firstJoin!.isCompleted) _firstJoin!.completeError(f);
   }
 

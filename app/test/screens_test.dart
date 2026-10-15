@@ -260,4 +260,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Rejoin your party'), findsNothing);
   });
+
+  testWidgets('host can add songs from the phone during a party', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
+    await tester.pump();
+    await tester.tap(find.text('Queue'));
+    await tester.pump();
+    await tester.tap(find.text('Add songs'));
+    await tester.pumpAndSettle();
+    expect(find.text('From this phone…'), findsOneWidget);
+    expect(find.text('From My music'), findsOneWidget);
+  });
 }

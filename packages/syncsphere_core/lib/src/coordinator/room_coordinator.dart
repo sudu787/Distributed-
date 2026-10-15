@@ -281,10 +281,20 @@ class RoomCoordinator {
     for (final s in _acceptorSubs) {
       unawaited(s.cancel());
     }
-    for (final l in _links.toList()) {
+    var byeSent = false;
+    for (final l in _links) {
       // After a redirect members reconnect elsewhere; a bye would end their
       // session.
-      if (l.hs == _Hs.active && !_redirected) _send(l, ByeMsg(reason));
+      if (l.hs == _Hs.active && !_redirected) {
+        _send(l, ByeMsg(reason));
+        byeSent = true;
+      }
+    }
+    // Let the byes reach the members before the links close: a member that
+    // only sees the link drop would treat it as a crash and fail over,
+    // keeping the "ended" party alive without its host.
+    if (byeSent) await Future<void>.delayed(const Duration(milliseconds: 300));
+    for (final l in _links.toList()) {
       l.handshakeTimer?.cancel();
       l.hs = _Hs.closed;
       // Fire and forget: closing must not hang on a subscription cancel.

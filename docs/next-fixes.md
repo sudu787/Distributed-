@@ -1,4 +1,4 @@
-# Fix: "End party" leaves guests playing, can't rejoin, can't add songs in a party (+ move work to laptop)
+# Done (see commit): "End party" leaves guests playing, can't rejoin, can't add songs in a party (+ move work to laptop)
 
 ## Context
 Real-phone test: sync was good, but (1) after the host tapped "End party" the two guests kept playing,
