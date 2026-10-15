@@ -93,5 +93,6 @@ RoomState translateForSuccessor(
     coordinatorEpoch: newEpoch,
     timeline: translated,
     clearPending: true,
+    clearCalibration: true,
   );
 }

@@ -26,6 +26,8 @@ library;
 
 import 'dart:async';
 
+import '../model/room_state.dart' show ChannelRole;
+
 /// Where to read audio from.
 class TrackSource {
   /// `file:///...` path on the device, or `content://` on Android.
@@ -135,6 +137,11 @@ abstract class AudioBackend {
 
   Future<void> setVolume(double volume);
 
+  /// Experimental distributed stereo: which source channel(s) this device
+  /// renders. Backends may apply it immediately or from the next prepared
+  /// segment.
+  Future<void> setChannelRole(ChannelRole role);
+
   /// Stops and releases all segments.
   Future<void> stop();
 
@@ -198,6 +205,8 @@ class NullAudioBackend implements AudioBackend {
   Future<void> setRate(double rate) async {}
   @override
   Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> setChannelRole(ChannelRole role) async {}
 
   @override
   Future<void> stop() async {

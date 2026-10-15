@@ -30,3 +30,7 @@ export 'src/distribution/file_server.dart';
 export 'src/distribution/track_downloader.dart';
 export 'src/discovery/udp_discovery.dart';
 export 'src/participant/failover.dart';
+export 'src/model/calibration_plan.dart';
+export 'src/calibration/click_track.dart';
+export 'src/calibration/calibration_analysis.dart';
+export 'src/calibration/calibration_runtime.dart';

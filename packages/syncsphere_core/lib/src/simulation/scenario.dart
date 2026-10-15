@@ -14,10 +14,16 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
 
+import '../audio/audio_backend.dart';
+import '../calibration/calibration_analysis.dart';
+import '../calibration/calibration_runtime.dart';
+import '../calibration/click_track.dart';
 import '../config/sync_config.dart';
+import '../model/calibration_plan.dart';
 import '../coordinator/room_coordinator.dart';
 import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
@@ -110,6 +116,13 @@ class PartitionAction extends SimAction {
   String get label => 'partition(p$participant, ${duration.inSeconds}s)';
 }
 
+/// The listener device requests an acoustic calibration to its position.
+class CalibrateAction extends SimAction {
+  const CalibrateAction();
+  @override
+  String get label => 'calibrate';
+}
+
 /// Kills the host device (coordinator process and the host's own player).
 /// Participants must detect it and either fail over or report it.
 class KillCoordinatorAction extends SimAction {
@@ -146,6 +159,14 @@ class Scenario {
   /// Enables coordinator failover by succession on all non-host devices.
   final bool failover;
 
+  /// Device whose position defines "what the listener hears": it gets a
+  /// (simulated) microphone, and ground truth additionally reports the
+  /// spread including acoustic propagation to it.
+  final int? listenerIndex;
+
+  /// Distance (m) from each device to the listener, cycled like [profiles].
+  final List<double> distancesM;
+
   const Scenario({
     required this.name,
     required this.participants,
@@ -161,6 +182,8 @@ class Scenario {
     this.trackDuration = const Duration(minutes: 30),
     this.outputCalibrationUs = const [0],
     this.failover = false,
+    this.listenerIndex,
+    this.distancesM = const [1.0],
   });
 
   Map<String, Object?> toJson() => {
@@ -174,6 +197,8 @@ class Scenario {
         'audioPpmRange': audioPpmRange,
         'seed': seed,
         if (failover) 'failover': true,
+        if (listenerIndex != null) 'listener': listenerIndex,
+        if (listenerIndex != null) 'distancesM': distancesM,
       };
 }
 
@@ -362,6 +387,18 @@ class SimulationRunner {
           joinKey: 'SIMKEY01',
           outputCalibrationUs: sc.outputCalibrationUs[i % sc.outputCalibrationUs.length],
           failover: failover,
+          recorder: sc.listenerIndex == i
+              ? SimMicrophone(
+                  trueNowUs: trueNow,
+                  listenerClock: clk,
+                  devices: () => [
+                    for (final d in devices) (d.id, d.backend, sc.distancesM[d.index % sc.distancesM.length])
+                  ],
+                  plan: () => coordinator.state.calibration,
+                  random: Random(sc.seed * 7 + i),
+                )
+              : null,
+          calibrationTracks: const _SimCalibrationTracks(),
         ),
         connector: net.connector(id, 'coordinator', link),
         clock: clk,
@@ -409,7 +446,8 @@ class SimulationRunner {
       if (coordinatorKilled) return;
       final tl = coordinator.state.timeline;
       final t = trueNow();
-      if (tl.isPlaying) {
+      // Calibration click segments are not music; keep them out of metrics.
+      if (tl.isPlaying && !coordinator.state.isCalibrationTrack(tl.trackId)) {
         final coordNow = coordClock.nowMicros();
         final expected = tl.expectedPositionAt(coordNow);
         final errs = <String, int>{};
@@ -510,6 +548,12 @@ class SimulationRunner {
           control(ControlAction.seek, pos: position.inMicroseconds);
         case NextTrackAction():
           control(ControlAction.next);
+        case CalibrateAction():
+          final li = sc.listenerIndex;
+          if (li == null) throw StateError('CalibrateAction needs Scenario.listenerIndex');
+          unawaited(devices[li].session.control(ControlAction.calibrate).then((ack) {
+            logEvent(ack.accepted ? 'calibration-started' : 'calibration-rejected', {'error': ack.error});
+          }));
         case PartitionAction(:final participant, :final duration):
           final d = devices[participant];
           d.link.partition();
@@ -565,6 +609,24 @@ class SimulationRunner {
       if (sp != null) {
         spread.add(sp / 1000);
         if (s.trueUs - genStart[s.generation]! > 3000000) spreadSteady.add(sp / 1000);
+      }
+    }
+
+    // What the listener hears: acoustic error plus propagation delay to the
+    // listener's position (343 m/s).
+    final listenerSpread = SampleStats();
+    if (sc.listenerIndex != null) {
+      final propUs = {
+        for (var i = 0; i < sc.participants; i++) 'device-$i': sc.distancesM[i % sc.distancesM.length] / 343.0 * 1e6
+      };
+      for (final smp in samples) {
+        if (smp.errors.length < 2) continue;
+        if (timelines[smp.generation] == null) continue;
+        // A positive position error means the device is *ahead*, i.e. a
+        // given moment of the music reaches the listener earlier.
+        final heard = [for (final e in smp.errors.entries) propUs[e.key]! - e.value];
+        if (smp.trueUs - genStart[smp.generation]! <= 3000000) continue;
+        listenerSpread.add((heard.reduce(max) - heard.reduce(min)) / 1000);
       }
     }
 
@@ -633,6 +695,7 @@ class SimulationRunner {
         .toList();
     final metrics = <String, Object?>{
       'interDeviceSpreadMs_all': spread.summary(),
+      if (sc.listenerIndex != null) 'listenerSpreadMs_steady': listenerSpread.summary(),
       'interDeviceSpreadMs_steady': spreadSteady.summary(),
       'pairwiseErrorMs': pairwise.summary(),
       'absErrorVsTimelineMs': absErr.summary(),
@@ -682,6 +745,104 @@ class SimulationRunner {
     return SimulationResult(sc, metrics, samples, simEvents);
   }
 
+}
+
+class _SimCalibrationTracks implements CalibrationTrackFactory {
+  const _SimCalibrationTracks();
+  @override
+  Future<TrackSource> sourceFor(CalibrationPlan plan, int deviceIndex) async =>
+      TrackSource(uri: Uri.parse('sim:///calibration/${plan.id}/$deviceIndex'), trackId: plan.trackId);
+}
+
+/// Virtual microphone at the listener's position. It traces every device's
+/// acoustic output during the recording, works out when each calibration
+/// click reaches the listener (output time + distance / 343 m/s), and
+/// synthesizes a 16 kHz PCM recording with noise. The recording's start
+/// timestamp is deliberately off by an unknown input latency, as on a phone.
+class SimMicrophone implements CalibrationRecorder {
+  final int Function() trueNowUs;
+  final DerivedClock listenerClock;
+  final List<(String, SimulatedAudioBackend, double)> Function() devices;
+  final CalibrationPlan? Function() plan;
+  final Random random;
+  final int sampleRate;
+  final int inputLatencyUs;
+
+  SimMicrophone({
+    required this.trueNowUs,
+    required this.listenerClock,
+    required this.devices,
+    required this.plan,
+    required this.random,
+    this.sampleRate = 16000,
+    this.inputLatencyUs = 18000,
+  });
+
+  @override
+  Future<AudioRecording> record({required int startAtLocalUs, required int durationUs}) async {
+    final startTrue = listenerClock.toReference(startAtLocalUs);
+    final wait = startTrue - trueNowUs();
+    if (wait > 0) await Future<void>.delayed(Duration(microseconds: wait));
+    final t0 = trueNowUs();
+    final p = plan();
+    final devs = devices();
+    final traces = {for (final d in devs) d.$1: <(int, int)>[]};
+    final tracer = Timer.periodic(const Duration(microseconds: 500), (_) {
+      final t = trueNowUs();
+      for (final d in devs) {
+        final pos = d.$2.acousticPositionAt(t);
+        if (pos != null) traces[d.$1]!.add((t, pos));
+      }
+    });
+    await Future<void>.delayed(Duration(microseconds: durationUs));
+    tracer.cancel();
+
+    final n = (durationUs * sampleRate / 1e6).round();
+    final buf = Float64List(n);
+    if (p != null) {
+      final click = clickWaveform(sampleRate: sampleRate, hz: p.clickHz, ms: p.clickMs);
+      for (final (id, _, dist) in devs) {
+        final k = p.order.indexOf(id);
+        if (k < 0) continue;
+        final tr = traces[id]!;
+        for (final slot in p.slotsOf(k)) {
+          final arrival = _crossing(tr, p.slotPositionUs(slot));
+          if (arrival == null) continue;
+          final heardAt = arrival + (dist / 343.0 * 1e6).round();
+          final start = ((heardAt - t0) * sampleRate / 1e6).round();
+          final gain = 20000 / max(0.5, dist);
+          for (var i = 0; i < click.length; i++) {
+            if (start + i >= 0 && start + i < n) buf[start + i] += click[i] * gain;
+          }
+        }
+      }
+    }
+    final pcm = Int16List(n);
+    for (var i = 0; i < n; i++) {
+      final u1 = 1 - random.nextDouble(), u2 = random.nextDouble();
+      final noise = sqrt(-2 * log(u1)) * cos(2 * pi * u2) * 200;
+      pcm[i] = (buf[i] + noise).round().clamp(-32768, 32767);
+    }
+    // The first sample was actually captured at t0, but like a real phone
+    // we report it inputLatencyUs late; analysis must not care.
+    return AudioRecording(
+      samples: pcm,
+      sampleRate: sampleRate,
+      firstSampleLocalUs: listenerClock.nowMicros() - durationUs + inputLatencyUs,
+    );
+  }
+
+  /// True time at which the traced position crossed [pos] (interpolated).
+  static int? _crossing(List<(int, int)> tr, int pos) {
+    for (var i = 1; i < tr.length; i++) {
+      final (ta, pa) = tr[i - 1];
+      final (tb, pb) = tr[i];
+      if (pa <= pos && pos < pb && pb > pa) {
+        return ta + ((pos - pa) * (tb - ta) / (pb - pa)).round();
+      }
+    }
+    return null;
+  }
 }
 
 class _SimFailover implements FailoverDelegate {

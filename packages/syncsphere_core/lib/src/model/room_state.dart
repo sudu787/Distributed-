@@ -14,6 +14,7 @@
 library;
 
 import '../protocol/reader.dart';
+import 'calibration_plan.dart';
 
 enum PlaybackStatus { idle, playing, paused }
 
@@ -248,6 +249,14 @@ class TrackInfo {
   static bool isValidTrackId(String s) => _hex64.hasMatch(s);
 }
 
+/// What a device plays from a stereo source (experimental distributed
+/// stereo). Phones usually have one loudspeaker, so `left`/`right` route a
+/// single source channel to all of the device's outputs.
+enum ChannelRole { stereo, left, right, mono }
+
+/// Room-wide repeat behaviour at the end of a track.
+enum RepeatMode { off, all, one }
+
 enum ParticipantRole {
   /// The coordinator's own device. Full control, cannot be demoted.
   host,
@@ -281,6 +290,12 @@ class ParticipantSummary {
   /// coordinator (null when it is not a failover candidate).
   final String? endpoint;
 
+  final ChannelRole channel;
+
+  /// Acoustic calibration offset assigned by the last room calibration (µs),
+  /// or null if the device was not calibrated in this room.
+  final int? calibrationUs;
+
   const ParticipantSummary({
     required this.deviceId,
     required this.displayName,
@@ -290,6 +305,8 @@ class ParticipantSummary {
     this.currentTrack = TrackAvailability.unknown,
     this.canHost = false,
     this.endpoint,
+    this.channel = ChannelRole.stereo,
+    this.calibrationUs,
   });
 
   ParticipantSummary copyWith({
@@ -308,6 +325,8 @@ class ParticipantSummary {
         currentTrack: currentTrack ?? this.currentTrack,
         canHost: canHost,
         endpoint: endpoint,
+        channel: channel,
+        calibrationUs: calibrationUs,
       );
 
   Map<String, Object?> toJson() => {
@@ -319,6 +338,8 @@ class ParticipantSummary {
         'track': currentTrack.name,
         'canHost': canHost,
         if (endpoint != null) 'ep': endpoint,
+        if (channel != ChannelRole.stereo) 'ch': channel.name,
+        if (calibrationUs != null) 'cal': calibrationUs,
       };
 
   factory ParticipantSummary.fromJson(Map<String, Object?> j) {
@@ -332,6 +353,8 @@ class ParticipantSummary {
       currentTrack: r.enumValue('track', TrackAvailability.values),
       canHost: r.optBoolean('canHost') ?? false,
       endpoint: r.optString('ep', maxLength: 128),
+      channel: r.optEnum('ch', ChannelRole.values) ?? ChannelRole.stereo,
+      calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000),
     );
   }
 }
@@ -351,6 +374,12 @@ class RoomState {
   final double masterVolume;
   final List<ParticipantSummary> participants;
   final DistributionMode distribution;
+  final RepeatMode repeat;
+  final bool shuffle;
+
+  /// Active acoustic calibration, if any (its click track is not part of the
+  /// playlist).
+  final CalibrationPlan? calibration;
 
   const RoomState({
     required this.roomId,
@@ -364,6 +393,9 @@ class RoomState {
     this.masterVolume = 1.0,
     this.participants = const [],
     this.distribution = DistributionMode.auto,
+    this.repeat = RepeatMode.off,
+    this.shuffle = false,
+    this.calibration,
   });
 
   TrackInfo? trackById(String? id) {
@@ -371,8 +403,14 @@ class RoomState {
     for (final t in playlist) {
       if (t.id == id) return t;
     }
+    final cal = calibration;
+    if (cal != null && cal.trackId == id) {
+      return TrackInfo(id: id, title: 'Calibration', durationUs: cal.durationUs, sizeBytes: 0, hostServes: false);
+    }
     return null;
   }
+
+  bool isCalibrationTrack(String? id) => id != null && calibration?.trackId == id;
 
   int indexOfTrack(String? id) => playlist.indexWhere((t) => t.id == id);
 
@@ -395,6 +433,10 @@ class RoomState {
     double? masterVolume,
     List<ParticipantSummary>? participants,
     DistributionMode? distribution,
+    RepeatMode? repeat,
+    bool? shuffle,
+    CalibrationPlan? calibration,
+    bool clearCalibration = false,
   }) =>
       RoomState(
         roomId: roomId,
@@ -408,6 +450,9 @@ class RoomState {
         masterVolume: masterVolume ?? this.masterVolume,
         participants: participants ?? this.participants,
         distribution: distribution ?? this.distribution,
+        repeat: repeat ?? this.repeat,
+        shuffle: shuffle ?? this.shuffle,
+        calibration: clearCalibration ? null : (calibration ?? this.calibration),
       );
 
   Map<String, Object?> toJson() => {
@@ -422,6 +467,9 @@ class RoomState {
         'mvol': masterVolume,
         'parts': [for (final p in participants) p.toJson()],
         'dist': distribution.name,
+        if (repeat != RepeatMode.off) 'rep': repeat.name,
+        if (shuffle) 'shuf': true,
+        if (calibration != null) 'cal': calibration!.toJson(),
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -446,6 +494,9 @@ class RoomState {
           ParticipantSummary.fromJson(m)
       ],
       distribution: r.enumValue('dist', DistributionMode.values),
+      repeat: r.optEnum('rep', RepeatMode.values) ?? RepeatMode.off,
+      shuffle: r.optBoolean('shuf') ?? false,
+      calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
     );
   }
 }

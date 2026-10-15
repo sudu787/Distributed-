@@ -16,7 +16,10 @@ library;
 import 'dart:async';
 import 'dart:math';
 
+
 import '../config/sync_config.dart';
+import '../calibration/calibration_analysis.dart';
+import '../model/calibration_plan.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
 import '../protocol/auth.dart';
@@ -144,13 +147,18 @@ class RoomCoordinator {
   /// re-applied when those devices rejoin.
   final Map<String, ParticipantRole> _restoredRoles = {};
 
+  final Random _random;
+  List<String> _shuffleOrder = const [];
+
   RoomCoordinator({
     required this.options,
     required this.clock,
     EventLog? log,
     RoomState? restoredState,
     String? instanceId,
+    Random? random,
   })  : log = log ?? EventLog(clock: clock, source: 'coordinator'),
+        _random = random ?? Random(),
         instanceId = instanceId ?? newId(9),
         _key = options.roomKey ??
             RoomKey.derive(
@@ -243,6 +251,7 @@ class RoomCoordinator {
     _heartbeatTimer?.cancel();
     _tickTimer?.cancel();
     _diagTimer?.cancel();
+    _calibrationTimer?.cancel();
     for (final s in _acceptorSubs) {
       await s.cancel();
     }
@@ -266,6 +275,7 @@ class RoomCoordinator {
     _heartbeatTimer?.cancel();
     _tickTimer?.cancel();
     _diagTimer?.cancel();
+    _calibrationTimer?.cancel();
     for (final s in _acceptorSubs) {
       await s.cancel();
     }
@@ -471,6 +481,9 @@ class RoomCoordinator {
     }
     final fport = h.caps.failoverPort;
     m.endpoint = fport == null ? null : '${link.remoteHost}:$fport';
+    // The room becomes the source of truth for a device's calibration once
+    // it joined; reconnects keep the room's value.
+    if (existing == null) m.calibrationUs = h.caps.calibrationUs;
     // Close any older link of this device (e.g. after a silent failure).
     for (final other in _links.toList()) {
       if (!identical(other, link) && other.member?.deviceId == m.deviceId) {
@@ -561,6 +574,13 @@ class RoomCoordinator {
           ..lastReportAtUs = t2
           ..rttP95Us = msg.rttP95Us
           ..uncertaintyUs = msg.uncertaintyUs;
+        final cal = _state.calibration;
+        if (cal != null && _state.isCalibrationTrack(_state.timeline.trackId) &&
+            msg.generation == _state.timeline.generation) {
+          (_calibrationReports[m.deviceId] ??= []).add((msg.coordTimeUs, msg.errorUs));
+        }
+      case CalibrationResultMsg():
+        _onCalibrationResult(m, msg);
       case PlaybackEventMsg():
         _onPlaybackEvent(m, msg);
       case AvailabilityMsg():
@@ -635,13 +655,41 @@ class RoomCoordinator {
         log.info('member.role', '${t.displayName} is now ${t.role.name}');
         _mutate(_state);
         return ok;
+      case ControlAction.setChannelRole:
+        final target = c.targetDevice ?? m.deviceId;
+        if (target != m.deviceId && !m.role.canControl) {
+          return const ControlOutcome.fail(ControlError.unauthorized);
+        }
+        final t = _members.byDevice(target);
+        final role = _parseEnum(ChannelRole.values, c.mode);
+        if (t == null || role == null) return const ControlOutcome.fail(ControlError.invalid);
+        t.channel = role;
+        log.info('member.channel', '${t.displayName} plays ${role.name}');
+        _mutate(_state);
+        return ok;
       default:
         break;
     }
 
     if (!m.role.canControl) return const ControlOutcome.fail(ControlError.unauthorized);
 
+    if (_state.calibration != null &&
+        const {
+          ControlAction.play,
+          ControlAction.pause,
+          ControlAction.seek,
+          ControlAction.setTrack,
+          ControlAction.next,
+          ControlAction.previous,
+          ControlAction.calibrate,
+        }.contains(c.action)) {
+      return const ControlOutcome.fail(ControlError.busy);
+    }
+
     switch (c.action) {
+      case ControlAction.calibrate:
+        return _startCalibration(m);
+
       case ControlAction.play:
         if (tl.isPlaying || (_state.pending?.autoPlay ?? false)) return ok; // idempotent
         if (tl.status == PlaybackStatus.paused && tl.trackId != null) {
@@ -684,19 +732,16 @@ class RoomCoordinator {
       case ControlAction.previous:
         if (stale()) return const ControlOutcome.fail(ControlError.staleVersion);
         final cur = _state.pending?.trackId ?? tl.trackId;
-        final idx = _state.indexOfTrack(cur);
         final playing = tl.isPlaying || (_state.pending?.autoPlay ?? false);
-        int target;
+        final wrap = _state.repeat == RepeatMode.all;
+        String? id;
         if (c.action == ControlAction.next) {
-          target = idx + 1;
+          id = _neighbor(cur, 1, wrap: wrap);
         } else {
           final pos = tl.expectedPositionAt(clock.nowMicros());
-          target = (playing && pos > 3000000) || idx <= 0 ? max(idx, 0) : idx - 1;
+          id = (playing && pos > 3000000) ? cur : (_neighbor(cur, -1, wrap: wrap) ?? cur);
         }
-        if (target < 0 || target >= _state.playlist.length) {
-          return const ControlOutcome.fail(ControlError.nothingToPlay);
-        }
-        final id = _state.playlist[target].id;
+        if (id == null) return const ControlOutcome.fail(ControlError.nothingToPlay);
         if (playing) {
           _requestSegment(id, 0);
         } else {
@@ -704,9 +749,178 @@ class RoomCoordinator {
         }
         return ok;
 
+      case ControlAction.setRepeat:
+        final mode = _parseEnum(RepeatMode.values, c.mode);
+        if (mode == null) return const ControlOutcome.fail(ControlError.invalid);
+        _mutate(_state.copyWith(repeat: mode));
+        return ok;
+
+      case ControlAction.setShuffle:
+        if (c.value == null) return const ControlOutcome.fail(ControlError.invalid);
+        final on = c.value! >= 0.5;
+        if (on) _reshuffle(keepFirst: _state.pending?.trackId ?? tl.trackId);
+        _mutate(_state.copyWith(shuffle: on));
+        return ok;
+
       default:
         return const ControlOutcome.fail(ControlError.invalid);
     }
+  }
+
+  // ------------------------------------------------------ calibration
+
+  int _calibrationSeq = 0;
+  final Map<String, List<(int, int)>> _calibrationReports = {};
+  Timer? _calibrationTimer;
+  (String, int)? _preCalibration;
+
+  ControlOutcome _startCalibration(Member listener) {
+    if (!listener.caps.microphone) {
+      log.warn('calibration.reject', '${listener.displayName} has no microphone for calibration');
+      return const ControlOutcome.fail(ControlError.invalid);
+    }
+    final order = [
+      for (final m in _members.all)
+        if (m.connection == ConnectionStatus.connected) m.deviceId
+    ];
+    if (order.isEmpty) return const ControlOutcome.fail(ControlError.invalid);
+    final tl = _state.timeline;
+    final now = clock.nowMicros();
+    final curTrack = _state.pending?.trackId ?? tl.trackId;
+    _preCalibration = curTrack == null || _state.isCalibrationTrack(curTrack)
+        ? null
+        : (curTrack, _state.pending?.positionUs ?? tl.expectedPositionAt(now));
+    final plan = CalibrationPlan(id: ++_calibrationSeq, listener: listener.deviceId, order: order);
+    _calibrationReports.clear();
+    log.info('calibration.start',
+        'calibrating ${order.length} device(s) to ${listener.displayName}\'s position (plan ${plan.id})',
+        {'devices': order.length, 'durationMs': plan.durationUs ~/ 1000});
+    _mutate(_state.copyWith(calibration: plan));
+    _requestSegment(plan.trackId, 0);
+    final sched = options.config.scheduler;
+    _calibrationTimer?.cancel();
+    _calibrationTimer = Timer(
+        Duration(microseconds: plan.durationUs) + sched.readinessTimeout + sched.maxLead + const Duration(seconds: 20),
+        () {
+      log.warn('calibration.timeout', 'no calibration result from the listener; cancelled');
+      _endCalibration();
+    });
+    return const ControlOutcome.ok();
+  }
+
+  void _onCalibrationResult(Member from, CalibrationResultMsg r) {
+    final plan = _state.calibration;
+    if (plan == null || r.calibrationId != plan.id || from.deviceId != plan.listener) {
+      log.debug('calibration.stale', 'ignoring calibration result ${r.calibrationId} from ${from.deviceId}');
+      return;
+    }
+    final tl = _state.timeline;
+    if (r.error != null) {
+      log.warn('calibration.failed', 'calibration failed on the listener: ${r.error}');
+    } else if (!_state.isCalibrationTrack(tl.trackId) || !tl.isPlaying) {
+      log.warn('calibration.failed', 'calibration result arrived without a calibration segment');
+    } else {
+      final corrections = combineCalibration(
+        plan: plan,
+        arrivalsBySlot: {
+          for (final e in r.arrivals.entries)
+            if (plan.order.contains(e.key)) e.key: e.value
+        },
+        softwareErrorAt: (id, slot) =>
+            _softwareErrorAt(id, tl.coordTimeForPosition(plan.slotPositionUs(slot))),
+      );
+      corrections.forEach((id, corr) {
+        final m = _members.byDevice(id);
+        if (m == null) return;
+        m.calibrationUs = ((m.calibrationUs ?? 0) + corr).clamp(-1000000, 1000000);
+      });
+      log.info('calibration.done',
+          'calibration applied to ${corrections.length} device(s)${r.undetected.isEmpty ? '' : '; not heard: ${r.undetected.join(', ')}'}',
+          {for (final e in corrections.entries) e.key: e.value});
+    }
+    _endCalibration();
+  }
+
+  /// A device's own software-estimated playback error at coordinator time
+  /// [t], interpolated from its sync reports during the calibration (0 when
+  /// unknown, i.e. assumed converged).
+  int _softwareErrorAt(String deviceId, int t) {
+    final reps = _calibrationReports[deviceId];
+    if (reps == null || reps.isEmpty) return 0;
+    reps.sort((a, b) => a.$1.compareTo(b.$1));
+    if (t <= reps.first.$1) return reps.first.$2;
+    if (t >= reps.last.$1) return reps.last.$2;
+    for (var i = 1; i < reps.length; i++) {
+      final (ta, ea) = reps[i - 1];
+      final (tb, eb) = reps[i];
+      if (t <= tb) return tb == ta ? eb : (ea + (eb - ea) * (t - ta) / (tb - ta)).round();
+    }
+    return reps.last.$2;
+  }
+
+  void _endCalibration() {
+    _calibrationTimer?.cancel();
+    _calibrationTimer = null;
+    if (_state.calibration == null) return;
+    _barrier = null;
+    final gen = _nextGeneration();
+    final pre = _preCalibration;
+    _preCalibration = null;
+    final tl = pre == null
+        ? PlaybackTimeline(
+            generation: gen,
+            trackId: null,
+            status: PlaybackStatus.idle,
+            anchorPositionUs: 0,
+            anchorCoordUs: clock.nowMicros())
+        : PlaybackTimeline(
+            generation: gen,
+            trackId: pre.$1,
+            status: PlaybackStatus.paused,
+            anchorPositionUs: pre.$2,
+            anchorCoordUs: clock.nowMicros());
+    _mutate(_state.copyWith(timeline: tl, clearPending: true, clearCalibration: true), timeline: true);
+  }
+
+  /// Play order: playlist order, or the shuffle order when shuffling.
+  List<String> _order() {
+    final ids = [for (final t in _state.playlist) t.id];
+    if (!_state.shuffle) return ids;
+    final present = ids.toSet();
+    final order = [for (final id in _shuffleOrder) if (present.contains(id)) id];
+    final missing = ids.where((id) => !order.contains(id)).toList()..shuffle(_random);
+    order.addAll(missing);
+    _shuffleOrder = order;
+    return order;
+  }
+
+  void _reshuffle({String? keepFirst}) {
+    final ids = [for (final t in _state.playlist) t.id]..shuffle(_random);
+    if (keepFirst != null && ids.remove(keepFirst)) ids.insert(0, keepFirst);
+    _shuffleOrder = ids;
+  }
+
+  /// Track [delta] steps from [current] in play order (null at the ends
+  /// unless [wrap]). With no current track, the first track.
+  String? _neighbor(String? current, int delta, {required bool wrap}) {
+    final order = _order();
+    if (order.isEmpty) return null;
+    final i = current == null ? -1 : order.indexOf(current);
+    if (i < 0) return delta > 0 ? order.first : null;
+    var j = i + delta;
+    if (j < 0 || j >= order.length) {
+      if (!wrap) return null;
+      j = j % order.length;
+      if (j < 0) j += order.length;
+    }
+    return order[j];
+  }
+
+  static T? _parseEnum<T extends Enum>(List<T> values, String? name) {
+    for (final v in values) {
+      if (v.name == name) return v;
+    }
+    return null;
   }
 
   int _clampPosition(String trackId, int pos) {
@@ -900,7 +1114,7 @@ class RoomCoordinator {
   /// it exactly at the end of the current one.
   void _autoAdvance() {
     final tl = _state.timeline;
-    if (!tl.isPlaying || tl.trackId == null || _state.pending != null) return;
+    if (!tl.isPlaying || tl.trackId == null || _state.pending != null || _state.calibration != null) return;
     if (_autoAdvancedGeneration == tl.generation) return;
     final dur = _state.trackById(tl.trackId)?.durationUs;
     if (dur == null || dur <= 0) return;
@@ -910,10 +1124,12 @@ class RoomCoordinator {
         options.config.scheduler.maxLead.inMicroseconds;
     if (now < endAt - prepareWindow) return;
     _autoAdvancedGeneration = tl.generation;
-    final idx = _state.indexOfTrack(tl.trackId);
-    if (idx >= 0 && idx + 1 < _state.playlist.length) {
-      log.info('schedule.advance', 'track ending; preparing next track');
-      _requestSegment(_state.playlist[idx + 1].id, 0, notBeforeUs: endAt);
+    final next = _state.repeat == RepeatMode.one
+        ? tl.trackId
+        : _neighbor(tl.trackId, 1, wrap: _state.repeat == RepeatMode.all);
+    if (next != null) {
+      log.info('schedule.advance', 'track ending; preparing ${next == tl.trackId ? 'repeat' : 'next track'}');
+      _requestSegment(next, 0, notBeforeUs: endAt);
     } else {
       // End of playlist: stop at the end of the track.
       Timer(Duration(microseconds: max(0, endAt - now)), () {

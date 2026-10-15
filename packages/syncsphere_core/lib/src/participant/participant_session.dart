@@ -15,6 +15,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import '../audio/audio_backend.dart';
@@ -29,6 +30,7 @@ import '../protocol/reader.dart';
 import '../time/clock.dart';
 import '../time/clock_sync.dart';
 import '../transport/transport.dart';
+import '../calibration/calibration_runtime.dart';
 import 'failover.dart';
 import 'playback_engine.dart';
 
@@ -76,6 +78,12 @@ class ParticipantOptions {
   /// pass an isolate-backed implementation so the UI does not stall.
   final Future<RoomKey> Function(String roomId, String joinKey, int iterations)? keyDeriver;
 
+  /// Microphone access; makes this device able to lead a room calibration.
+  final CalibrationRecorder? recorder;
+
+  /// Where calibration click tracks are written (default: a temp folder).
+  final CalibrationTrackFactory? calibrationTracks;
+
   /// Enables coordinator failover by succession (see `failover.dart`).
   /// Null keeps the conservative behaviour: report that the room is gone.
   final FailoverDelegate? failover;
@@ -96,6 +104,8 @@ class ParticipantOptions {
     this.keyDeriver,
     this.failover,
     this.failoverPolicy = const FailoverPolicy(),
+    this.recorder,
+    this.calibrationTracks,
   });
 }
 
@@ -109,6 +119,7 @@ class ParticipantSession implements ClockSource {
   final Random _random;
 
   late final PlaybackEngine engine;
+  CalibrationListener? calibrationListener;
   ClockSyncEstimator _estimator = ClockSyncEstimator();
   SyncConfig _config = const SyncConfig();
 
@@ -179,7 +190,20 @@ class ParticipantSession implements ClockSource {
       send: _sendIfActive,
       startLatencyUs: options.initialStartLatencyUs,
       outputCalibrationUs: options.outputCalibrationUs,
+      calibrationTracks: options.calibrationTracks ??
+          FileCalibrationTrackFactory(Directory('${Directory.systemTemp.path}/syncsphere-calibration')),
     );
+    final rec = options.recorder;
+    if (rec != null) {
+      calibrationListener = CalibrationListener(
+        deviceId: options.deviceId,
+        recorder: rec,
+        clock: clock,
+        estimate: () => estimate,
+        send: _sendIfActive,
+        log: this.log,
+      );
+    }
   }
 
   // ---------------------------------------------------------- accessors
@@ -370,6 +394,8 @@ class ParticipantSession implements ClockSource {
         backend: backend.capabilities.backend,
         canHost: options.canHost || options.failover != null,
         failoverPort: options.failover?.failoverPort,
+        microphone: options.recorder != null,
+        calibrationUs: engine.outputCalibrationUs,
       ),
     ));
   }
@@ -605,6 +631,7 @@ class ParticipantSession implements ClockSource {
     if (me != null) _role = me.role;
     if (!_stateCtl.isClosed) _stateCtl.add(s);
     engine.applyState(s);
+    calibrationListener?.onState(s);
   }
 
   // ------------------------------------------------------------ timers

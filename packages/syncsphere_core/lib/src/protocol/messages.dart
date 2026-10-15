@@ -57,6 +57,8 @@ sealed class Message {
         return DiagnosticsMsg.read(r);
       case ByeMsg.kType:
         return ByeMsg.read(r);
+      case CalibrationResultMsg.kType:
+        return CalibrationResultMsg.read(r);
       case ErrorMsg.kType:
         return ErrorMsg.read(r);
       default:
@@ -94,12 +96,20 @@ class DeviceCapabilities {
   /// combines it with the address it sees the device connect from.
   final int? failoverPort;
 
+  /// Device can record calibration clicks with a microphone.
+  final bool microphone;
+
+  /// Acoustic calibration offset the device currently applies (µs).
+  final int calibrationUs;
+
   const DeviceCapabilities({
     required this.rateControl,
     required this.backend,
     this.lanDownload = true,
     this.canHost = false,
     this.failoverPort,
+    this.microphone = false,
+    this.calibrationUs = 0,
   });
 
   Map<String, Object?> toJson() => {
@@ -108,6 +118,8 @@ class DeviceCapabilities {
         'lan': lanDownload,
         'canHost': canHost,
         if (failoverPort != null) 'fport': failoverPort,
+        if (microphone) 'mic': true,
+        if (calibrationUs != 0) 'cal': calibrationUs,
       };
 
   factory DeviceCapabilities.fromJson(Map<String, Object?> j) {
@@ -118,6 +130,8 @@ class DeviceCapabilities {
       lanDownload: r.optBoolean('lan') ?? false,
       canHost: r.optBoolean('canHost') ?? false,
       failoverPort: r.optInteger('fport', min: 1, max: 65535),
+      microphone: r.optBoolean('mic') ?? false,
+      calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000) ?? 0,
     );
   }
 }
@@ -417,7 +431,7 @@ class ReadyMsg extends Message {
         trackId: r.string('track', maxLength: 64),
         ok: r.boolean('ok'),
         error: r.optString('err', maxLength: 64),
-        startLatencyUs: r.integer('lat', min: 0, max: 10000000),
+        startLatencyUs: r.integer('lat', min: -10000000, max: 10000000),
         rttP95Us: r.integer('rtt', min: 0, max: 600000000),
         uncertaintyUs: r.integer('unc', min: 0, max: 600000000),
       );
@@ -433,6 +447,18 @@ enum ControlAction {
   masterVolume,
   deviceVolume,
   setRole,
+
+  /// `mode`: `off|all|one`.
+  setRepeat,
+
+  /// `value`: 1 = on, 0 = off.
+  setShuffle,
+
+  /// `dev` (default: sender), `mode`: `stereo|left|right|mono`.
+  setChannelRole,
+
+  /// Starts an acoustic calibration measured by the sender's microphone.
+  calibrate,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -451,6 +477,9 @@ class ControlMsg extends Message {
   final String? targetDevice;
   final ParticipantRole? role;
 
+  /// Mode argument for setRepeat / setChannelRole.
+  final String? mode;
+
   const ControlMsg({
     required this.requestId,
     required this.action,
@@ -460,6 +489,7 @@ class ControlMsg extends Message {
     this.value,
     this.targetDevice,
     this.role,
+    this.mode,
   });
 
   @override
@@ -472,6 +502,7 @@ class ControlMsg extends Message {
         if (value != null) 'val': value,
         if (targetDevice != null) 'dev': targetDevice,
         if (role != null) 'role': role!.name,
+        if (mode != null) 'mode': mode,
       };
 
   static ControlMsg read(Reader r) => ControlMsg(
@@ -483,6 +514,7 @@ class ControlMsg extends Message {
         value: r.optNumber('val', min: 0, max: 1),
         targetDevice: r.optString('dev', maxLength: 64),
         role: r.optEnum('role', ParticipantRole.values),
+        mode: r.optString('mode', maxLength: 16),
       );
 }
 
@@ -760,6 +792,66 @@ class DiagnosticsMsg extends Message {
         ],
         maxPairwiseErrorUs: r.optInteger('maxPair', min: 0),
       );
+}
+
+/// Listener → coordinator: corrections measured by a calibration run.
+class CalibrationResultMsg extends Message {
+  static const kType = 'cal.res';
+  @override
+  String get type => kType;
+  final int calibrationId;
+
+  /// Raw click arrivals per device: slot → (arrival − scheduled) µs, with
+  /// the recorder's unknown common offset. The coordinator combines them
+  /// with each device's reported software error.
+  final Map<String, Map<int, int>> arrivals;
+
+  /// Devices whose clicks could not be detected.
+  final List<String> undetected;
+
+  /// Non-null when the listener could not measure at all.
+  final String? error;
+
+  const CalibrationResultMsg({
+    required this.calibrationId,
+    this.arrivals = const {},
+    this.undetected = const [],
+    this.error,
+  });
+
+  @override
+  Map<String, Object?> toBody() => {
+        'id': calibrationId,
+        'arr': {
+          for (final e in arrivals.entries) e.key: {for (final s in e.value.entries) '${s.key}': s.value}
+        },
+        if (undetected.isNotEmpty) 'missing': undetected,
+        if (error != null) 'err': error,
+      };
+
+  static CalibrationResultMsg read(Reader r) {
+    final raw = r.optMap('arr') ?? const {};
+    if (raw.length > 256) throw r.error('arr', 'too many devices');
+    final arr = <String, Map<int, int>>{};
+    raw.forEach((dev, slots) {
+      if (dev.length > 64 || slots is! Map || slots.length > 100) throw r.error('arr', 'invalid entry for $dev');
+      final m = <int, int>{};
+      slots.forEach((k, v) {
+        final slot = k is String ? int.tryParse(k) : null;
+        if (slot == null || slot < 0 || slot > 10000 || v is! num || !v.isFinite || v.abs() > 2000000) {
+          throw r.error('arr', 'invalid arrival for $dev');
+        }
+        m[slot] = v.toInt();
+      });
+      arr[dev] = m;
+    });
+    return CalibrationResultMsg(
+      calibrationId: r.integer('id', min: 0),
+      arrivals: arr,
+      undetected: r.has('missing') ? r.stringList('missing', maxLength: 256, maxItemLength: 64) : const [],
+      error: r.optString('err', maxLength: 256),
+    );
+  }
 }
 
 class ByeMsg extends Message {

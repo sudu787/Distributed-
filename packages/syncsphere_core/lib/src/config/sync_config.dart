@@ -212,7 +212,7 @@ class DriftConfig {
     this.medianWindow = 5,
     this.rateEnterThreshold = const Duration(milliseconds: 8),
     this.rateExitThreshold = const Duration(milliseconds: 3),
-    this.seekThreshold = const Duration(milliseconds: 250),
+    this.seekThreshold = const Duration(milliseconds: 150),
     this.seekThresholdNoRate = const Duration(milliseconds: 45),
     this.seekConfirmations = 2,
     this.seekCooldown = const Duration(seconds: 5),

@@ -16,6 +16,7 @@ import 'dart:async';
 import 'dart:math';
 
 import '../audio/audio_backend.dart';
+import '../model/room_state.dart' show ChannelRole;
 import '../time/clock.dart';
 
 class DeviceAudioProfile {
@@ -273,6 +274,11 @@ class SimulatedAudioBackend implements AudioBackend {
 
   @override
   Future<void> setVolume(double volume) async {}
+
+  ChannelRole channelRole = ChannelRole.stereo;
+
+  @override
+  Future<void> setChannelRole(ChannelRole role) async => channelRole = role;
 
   @override
   Future<void> stop() async {

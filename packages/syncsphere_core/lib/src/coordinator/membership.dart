@@ -28,6 +28,11 @@ class Member {
 
   /// Failover endpoint (`host:port`), if the device offered one.
   String? endpoint;
+
+  /// Experimental stereo role and the room-calibration result; both survive
+  /// reconnects.
+  ChannelRole channel = ChannelRole.stereo;
+  int? calibrationUs;
   int lastSeenUs;
   final int joinedAtUs;
   int? disconnectedAtUs;
@@ -72,6 +77,8 @@ class Member {
             : (availability[currentTrackId] ?? TrackAvailability.unknown),
         canHost: caps.canHost,
         endpoint: caps.canHost ? endpoint : null,
+        channel: channel,
+        calibrationUs: calibrationUs,
       );
 }
 

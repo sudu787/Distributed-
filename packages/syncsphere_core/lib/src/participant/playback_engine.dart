@@ -15,6 +15,7 @@ import 'dart:async';
 import 'dart:math';
 
 import '../audio/audio_backend.dart';
+import '../calibration/calibration_runtime.dart';
 import '../config/sync_config.dart';
 import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
@@ -111,6 +112,7 @@ class PlaybackEngine {
   final Map<String, TrackAvailability> _reportedAvailability = {};
   int _lastReportAtUs = 0;
   bool _disposed = false;
+  ChannelRole _channel = ChannelRole.stereo;
 
   /// Learned output start latency (µs): play calls are issued this much
   /// before the target audible time.
@@ -121,6 +123,9 @@ class PlaybackEngine {
   /// or DSP latency the platform does not report). Measured with an
   /// external microphone / test tone; 0 when uncalibrated.
   int outputCalibrationUs;
+
+  /// Source of personalized click tracks during room calibration.
+  final CalibrationTrackFactory? calibrationTracks;
 
   /// EWMA of how long prepare() takes (µs), used to size late joins.
   int _prepareEstimateUs = 300000;
@@ -138,6 +143,7 @@ class PlaybackEngine {
     this.config = const SyncConfig(),
     this.startLatencyUs = 0,
     this.outputCalibrationUs = 0,
+    this.calibrationTracks,
   }) {
     _drift = DriftController(config.drift, rateSupported: backend.capabilities.rateControl);
     // Without a learned value, seed the start-latency compensation from the
@@ -206,6 +212,14 @@ class PlaybackEngine {
     final prev = _state;
     _state = s;
     _applyVolume(s);
+    final roomCal = s.participant(deviceId)?.calibrationUs;
+    if (roomCal != null && roomCal != outputCalibrationUs) {
+      log.info('engine.calibration', 'room calibration offset ${outputCalibrationUs ~/ 1000} → ${roomCal ~/ 1000} ms');
+      // The learned start latency aligned the *calibrated* position; a
+      // calibration change of Δ means play calls must move Δ earlier.
+      startLatencyUs = (startLatencyUs + roomCal - outputCalibrationUs).clamp(-500000, 1000000);
+      outputCalibrationUs = roomCal;
+    }
     final sig = s.playlist.map((t) => t.id).join(',');
     if (sig != _playlistSignature) {
       _playlistSignature = sig;
@@ -318,7 +332,7 @@ class PlaybackEngine {
     final seg = _Segment(++_segSeq, p.generation, p.trackId, p.positionUs, SegmentStatus.preparing);
     _standby = seg;
     try {
-      final src = await resolver.resolve(track, s.distribution);
+      final src = await _resolve(track, s);
       _markAvailable(track.id);
       if (!_stillRelevant(p.generation)) {
         if (identical(_standby, seg)) _standby = null;
@@ -353,6 +367,21 @@ class PlaybackEngine {
   }
 
   bool _isPendingCurrent(int gen) => _state?.pending?.generation == gen;
+
+  /// Playlist tracks come from the resolver; the calibration segment is a
+  /// click track generated locally for this device's slots.
+  Future<TrackSource> _resolve(TrackInfo track, RoomState s) {
+    final plan = s.calibration;
+    if (plan != null && plan.trackId == track.id) {
+      final k = plan.order.indexOf(deviceId);
+      final f = calibrationTracks;
+      if (k < 0 || f == null) {
+        throw const TrackUnavailableException('missing_track', 'this device is not part of the calibration');
+      }
+      return f.sourceFor(plan, k);
+    }
+    return resolver.resolve(track, s.distribution);
+  }
 
   bool _stillRelevant(int gen) =>
       _isPendingCurrent(gen) || _state?.timeline.generation == gen;
@@ -401,7 +430,7 @@ class PlaybackEngine {
         }
         final seg = _Segment(++_segSeq, tl.generation, tl.trackId!, pos, SegmentStatus.preparing, isResync: resync);
         final t0 = clock.nowMicros();
-        final src = await resolver.resolve(track, s.distribution);
+        final src = await _resolve(track, s);
         _markAvailable(track.id);
         if (_state?.timeline.generation != tl.generation) return;
         if (!resync) _standby = seg;
@@ -554,7 +583,9 @@ class PlaybackEngine {
     // error < 0: audio started late → issue play calls earlier next time.
     if (errorUs.abs() > 500000) return; // implausible; something else is wrong
     final before = startLatencyUs;
-    startLatencyUs = (startLatencyUs - 0.6 * errorUs).round().clamp(0, 1000000);
+    // Negative values are allowed: an uncalibrated device whose reported
+    // position runs ahead of its sound (Bluetooth) learns to play "late".
+    startLatencyUs = (startLatencyUs - 0.6 * errorUs).round().clamp(-500000, 1000000);
     log.info('engine.started', 'g${a.generation} start error ${(errorUs / 1000).toStringAsFixed(1)} ms (est.); latency comp ${before ~/ 1000} → ${startLatencyUs ~/ 1000} ms');
     send(PlaybackEventMsg(
       kind: PlaybackEventKind.started,
@@ -631,6 +662,12 @@ class PlaybackEngine {
     final me = s.participant(deviceId);
     final v = (s.masterVolume * (me?.volume ?? 1.0)).clamp(0.0, 1.0);
     unawaited(backend.setVolume(v).catchError((Object e) => _fail('setVolume failed: $e')));
+    final ch = me?.channel ?? ChannelRole.stereo;
+    if (ch != _channel) {
+      _channel = ch;
+      log.info('engine.channel', 'channel role → ${ch.name}');
+      unawaited(backend.setChannelRole(ch).catchError((Object e) => _fail('setChannelRole failed: $e')));
+    }
   }
 
   Future<void> _reportAvailability(RoomState s) async {

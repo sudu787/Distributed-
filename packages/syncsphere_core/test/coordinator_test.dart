@@ -322,6 +322,103 @@ void main() {
     });
   });
 
+  test('repeat: next wraps only with repeat all', () {
+    fakeAsync((fa) {
+      final f = Fixture(fa, defaultRole: ParticipantRole.controller);
+      final (a, _) = f.join('host-device');
+      void ctl(ControlMsg Function(int v) m) {
+        a.send(m(f.coord.state.version));
+        fa.elapse(const Duration(milliseconds: 10));
+      }
+
+      ctl((v) => ControlMsg(requestId: 1, action: ControlAction.setTrack, baseVersion: v, trackId: tracks[1].id));
+      ctl((v) => ControlMsg(requestId: 2, action: ControlAction.next, baseVersion: v));
+      expect(a.last<ControlAckMsg>()!.error, ControlError.nothingToPlay);
+      ctl((v) => ControlMsg(requestId: 3, action: ControlAction.setRepeat, baseVersion: v, mode: 'all'));
+      expect(f.coord.state.repeat, RepeatMode.all);
+      ctl((v) => ControlMsg(requestId: 4, action: ControlAction.next, baseVersion: v));
+      expect(a.last<ControlAckMsg>()!.accepted, isTrue);
+      expect(f.coord.state.pending!.trackId, tracks[0].id);
+      ctl((v) => ControlMsg(requestId: 5, action: ControlAction.setRepeat, baseVersion: v, mode: 'bogus'));
+      expect(a.last<ControlAckMsg>()!.error, ControlError.invalid);
+    });
+  });
+
+  test('shuffle visits every track once per cycle', () {
+    fakeAsync((fa) {
+      final many = [
+        for (var i = 0; i < 6; i++)
+          TrackInfo(id: i.toRadixString(16) * 64, title: 'T$i', sizeBytes: 1, durationUs: 60000000)
+      ];
+      final f = Fixture(fa, defaultRole: ParticipantRole.controller);
+      f.coord.setPlaylist(many);
+      final (a, _) = f.join('host-device');
+      void ctl(ControlAction act, {double? value, String? mode, String? track}) {
+        a.send(ControlMsg(
+            requestId: 1, action: act, baseVersion: f.coord.state.version, value: value, mode: mode, trackId: track));
+        fa.elapse(const Duration(milliseconds: 10));
+      }
+
+      ctl(ControlAction.setTrack, track: many[0].id);
+      ctl(ControlAction.setShuffle, value: 1);
+      expect(f.coord.state.shuffle, isTrue);
+      final seen = <String>{f.coord.state.pending!.trackId};
+      for (var i = 0; i < 5; i++) {
+        ctl(ControlAction.next);
+        seen.add(f.coord.state.pending!.trackId);
+      }
+      expect(seen.length, 6, reason: 'no repeats within one shuffle cycle');
+      ctl(ControlAction.next);
+      expect(a.last<ControlAckMsg>()!.error, ControlError.nothingToPlay);
+    });
+  });
+
+  test('repeat one replays the same track at its end', () {
+    fakeAsync((fa) {
+      final short = [TrackInfo(id: 'c' * 64, title: 'Short', sizeBytes: 1, durationUs: 15000000)];
+      final f = Fixture(fa, defaultRole: ParticipantRole.controller);
+      f.coord.setPlaylist(short);
+      final (a, _) = f.join('host-device');
+      a.send(ControlMsg(requestId: 1, action: ControlAction.setRepeat, baseVersion: 0, mode: 'one'));
+      a.send(ControlMsg(requestId: 2, action: ControlAction.play, baseVersion: f.coord.state.version));
+      fa.elapse(const Duration(milliseconds: 10));
+      final p = f.coord.state.pending!;
+      a.send(ReadyMsg(generation: p.generation, trackId: p.trackId, ok: true));
+      fa.elapse(const Duration(milliseconds: 10));
+      final g = f.coord.state.timeline.generation;
+      expect(f.coord.state.timeline.isPlaying, isTrue);
+      // Keep the link alive and let the track approach its end.
+      for (var i = 0; i < 10; i++) {
+        a.send(HeartbeatMsg(i));
+        fa.elapse(const Duration(seconds: 1));
+      }
+      final next = f.coord.state.pending;
+      expect(next, isNotNull);
+      expect(next!.trackId, short.single.id);
+      expect(next.generation, greaterThan(g));
+    });
+  });
+
+  test('channel roles: own device always, others only with control rights', () {
+    fakeAsync((fa) {
+      final f = Fixture(fa);
+      final (host, _) = f.join('host-device');
+      final (p, _) = f.join('phone-1');
+      p.send(const ControlMsg(requestId: 1, action: ControlAction.setChannelRole, baseVersion: 0, mode: 'left'));
+      p.send(const ControlMsg(
+          requestId: 2, action: ControlAction.setChannelRole, baseVersion: 0, mode: 'right', targetDevice: 'host-device'));
+      fa.elapse(const Duration(milliseconds: 10));
+      final acks = p.received.whereType<ControlAckMsg>().toList();
+      expect(acks[0].accepted, isTrue);
+      expect(acks[1].error, ControlError.unauthorized);
+      expect(f.coord.state.participant('phone-1')!.channel, ChannelRole.left);
+      host.send(const ControlMsg(
+          requestId: 3, action: ControlAction.setChannelRole, baseVersion: 0, mode: 'mono', targetDevice: 'phone-1'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(f.coord.state.participant('phone-1')!.channel, ChannelRole.mono);
+    });
+  });
+
   test('lead time calculation', () {
     final d = computeLead(const SchedulerConfig(), const [
       ParticipantTiming(deviceId: 'a', rttP95Us: 10000, startLatencyUs: 50000, uncertaintyUs: 1000),
