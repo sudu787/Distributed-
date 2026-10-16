@@ -102,6 +102,12 @@ class FakeNative implements NativeAudioApi {
   }
 
   @override
+  Future<bool> extractArtwork(String uri, String outPath) async => false;
+
+  @override
+  Future<bool> moveToBack() async => false;
+
+  @override
   Stream<Map<String, Object?>> get events => ev.stream;
 }
 

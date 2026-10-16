@@ -17,6 +17,8 @@ import 'package:syncsphere/src/state/room_controller.dart';
 import 'package:syncsphere/src/ui/diagnostics_screen.dart';
 import 'package:syncsphere/src/ui/home_screen.dart';
 import 'package:syncsphere/src/ui/player_screen.dart';
+import 'package:syncsphere/src/ui/queue_view.dart';
+import 'package:syncsphere/src/ui/widgets.dart';
 import 'package:syncsphere/src/ui/room_screen.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 import 'dart:io';
@@ -76,6 +78,11 @@ class _FakeRoomController extends RoomController {
   @override
   int? expectedPositionUs() => 65000000;
 
+  final List<String> rejoined = [];
+  @override
+  Future<void> joinRecentParty(RoomHistoryEntry entry, String joinKey, {RoomBeacon? beacon}) async =>
+      rejoined.add('${entry.roomId}@${beacon?.host ?? entry.host}:$joinKey');
+
   @override
   Future<JoinLink?> joinLink() async =>
       JoinLink(hosts: ['192.168.1.20'], port: 47800, joinKey: 'ABCD2345', roomId: 'K7Q2M9');
@@ -99,7 +106,7 @@ List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller,
 }
 
 Widget _wrap(Widget child, List<Override> overrides) =>
-    ProviderScope(overrides: overrides, child: MaterialApp(home: child));
+    ProviderScope(key: UniqueKey(), overrides: overrides, child: MaterialApp(home: child));
 
 /// Phone-shaped, tall viewport so lazily built list items are on screen.
 void _phone(WidgetTester tester) {
@@ -121,6 +128,75 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Scan QR code'), findsOneWidget);
     expect(find.text('Enter address and code'), findsOneWidget);
+  });
+
+  testWidgets('home: recent parties show which are online and rejoin with one tap', (tester) async {
+    _phone(tester);
+    final store = MemoryAppStore();
+    await store.addRoomHistory(RoomHistoryEntry(
+        roomId: 'R2D2C3', roomName: 'Last Friday', host: '192.168.1.9', port: 47800, hosted: false, at: DateTime(2026, 10, 10), joinKey: 'KEYKEY12'));
+    await store.addRoomHistory(RoomHistoryEntry(
+        roomId: 'OLD123', roomName: 'Old party', host: '192.168.1.40', port: 47800, hosted: false, at: DateTime(2026, 9, 1), joinKey: 'OLDKEY12'));
+    final ctl = _FakeRoomController(const RoomViewState());
+    await tester.pumpWidget(_wrap(const HomeScreen(), _overrides(const RoomViewState(), controller: ctl, appStore: store)));
+    await tester.pumpAndSettle();
+    expect(find.text('Recent parties'), findsOneWidget);
+    expect(find.text('Online · 3 phones'), findsOneWidget);
+    expect(find.textContaining('not found nearby'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Join'));
+    await tester.pumpAndSettle();
+    // Joins at the address the party announces now, with the saved code.
+    expect(ctl.rejoined, ['R2D2C3@192.168.1.30:KEYKEY12']);
+    await tester.tap(find.text('Try'));
+    await tester.pumpAndSettle();
+    expect(ctl.rejoined.last, 'OLD123@192.168.1.40:OLDKEY12');
+  });
+
+  testWidgets('back button asks before leaving the app or the party', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_wrap(const HomeScreen(), _overrides(const RoomViewState())));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Exit SyncSphere?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Host a party'), findsOneWidget);
+
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Keep playing in the background'), findsOneWidget);
+    expect(find.text('Stops the music on every phone'), findsOneWidget);
+  });
+
+  testWidgets('queue: guests allowed to control can add songs; listeners cannot', (tester) async {
+    _phone(tester);
+    RoomViewState guest(ParticipantRole role) => _roomState(role: role).copyWith(
+        info: const RoomInfo(isHost: false, roomId: 'K7Q2M9', roomName: 'Living room', host: '192.168.1.20', port: 47800));
+    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(guest(ParticipantRole.controller))));
+    await tester.pumpAndSettle();
+    expect(find.text('Add songs'), findsOneWidget);
+    expect(find.byType(TrackArt), findsOneWidget);
+    await tester.tap(find.text('Add songs'));
+    await tester.pumpAndSettle();
+    expect(find.text('From this phone…'), findsOneWidget);
+
+    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(guest(ParticipantRole.listener))));
+    await tester.pumpAndSettle();
+    expect(find.text('Add songs'), findsNothing);
+    expect(find.textContaining('can pick or add songs'), findsOneWidget);
+  });
+
+  testWidgets('queue shows upload progress', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()),
+        _overrides(_roomState(role: ParticipantRole.controller).copyWith(
+            info: const RoomInfo(isHost: false, roomId: 'K7Q2M9', roomName: 'Living room', host: 'h', port: 1),
+            adding: (1, 3)))));
+    await tester.pump();
+    expect(find.text('Sending songs to the host… 2 of 3'), findsOneWidget);
   });
 
   testWidgets('room: three tabs with player, queue and speakers', (tester) async {

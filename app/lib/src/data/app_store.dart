@@ -12,8 +12,17 @@ abstract class AppStore {
   Future<void> upsertTrack(LibraryTrack track);
   Future<void> deleteTrack(String id);
 
-  Future<List<RoomHistoryEntry>> roomHistory({int limit = 20});
+  /// Recent parties, newest first (one entry per party).
+  Future<List<RoomHistoryEntry>> roomHistory({int limit = kMaxRoomHistory});
+
+  /// Records [entry], replacing an older entry for the same party, and
+  /// keeps only the [kMaxRoomHistory] newest parties.
   Future<void> addRoomHistory(RoomHistoryEntry entry);
+  Future<void> removeRoomHistory(String roomId);
+
+  /// Small app preferences (e.g. vibration feedback).
+  Future<String?> setting(String key);
+  Future<void> saveSetting(String key, String value);
 
   /// The party this device hosts (null when none / ended on purpose).
   Future<HostedRoom?> hostedRoom();
@@ -30,6 +39,7 @@ class MemoryAppStore implements AppStore {
   final Map<String, LibraryTrack> _tracks = {};
   final List<RoomHistoryEntry> _history = [];
   HostedRoom? _hosted;
+  final Map<String, String> _settings = {};
 
   @override
   Future<DeviceIdentity> loadIdentity({required String defaultName}) async =>
@@ -49,11 +59,26 @@ class MemoryAppStore implements AppStore {
   Future<void> deleteTrack(String id) async => _tracks.remove(id);
 
   @override
-  Future<List<RoomHistoryEntry>> roomHistory({int limit = 20}) async =>
+  Future<List<RoomHistoryEntry>> roomHistory({int limit = kMaxRoomHistory}) async =>
       (List.of(_history)..sort((a, b) => b.at.compareTo(a.at))).take(limit).toList();
 
   @override
-  Future<void> addRoomHistory(RoomHistoryEntry entry) async => _history.add(entry);
+  Future<void> addRoomHistory(RoomHistoryEntry entry) async {
+    _history
+      ..removeWhere((e) => e.roomId == entry.roomId)
+      ..add(entry)
+      ..sort((a, b) => b.at.compareTo(a.at));
+    if (_history.length > kMaxRoomHistory) _history.removeRange(kMaxRoomHistory, _history.length);
+  }
+
+  @override
+  Future<void> removeRoomHistory(String roomId) async => _history.removeWhere((e) => e.roomId == roomId);
+
+  @override
+  Future<String?> setting(String key) async => _settings[key];
+
+  @override
+  Future<void> saveSetting(String key, String value) async => _settings[key] = value;
 
   @override
   Future<HostedRoom?> hostedRoom() async => _hosted;

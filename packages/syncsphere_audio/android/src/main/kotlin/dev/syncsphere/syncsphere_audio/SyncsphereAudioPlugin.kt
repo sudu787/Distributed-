@@ -37,6 +37,8 @@ import io.flutter.plugin.common.PluginRegistry
  *   recordMic {startAtNanos, durationMs, sampleRate} → {path, sampleRate, firstSampleNanos, timestampSource}
  *   startService {title, text, playing}, updateService {…}, stopService
  *   exactCopy {uri, out} → {path, sampleRate, channels, durationUs, decoder} (decode to PCM WAV)
+ *   extractArtwork {uri, out} → Boolean (embedded cover → JPEG at out)
+ *   moveToBack → Boolean (app to background, keeps running)
  * Event channel `dev.syncsphere/audio_events`: {kind, segment, atNanos, message};
  * notification buttons arrive as {kind: "command", message: play|pause|next|previous}.
  */
@@ -143,6 +145,19 @@ class SyncsphereAudioPlugin :
                         }
                     }.start()
                 }
+                "extractArtwork" -> {
+                    val uri = call.argument<String>("uri") ?: throw IllegalArgumentException("uri missing")
+                    val out = call.argument<String>("out") ?: throw IllegalArgumentException("out missing")
+                    Thread {
+                        try {
+                            val ok = TrackProbe.artwork(context, uri, java.io.File(out))
+                            main.post { result.success(ok) }
+                        } catch (e: Exception) {
+                            main.post { result.error("artwork_failed", e.message, null) }
+                        }
+                    }.start()
+                }
+                "moveToBack" -> result.success(activity?.moveTaskToBack(true) ?: false)
                 "keepScreenOn" -> {
                     val on = call.argument<Boolean>("on") ?: false
                     activity?.window?.let { w ->

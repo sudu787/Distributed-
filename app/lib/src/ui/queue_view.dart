@@ -9,10 +9,11 @@ import '../data/models.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
+import 'haptics.dart';
 import 'widgets.dart';
 
-/// Queue tab: the room's playlist. Tap a song to play it (with control
-/// rights); the host adds songs from its library.
+/// Queue tab: the room's playlist. Everyone allowed to control the music
+/// can pick a song and add songs (a guest's songs are sent to the host).
 class QueueView extends ConsumerWidget {
   const QueueView({super.key});
 
@@ -27,24 +28,39 @@ class QueueView extends ConsumerWidget {
       children: [
         SectionHeader(
           '${room.playlist.length} song${room.playlist.length == 1 ? '' : 's'}',
-          trailing: s.isHost
+          trailing: s.canControl
               ? FilledButton.tonalIcon(
                   icon: const Icon(Icons.add),
                   label: const Text('Add songs'),
-                  onPressed: () => _chooseSource(context, ref),
+                  onPressed: s.adding != null ? null : () => _chooseSource(context, ref),
                 )
               : null,
         ),
+        if (s.adding case (final done, final total))
+          ListTile(
+            leading: const SizedBox.square(dimension: 24, child: CircularProgressIndicator(strokeWidth: 3)),
+            title: Text(s.isHost ? 'Adding songs…' : 'Sending songs to the host… ${done + 1 > total ? total : done + 1} of $total'),
+            subtitle: total == 0 ? null : LinearProgressIndicator(value: done / total),
+          ),
         if (room.playlist.isEmpty)
           ListTile(
             leading: const Icon(Icons.queue_music),
             title: const Text('The queue is empty'),
-            subtitle: Text(s.isHost ? 'Tap "Add songs" to pick music from this phone.' : 'Waiting for the host to add songs.'),
+            subtitle: Text(s.canControl ? 'Tap "Add songs" to pick music from this phone.' : 'Waiting for the host to add songs.'),
           ),
         for (final t in room.playlist)
           ListTile(
             selected: t.id == current,
-            leading: Icon(t.id == current ? Icons.equalizer : Icons.music_note_outlined),
+            leading: Stack(alignment: Alignment.center, children: [
+              TrackArt(t.id, size: 44),
+              if (t.id == current)
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(44 * 0.14)),
+                  child: const Icon(Icons.equalizer, color: Colors.white),
+                ),
+            ]),
             title: Text(t.title, overflow: TextOverflow.ellipsis),
             subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
             trailing: t.availableCount >= connected
@@ -58,6 +74,7 @@ class QueueView extends ConsumerWidget {
                   ),
             onTap: s.canControl
                 ? () async {
+                    haptic(ref, Haptic.action);
                     final err = await ref.read(roomControllerProvider.notifier).control(ControlAction.setTrack, trackId: t.id);
                     if (err != null && context.mounted) showMessage(context, err, error: true);
                   }
@@ -66,13 +83,15 @@ class QueueView extends ConsumerWidget {
         if (!s.canControl && room.playlist.isNotEmpty)
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('Only the host (and phones it allows) can pick songs.', style: Theme.of(context).textTheme.bodySmall),
+            child: Text('Only the host and phones it allows to control the music can pick or add songs.',
+                style: Theme.of(context).textTheme.bodySmall),
           ),
       ],
     );
   }
 
   Future<void> _chooseSource(BuildContext context, WidgetRef ref) async {
+    haptic(ref, Haptic.tap);
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -118,13 +137,15 @@ class QueueView extends ConsumerWidget {
     ref.invalidate(libraryProvider);
     final inRoom = ref.read(roomControllerProvider).room?.playlist.map((t) => t.id).toSet() ?? {};
     final fresh = [for (final t in added) if (!inRoom.contains(t.id)) t];
-    if (fresh.isNotEmpty) ref.read(roomControllerProvider.notifier).addTracks(fresh);
+    final err = await ref.read(roomControllerProvider.notifier).addTracks(fresh);
+    if (err != null) errors.add(err);
     if (!context.mounted) return;
+    haptic(ref, errors.isEmpty ? Haptic.action : Haptic.alert);
     showMessage(
       context,
       errors.isEmpty
           ? 'Added ${fresh.length} song${fresh.length == 1 ? '' : 's'} to the queue.'
-          : 'Some files could not be added: ${errors.join('; ')}',
+          : 'Some songs could not be added: ${errors.join('; ')}',
       error: errors.isNotEmpty,
     );
   }
@@ -156,6 +177,7 @@ class QueueView extends ConsumerWidget {
               for (final t in candidates)
                 CheckboxListTile(
                   value: chosen.contains(t.id),
+                  secondary: TrackArt(t.id, size: 40),
                   title: Text(t.title),
                   subtitle: t.artist == null ? null : Text(t.artist!),
                   onChanged: (v) => setState(() => v == true ? chosen.add(t.id) : chosen.remove(t.id)),
@@ -170,7 +192,10 @@ class QueueView extends ConsumerWidget {
       ),
     );
     if (ok == true && chosen.isNotEmpty) {
-      ref.read(roomControllerProvider.notifier).addTracks(candidates.where((t) => chosen.contains(t.id)).toList());
+      final err = await ref.read(roomControllerProvider.notifier).addTracks(candidates.where((t) => chosen.contains(t.id)).toList());
+      if (!context.mounted) return;
+      haptic(ref, err == null ? Haptic.action : Haptic.alert);
+      if (err != null) showMessage(context, err, error: true);
     }
   }
 }

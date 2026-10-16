@@ -17,6 +17,10 @@ abstract class PlatformHooks {
   Future<void> enterRoom(String roomName) async {}
   Future<void> leaveRoom() async {}
 
+  /// Puts the app in the background without closing it (the party keeps
+  /// running). Returns false where unsupported.
+  Future<bool> moveToBackground() async => false;
+
   /// Keeps a "now playing" notification current.
   Future<void> nowPlaying({required String roomName, required String text, required bool playing}) async {}
 
@@ -156,12 +160,7 @@ class RoomService {
         ..clear()
         ..addEntries(tracks.map((t) => MapEntry(t.id, File(t.path))));
       coord.setPlaylist([for (final t in tracks) t.toTrackInfo()]);
-      _files = TrackFileServer(
-        fileForTrack: (id) => _served[id],
-        keysForSession: coord.transferKeysForSession,
-        nowMs: () => clock.nowMicros() ~/ 1000,
-        log: log,
-      );
+      _files = _fileServerFor(coord);
       _server = await _bind(port);
       coord.serve(_server!);
       coord.start();
@@ -187,7 +186,13 @@ class RoomService {
       await store.saveHostedRoom(HostedRoom(roomId: roomId, roomName: roomName, joinKey: joinKey, startedAt: DateTime.now()));
       await _startSession(identity, joinKey: joinKey, host: '127.0.0.1', port: _server!.port, roomId: roomId, key: key);
       await store.addRoomHistory(RoomHistoryEntry(
-          roomId: roomId, roomName: roomName, host: 'this device', port: _server!.port, hosted: true, at: DateTime.now()));
+          roomId: roomId,
+          roomName: roomName,
+          host: 'this device',
+          port: _server!.port,
+          hosted: true,
+          at: DateTime.now(),
+          joinKey: joinKey));
       return info!;
     } catch (e) {
       log.error('room.host', 'failed to host room: $e');
@@ -205,6 +210,13 @@ class RoomService {
     _served
       ..clear()
       ..addEntries(library.map((t) => MapEntry(t.id, File(t.path))));
+    // Songs this phone downloaded (including ones guests uploaded to the
+    // previous host) can be served too, so they survive the host change.
+    for (final t in req.state.playlist) {
+      if (_served.containsKey(t.id)) continue;
+      final cached = _cache.fileFor(t.id);
+      if (await cached.exists()) _served[t.id] = cached;
+    }
     final state = req.state.copyWith(playlist: [
       for (final t in req.state.playlist) t.copyWith(hostServes: _served.containsKey(t.id)),
     ]);
@@ -226,12 +238,7 @@ class RoomService {
       restoredState: state,
     );
     coordinator = coord;
-    _files = TrackFileServer(
-      fileForTrack: (id) => _served[id],
-      keysForSession: coord.transferKeysForSession,
-      nowMs: () => clock.nowMicros() ~/ 1000,
-      log: log,
-    );
+    _files = _fileServerFor(coord);
     _server = await _bind(failoverPort);
     if (_server!.port != failoverPort) {
       log.warn('failover.port', 'port $failoverPort busy; other members may not find this coordinator');
@@ -342,6 +349,30 @@ class RoomService {
 
   void _serverError(Object e, StackTrace st) => log.error('server', '$e');
 
+  TrackCache get _cache => TrackCache(Directory('${cacheDir.path}/tracks'));
+
+  /// Serves the room's songs and accepts songs uploaded by guests who may
+  /// control the music. Uploads go into the track cache, where this phone's
+  /// own player finds them too.
+  TrackFileServer _fileServerFor(RoomCoordinator coord) {
+    coord.trackAvailable = _served.containsKey;
+    final cache = _cache;
+    return TrackFileServer(
+      fileForTrack: (id) => _served[id],
+      keysForSession: coord.transferKeysForSession,
+      nowMs: () => clock.nowMicros() ~/ 1000,
+      log: log,
+      canUpload: coord.canControlSession,
+      uploadDir: Directory('${cacheDir.path}/uploads'),
+      acceptUpload: (id, file) async {
+        await cache.dir.create(recursive: true);
+        final dest = cache.fileFor(id);
+        if (!await dest.exists()) await file.copy(dest.path);
+        _served[id] = dest;
+      },
+    );
+  }
+
   /// Joins a room hosted elsewhere. Throws [SessionFailure] on rejection.
   Future<RoomInfo> join({
     required DeviceIdentity identity,
@@ -356,7 +387,7 @@ class RoomService {
       final s = session!.state!;
       info = RoomInfo(isHost: false, roomId: s.roomId, roomName: s.roomName, host: host, port: port);
       await store.addRoomHistory(RoomHistoryEntry(
-          roomId: s.roomId, roomName: s.roomName, host: host, port: port, hosted: false, at: DateTime.now()));
+          roomId: s.roomId, roomName: s.roomName, host: host, port: port, hosted: false, at: DateTime.now(), joinKey: joinKey));
       return info!;
     } catch (e) {
       log.error('room.join', 'failed to join $host:$port: $e');
@@ -379,7 +410,7 @@ class RoomService {
     final backend = await backendFactory(log);
     TrackResolver resolver = LibraryTrackResolver(
       library: {for (final t in library) t.id: File(t.path)},
-      cache: TrackCache(Directory('${cacheDir.path}/tracks')),
+      cache: _cache,
       downloader: _downloader!,
       log: log,
     );
@@ -483,14 +514,31 @@ class RoomService {
     info = null;
   }
 
-  /// Host only: offers more library tracks to the room.
-  void addTracks(List<LibraryTrack> tracks) {
+  /// Adds library tracks to the room. The coordinator adds them directly;
+  /// a guest allowed to control the music uploads each song to the
+  /// coordinator first. [onProgress] reports (done, total) songs. Returns
+  /// the error of the first song that could not be added, or null.
+  Future<String?> addTracks(List<LibraryTrack> tracks, {void Function(int done, int total)? onProgress}) async {
     final c = coordinator;
-    if (c == null) throw StateError('only the host can add tracks');
-    for (final t in tracks) {
-      _served[t.id] = File(t.path);
-      c.addTrack(t.toTrackInfo());
+    if (c != null) {
+      for (final t in tracks) {
+        _served[t.id] = File(t.path);
+        c.addTrack(t.toTrackInfo());
+      }
+      onProgress?.call(tracks.length, tracks.length);
+      return null;
     }
+    final s = session;
+    if (s == null) return ControlError.notConnected;
+    var done = 0;
+    for (final t in tracks) {
+      onProgress?.call(done, tracks.length);
+      final ack = await s.uploadTrack(File(t.path), t.toTrackInfo());
+      if (!ack.accepted) return ack.error ?? 'failed';
+      done++;
+    }
+    onProgress?.call(done, tracks.length);
+    return null;
   }
 
   /// Saves what this device learned (start latency, and the output

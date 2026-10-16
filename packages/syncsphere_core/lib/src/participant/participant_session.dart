@@ -154,6 +154,13 @@ class ParticipantSession implements ClockSource {
 
   // Failover state.
   Connector? _target;
+
+  /// HTTP base of the coordinator [_target] points at (downloads and
+  /// uploads); null: [ParticipantOptions.transferBase].
+  Uri? _targetBase;
+
+  /// Transfer authorisation for the current session (null until welcomed).
+  TransferContext? _transfer;
   int? _linkLostAtUs;
   int _candidateIndex = 0;
   int _candidateAttempts = 0;
@@ -333,11 +340,13 @@ class ParticipantSession implements ClockSource {
       log.warn('failover.promote', 'coordinator lost; this device takes over (epoch $epoch)');
       final translated = translateForSuccessor(s, estimate: est, newCoordinatorId: options.deviceId, newEpoch: epoch);
       _target = await d.promote(PromotionRequest(state: translated, epoch: epoch, roomKey: key, joinKey: options.joinKey));
+      _targetBase = Uri.parse('http://127.0.0.1:${d.failoverPort}');
       _promoted = true;
       return true;
     }
     log.warn('failover.follow', 'coordinator lost; trying successor ${cand.displayName} (${cand.endpoint})');
     _target = d.connectorFor(cand.endpoint!);
+    _targetBase = Uri.tryParse('http://${cand.endpoint}');
     _tryingCandidate = true;
     return true;
   }
@@ -363,6 +372,7 @@ class ParticipantSession implements ClockSource {
       final translated = translateForSuccessor(h.state, estimate: est, newCoordinatorId: options.deviceId, newEpoch: h.epoch);
       final connector = await d.promote(PromotionRequest(state: translated, epoch: h.epoch, roomKey: key, joinKey: options.joinKey));
       _target = connector;
+      _targetBase = Uri.parse('http://127.0.0.1:${d.failoverPort}');
       _promoted = true;
       handoverCount++;
       log.info('handback.promoted', 'this device is the host again (epoch ${h.epoch})');
@@ -388,6 +398,7 @@ class ParticipantSession implements ClockSource {
     }
     log.warn('session.redirect', 'coordinator moved to ${r.endpoint} (epoch ${r.epoch}, ${r.reason}); audio keeps playing');
     _target = d.connectorFor(r.endpoint);
+    _targetBase = Uri.tryParse('http://${r.endpoint}');
     // Treated like a failover candidate: if it stays unreachable, fall back
     // to the succession order (starting with its first entry).
     _tryingCandidate = true;
@@ -620,18 +631,20 @@ class ParticipantSession implements ClockSource {
     _estimator = rebuilt;
     engine.updateConfig(_config);
     final keys = _roomKey!.sessionKeys(options.deviceId, _clientNonce!, c.serverNonce);
-    if (options.transferBase != null) {
-      resolver.setTransferContext(TransferContext(
-        baseUri: options.transferBase!,
-        sessionId: w.sessionId,
-        transferKey: keys.transfer,
-        coordinatorNowMs: () {
-          final e = estimate;
-          final now = clock.nowMicros();
-          return (e == null ? now : e.toRemote(now)) ~/ 1000;
-        },
-      ));
-    }
+    final base = _targetBase ?? options.transferBase;
+    _transfer = base == null
+        ? null
+        : TransferContext(
+            baseUri: base,
+            sessionId: w.sessionId,
+            transferKey: keys.transfer,
+            coordinatorNowMs: () {
+              final e = estimate;
+              final now = clock.nowMicros();
+              return (e == null ? now : e.toRemote(now)) ~/ 1000;
+            },
+          );
+    if (_transfer != null) resolver.setTransferContext(_transfer);
     log.info('session.joined', 'joined room ${c.roomId} as ${w.role.name}', {'session': w.sessionId});
     _setPhase(SessionPhase.syncing);
     _lastHeardUs = clock.nowMicros();
@@ -762,6 +775,7 @@ class ParticipantSession implements ClockSource {
     ParticipantRole? role,
     String? mode,
     int? offsetUs,
+    TrackInfo? info,
     Duration timeout = const Duration(seconds: 5),
   }) {
     final version = _state?.version ?? 0;
@@ -783,11 +797,64 @@ class ParticipantSession implements ClockSource {
       role: role,
       mode: mode,
       offsetUs: offsetUs,
+      info: info,
     ));
     return c.future.timeout(timeout, onTimeout: () {
       _pendingControls.remove(rid);
       return ControlAckMsg(requestId: rid, accepted: false, error: 'timeout', version: version);
     });
+  }
+
+  /// Adds a song from this device to the room: uploads [file] to the
+  /// coordinator (`PUT /uploads/<id>`; the coordinator checks that its
+  /// SHA-256 is [info].id and that this member may control the music), then
+  /// appends it to the playlist. Every other device downloads it from the
+  /// coordinator as usual. Songs already in the room are not re-sent.
+  Future<ControlAckMsg> uploadTrack(
+    File file,
+    TrackInfo info, {
+    void Function(int sent, int total)? onProgress,
+    Duration timeout = const Duration(minutes: 10),
+  }) async {
+    final version = _state?.version ?? 0;
+    ControlAckMsg fail(String error) => ControlAckMsg(requestId: -1, accepted: false, error: error, version: version);
+    final ctx = _transfer;
+    if (_hs != _Hs.active || ctx == null) return fail(ControlError.notConnected);
+    if (!(_role?.canControl ?? false)) return fail(ControlError.unauthorized);
+    if (_state?.trackById(info.id) != null) {
+      return ControlAckMsg(requestId: -1, accepted: true, version: version);
+    }
+    final path = '/uploads/${info.id}';
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final total = await file.length();
+      final req = await client.openUrl('PUT', ctx.baseUri.replace(path: path));
+      final expiry = ctx.coordinatorNowMs() + const TransferConfig().authValidity.inMilliseconds;
+      req.headers.set('x-syncsphere-auth', signUpload(ctx.sessionId, ctx.transferKey, path, expiry));
+      req.headers.contentType = ContentType('application', 'octet-stream');
+      req.contentLength = total;
+      var sent = 0;
+      await req.addStream(file.openRead().map((chunk) {
+        sent += chunk.length;
+        onProgress?.call(sent, total);
+        return chunk;
+      }));
+      final res = await req.close().timeout(timeout);
+      final body = await res.transform(const SystemEncoding().decoder).join();
+      if (res.statusCode != HttpStatus.created) {
+        log.warn('upload.failed', 'upload of ${info.title} refused: HTTP ${res.statusCode} $body');
+        return fail(res.statusCode == HttpStatus.forbidden
+            ? ControlError.unauthorized
+            : 'upload_failed: ${body.length > 80 ? body.substring(0, 80) : body}');
+      }
+      log.info('upload.done', 'uploaded ${info.title} ($total bytes)');
+    } on Object catch (e) {
+      log.warn('upload.failed', 'upload of ${info.title} failed: $e');
+      return fail('upload_failed: $e');
+    } finally {
+      client.close(force: true);
+    }
+    return control(ControlAction.addTrack, info: info.copyWith(hostServes: true));
   }
 
   // ------------------------------------------------------------ sending

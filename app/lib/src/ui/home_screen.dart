@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
+import '../data/models.dart';
 import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
+import 'haptics.dart';
 import 'scan_screen.dart';
 import 'widgets.dart';
 
@@ -22,60 +24,118 @@ class HomeScreen extends ConsumerWidget {
     final room = ref.watch(roomControllerProvider);
     final starting = room.status == RoomStatus.starting;
     ref.listen(roomControllerProvider.select((s) => s.error), (prev, next) {
-      if (next != null && next != prev) showMessage(context, next, error: true);
+      if (next != null && next != prev) {
+        haptic(ref, Haptic.alert);
+        showMessage(context, next, error: true);
+      }
     });
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('SyncSphere'),
-        actions: [
-          IconButton(
-            tooltip: 'Phone name',
-            icon: const Icon(Icons.badge_outlined),
-            onPressed: () => _editName(context, ref),
-          ),
-        ],
-      ),
-      body: AbsorbPointer(
-        absorbing: starting,
-        child: Stack(
-          children: [
-            RefreshIndicator(
-              onRefresh: () async => ref.invalidate(networkSummaryProvider),
-              child: ListView(
-                padding: const EdgeInsets.only(bottom: 32),
-                children: const [
-                  _NetworkBanner(),
-                  _RejoinCard(),
-                  _MainActions(),
-                  _NearbyRooms(),
-                  _LibrarySection(),
-                ],
-              ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmExit(context, ref);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('SyncSphere'),
+          actions: [
+            IconButton(
+              tooltip: 'Phone name',
+              icon: const Icon(Icons.badge_outlined),
+              onPressed: () => _editName(context, ref),
             ),
-            if (starting)
-              const Positioned.fill(
-                child: ColoredBox(
-                  color: Color(0x33000000),
-                  child: Center(
-                    child: Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
-                          SizedBox(width: 16),
-                          Text('Connecting…'),
-                        ]),
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => _settings(context, ref),
+            ),
+          ],
+        ),
+        body: AbsorbPointer(
+          absorbing: starting,
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                onRefresh: () async => ref.invalidate(networkSummaryProvider),
+                child: ListView(
+                  padding: const EdgeInsets.only(bottom: 32),
+                  children: const [
+                    _NetworkBanner(),
+                    _RejoinCard(),
+                    _MainActions(),
+                    _RecentParties(),
+                    _NearbyRooms(),
+                    _LibrarySection(),
+                  ],
+                ),
+              ),
+              if (starting)
+                const Positioned.fill(
+                  child: ColoredBox(
+                    color: Color(0x33000000),
+                    child: Center(
+                      child: Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                            SizedBox(width: 16),
+                            Text('Connecting…'),
+                          ]),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+
+  /// Back button on the home screen: ask before closing the app.
+  Future<void> _confirmExit(BuildContext context, WidgetRef ref) async {
+    haptic(ref, Haptic.tap);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Exit SyncSphere?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Exit')),
+        ],
+      ),
+    );
+    if (ok == true) await SystemNavigator.pop();
+  }
+
+  Future<void> _settings(BuildContext context, WidgetRef ref) => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (c) => Consumer(
+          builder: (c, ref, _) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: const Text('Phone name'),
+                subtitle: Text(ref.watch(identityProvider).displayName),
+                onTap: () {
+                  Navigator.pop(c);
+                  _editName(context, ref);
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.vibration),
+                title: const Text('Vibration feedback'),
+                subtitle: const Text('Buzz on taps and when the song changes'),
+                value: ref.watch(hapticsProvider),
+                onChanged: (v) => ref.read(hapticsProvider.notifier).set(v),
+              ),
+            ]),
+          ),
+        ),
+      );
 
   Future<void> _editName(BuildContext context, WidgetRef ref) async {
     final id = ref.read(identityProvider);
@@ -114,8 +174,10 @@ class _NetworkBanner extends ConsumerWidget {
     if (ok) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-        child: Text('Play music on several phones at once, perfectly together. All phones must be on the same '
-            'Wi-Fi or one phone\'s hotspot. No internet needed.', style: Theme.of(context).textTheme.bodyMedium),
+        child: Text(
+            'Play music on several phones at once, perfectly together. All phones must be on the same '
+            'Wi-Fi or one phone\'s hotspot. No internet needed.',
+            style: Theme.of(context).textTheme.bodyMedium),
       );
     }
     return Card(
@@ -252,7 +314,9 @@ class _MainActions extends ConsumerWidget {
         final clip = await Clipboard.getData(Clipboard.kTextPlain);
         final link = JoinLink.tryParse(clip?.text ?? '');
         if (link == null) {
-          if (context.mounted) showMessage(context, 'Copy the invite link first (host: QR icon → Copy link).', error: true);
+          if (context.mounted) {
+            showMessage(context, 'Copy the invite link first (host: QR icon → Copy link).', error: true);
+          }
           return;
         }
         await ctl.joinWithLink(link);
@@ -310,7 +374,8 @@ class _BigAction extends StatelessWidget {
   final String subtitle;
   final bool filled;
   final VoidCallback onTap;
-  const _BigAction({required this.icon, required this.title, required this.subtitle, required this.onTap, this.filled = false});
+  const _BigAction(
+      {required this.icon, required this.title, required this.subtitle, required this.onTap, this.filled = false});
 
   @override
   Widget build(BuildContext context) {
@@ -327,7 +392,8 @@ class _BigAction extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Icon(icon, size: 36, color: fg),
             const SizedBox(height: 12),
-            Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w600)),
+            Text(title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w600)),
             Text(subtitle, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: fg)),
           ]),
         ),
@@ -385,6 +451,130 @@ class _RejoinCard extends ConsumerWidget {
         ]),
       ),
     );
+  }
+}
+
+/// The last parties this phone was in. A party that is running nearby
+/// (found by its discovery beacon, even after another phone took over as
+/// host) rejoins with one tap using the saved code.
+class _RecentParties extends ConsumerWidget {
+  const _RecentParties();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final history = ref.watch(roomHistoryProvider).value ?? const <RoomHistoryEntry>[];
+    if (history.isEmpty) return const SizedBox.shrink();
+    final hosted = ref.watch(hostedRoomProvider).value;
+    final beacons = ref.watch(discoveryProvider).value ?? const <RoomBeacon>[];
+    final online = {
+      for (final b in beacons)
+        if (b.host != null) b.roomId: b
+    };
+    final shown = [
+      for (final e in history)
+        // "Rejoin your party" above already offers this one.
+        if (!(hosted != null && e.roomId == hosted.roomId && online.containsKey(e.roomId))) e,
+    ];
+    if (shown.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Recent parties'),
+        for (final e in shown) _RecentPartyTile(entry: e, beacon: online[e.roomId]),
+      ],
+    );
+  }
+}
+
+class _RecentPartyTile extends ConsumerWidget {
+  final RoomHistoryEntry entry;
+  final RoomBeacon? beacon;
+  const _RecentPartyTile({required this.entry, required this.beacon});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final b = beacon;
+    final canRetry = b == null && !entry.hosted && entry.joinKey != null;
+    final when = _ago(entry.at);
+    return Dismissible(
+      key: ValueKey('history-${entry.roomId}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: cs.errorContainer,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        child: Icon(Icons.delete_outline, color: cs.onErrorContainer),
+      ),
+      onDismissed: (_) => ref.read(roomControllerProvider.notifier).forgetRecentParty(entry.roomId),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: b != null ? cs.primaryContainer : cs.surfaceContainerHighest,
+          child: Icon(entry.hosted ? Icons.celebration_outlined : Icons.speaker_group_outlined,
+              color: b != null ? cs.onPrimaryContainer : cs.onSurfaceVariant),
+        ),
+        title: Text(entry.roomName, overflow: TextOverflow.ellipsis),
+        subtitle: Row(children: [
+          if (b != null) ...[
+            const HealthDot(SyncHealth.good, size: 8),
+            const SizedBox(width: 6),
+          ],
+          Flexible(
+            child: Text(
+              b != null
+                  ? 'Online · ${b.participants} phone${b.participants == 1 ? '' : 's'}'
+                  : '${entry.hosted ? 'You hosted' : 'Joined'} $when · not found nearby',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ]),
+        trailing: b != null
+            ? FilledButton(
+                onPressed: () => _join(context, ref, b),
+                child: const Text('Join'),
+              )
+            : canRetry
+                ? TextButton(onPressed: () => _join(context, ref, null), child: const Text('Try'))
+                : null,
+      ),
+    );
+  }
+
+  Future<void> _join(BuildContext context, WidgetRef ref, RoomBeacon? b) async {
+    haptic(ref, Haptic.action);
+    final key = entry.joinKey ?? await _askCode(context);
+    if (key == null || key.isEmpty) return;
+    await ref.read(roomControllerProvider.notifier).joinRecentParty(entry, key, beacon: b);
+  }
+
+  Future<String?> _askCode(BuildContext context) async {
+    final key = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Join "${entry.roomName}"'),
+        content: TextField(
+          controller: key,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Code shown on the host', hintText: 'ABCD-EFGH'),
+          textCapitalization: TextCapitalization.characters,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Join')),
+        ],
+      ),
+    );
+    return ok == true ? key.text.trim() : null;
+  }
+
+  static String _ago(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inHours < 1) return '${d.inMinutes} min ago';
+    if (d.inDays < 1) return '${d.inHours} h ago';
+    if (d.inDays == 1) return 'yesterday';
+    return '${d.inDays} days ago';
   }
 }
 
@@ -465,7 +655,7 @@ class _LibrarySection extends ConsumerWidget {
                   for (final t in tracks)
                     ListTile(
                       dense: true,
-                      leading: const Icon(Icons.music_note_outlined),
+                      leading: TrackArt(t.id, size: 40),
                       title: Text(t.title, overflow: TextOverflow.ellipsis),
                       subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
                       trailing: IconButton(
@@ -476,7 +666,8 @@ class _LibrarySection extends ConsumerWidget {
                     ),
                 ]),
           loading: () => const Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator()),
-          error: (e, _) => ListTile(leading: const Icon(Icons.error_outline), title: Text('Could not load your music: $e')),
+          error: (e, _) =>
+              ListTile(leading: const Icon(Icons.error_outline), title: Text('Could not load your music: $e')),
         ),
       ],
     );
@@ -484,7 +675,10 @@ class _LibrarySection extends ConsumerWidget {
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
     final picked = await FilePicker.pickFiles(type: FileType.audio, dialogTitle: 'Add songs');
-    final files = [for (final f in picked) if (f.path != null) File(f.path!)];
+    final files = [
+      for (final f in picked)
+        if (f.path != null) File(f.path!)
+    ];
     if (files.isEmpty) return;
     final errors = await ref.read(libraryProvider.notifier).importFiles(files);
     if (!context.mounted) return;

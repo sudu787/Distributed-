@@ -48,6 +48,13 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   4.6 ms median (p95 22 ms, mostly the first seconds while devices re-converge). Not yet run on phones.
 - **Experimental channel roles:** each phone can play stereo, left, right or a mono mix (Media3 channel mixing).
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
+- **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
+  phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
+- **Recent parties:** the last 5 parties are listed on the home screen. A party that is still running shows **Online**
+  and rejoins with one tap (also after another phone took over as host).
+- **Album art** from each song's embedded picture (colourful placeholder otherwise), and **vibration feedback** on
+  controls and when the song changes (Settings → Vibration feedback).
+- **Back button** asks before closing the app; in a party it offers *Keep playing in the background* or *Leave*.
 - **Background playback:** a foreground media service with a notification (room name, track, previous/play/next)
   keeps the room running with the screen off.
 - **QR invites:** the host shows a QR code / link containing address, port and key; guests scan it in the app,
@@ -110,7 +117,7 @@ Download that artifact and install it with `adb install` or a file manager.
 4. Guests: **Join a party → Scan QR code**. Nearby parties are also listed on the home screen.
 5. The party has three tabs:
    - **Playing:** play/pause, seek, skip, shuffle, repeat, volume for everyone and for this phone.
-   - **Queue:** the songs; the host adds more with **Add songs**.
+   - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**.
    - **Speakers:** every phone and its sync state. **Calibrate to this spot** lines the sound up where you stand.
      Tap a phone to set its volume, **timing** (fine-tune by ear: + plays earlier, − later) and channel.
 6. Something sounds off? On the Playing tab tap **This phone sounds early or late?**. For bug reports, open

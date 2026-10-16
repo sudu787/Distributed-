@@ -10,7 +10,7 @@ class SqfliteAppStore implements AppStore {
   final Database db;
   SqfliteAppStore._(this.db);
 
-  static const _version = 1;
+  static const _version = 2;
 
   /// Opens (and migrates) the database at [path]. Pass a
   /// [DatabaseFactory] in tests (e.g. `databaseFactoryFfi`).
@@ -43,9 +43,16 @@ class SqfliteAppStore implements AppStore {
                 port INTEGER NOT NULL,
                 hosted INTEGER NOT NULL,
                 at INTEGER NOT NULL,
+                join_key TEXT,
                 PRIMARY KEY (room_id, at)
               )''');
           await batch.commit(noResult: true);
+        },
+        onUpgrade: (db, from, to) async {
+          if (from < 2) {
+            // v2: join key for one-tap rejoin from "Recent parties".
+            await db.execute('ALTER TABLE room_history ADD COLUMN join_key TEXT');
+          }
         },
       ),
     );
@@ -94,12 +101,36 @@ class SqfliteAppStore implements AppStore {
   Future<void> deleteTrack(String id) => db.delete('library_tracks', where: 'id = ?', whereArgs: [id]);
 
   @override
-  Future<List<RoomHistoryEntry>> roomHistory({int limit = 20}) async =>
-      (await db.query('room_history', orderBy: 'at DESC', limit: limit)).map(RoomHistoryEntry.fromRow).toList();
+  Future<List<RoomHistoryEntry>> roomHistory({int limit = kMaxRoomHistory}) async {
+    // Older versions kept one row per visit; show each party once.
+    final rows = await db.query('room_history', orderBy: 'at DESC');
+    final seen = <String>{};
+    return [
+      for (final e in rows.map(RoomHistoryEntry.fromRow))
+        if (seen.add(e.roomId)) e,
+    ].take(limit).toList();
+  }
 
   @override
-  Future<void> addRoomHistory(RoomHistoryEntry entry) =>
-      db.insert('room_history', entry.toRow(), conflictAlgorithm: ConflictAlgorithm.replace);
+  Future<void> addRoomHistory(RoomHistoryEntry entry) => db.transaction((tx) async {
+        await tx.delete('room_history', where: 'room_id = ?', whereArgs: [entry.roomId]);
+        await tx.insert('room_history', entry.toRow(), conflictAlgorithm: ConflictAlgorithm.replace);
+        await tx.rawDelete(
+          'DELETE FROM room_history WHERE room_id NOT IN '
+          '(SELECT room_id FROM room_history ORDER BY at DESC LIMIT ?)',
+          [kMaxRoomHistory],
+        );
+      });
+
+  @override
+  Future<void> removeRoomHistory(String roomId) =>
+      db.delete('room_history', where: 'room_id = ?', whereArgs: [roomId]);
+
+  @override
+  Future<String?> setting(String key) => _get('setting.$key');
+
+  @override
+  Future<void> saveSetting(String key, String value) => _set('setting.$key', value);
 
   @override
   Future<HostedRoom?> hostedRoom() async {

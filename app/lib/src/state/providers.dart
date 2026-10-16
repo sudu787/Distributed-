@@ -6,6 +6,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 
 import '../data/app_store.dart';
 import '../data/models.dart';
+import '../services/artwork_service.dart';
 import '../services/library_service.dart';
 import '../services/network_info.dart';
 import '../services/room_service.dart';
@@ -15,6 +16,21 @@ final appStoreProvider = Provider<AppStore>((ref) => throw UnimplementedError('o
 final libraryServiceProvider =
     Provider<LibraryService>((ref) => throw UnimplementedError('override libraryServiceProvider'));
 final roomServiceProvider = Provider<RoomService>((ref) => throw UnimplementedError('override roomServiceProvider'));
+/// Album art; overridden in `main()` (disabled in tests).
+final artworkServiceProvider = Provider<ArtworkService>((ref) => ArtworkService.disabled());
+
+/// The cover of a track, or null (placeholder). While the song is still
+/// downloading to this phone it checks again every few seconds.
+final artworkProvider = FutureProvider.autoDispose.family<File?, String>((ref, trackId) async {
+  final svc = ref.watch(artworkServiceProvider);
+  final art = await svc.artFor(trackId);
+  if (art == null && await svc.mayAppearLater(trackId)) {
+    final retry = Timer(const Duration(seconds: 3), ref.invalidateSelf);
+    ref.onDispose(retry.cancel);
+  }
+  return art;
+});
+
 final initialIdentityProvider =
     Provider<DeviceIdentity>((ref) => throw UnimplementedError('override initialIdentityProvider'));
 

@@ -48,6 +48,125 @@ void main() {
     await store.close();
   });
 
+  test('recent parties: one entry per party, newest 5, join key kept; v1 databases upgrade', () async {
+    sqfliteFfiInit();
+    final path = '${tmp.path}/old.db';
+    // A database written by the previous app version (schema v1).
+    final old = await databaseFactoryFfi.openDatabase(path,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onCreate: (db, _) async {
+            await db.execute('CREATE TABLE device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+            await db.execute('CREATE TABLE library_tracks (id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, '
+                'artist TEXT, album TEXT, size INTEGER NOT NULL, duration_us INTEGER, mime TEXT, added_at INTEGER NOT NULL)');
+            await db.execute('CREATE TABLE room_history (room_id TEXT NOT NULL, room_name TEXT NOT NULL, host TEXT NOT NULL, '
+                'port INTEGER NOT NULL, hosted INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (room_id, at))');
+          },
+        ));
+    for (var i = 0; i < 2; i++) {
+      await old.insert('room_history',
+          {'room_id': 'OLD', 'room_name': 'Old party', 'host': 'h', 'port': 1, 'hosted': 0, 'at': 1000 + i});
+    }
+    await old.close();
+
+    for (final store in <AppStore>[await SqfliteAppStore.open(path, factory: databaseFactoryFfi), MemoryAppStore()]) {
+      final before = await store.roomHistory();
+      if (store is SqfliteAppStore) {
+        expect(before.single.roomId, 'OLD', reason: 'duplicates from v1 are shown once');
+        expect(before.single.joinKey, isNull);
+      }
+      for (var i = 0; i < 7; i++) {
+        await store.addRoomHistory(RoomHistoryEntry(
+            roomId: 'R$i', roomName: 'Party $i', host: 'h', port: 1, hosted: false, at: DateTime(2026, 1, 1 + i), joinKey: 'KEY$i'));
+      }
+      // Joining party 2 again moves it to the top instead of adding a row.
+      await store.addRoomHistory(RoomHistoryEntry(
+          roomId: 'R2', roomName: 'Party 2', host: 'h2', port: 2, hosted: false, at: DateTime(2026, 2), joinKey: 'KEY2'));
+      final h = await store.roomHistory();
+      expect(h.map((e) => e.roomId), ['R2', 'R6', 'R5', 'R4', 'R3']);
+      expect(h.first.joinKey, 'KEY2');
+      expect(h.first.host, 'h2');
+      await store.removeRoomHistory('R5');
+      expect((await store.roomHistory()).map((e) => e.roomId), ['R2', 'R6', 'R4', 'R3']);
+      await store.saveSetting('haptics', '0');
+      expect(await store.setting('haptics'), '0');
+      await store.close();
+    }
+  });
+
+  test('a guest allowed to control adds songs from their phone; the host and others get them', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    Future<(RoomService, DeviceIdentity, MemoryAppStore)> device(String name) async {
+      final store = MemoryAppStore();
+      final svc = RoomService(
+        store: store,
+        cacheDir: Directory('${tmp.path}/cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+        watchForNewerCoordinator: false,
+      );
+      return (svc, await store.loadIdentity(defaultName: name), store);
+    }
+
+    final (host, hostId, hostStore) = await device('host');
+    final hostLib = LibraryService(store: hostStore, libraryDir: Directory('${tmp.path}/hostlib'), log: EventLog(clock: clock));
+    final first = await hostLib.import(await audioFile('first.mp3', 1));
+    final info = await host.host(identity: hostId, roomName: 'Upload party', tracks: [first], port: 0);
+    final (guest, guestId, guestStore) = await device('guest');
+    final (other, otherId, _) = await device('other');
+    await guest.join(identity: guestId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await other.join(identity: otherId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+
+    final guestLib = LibraryService(store: guestStore, libraryDir: Directory('${tmp.path}/guestlib'), log: EventLog(clock: clock));
+    final song = await guestLib.import(await audioFile('guest-song.mp3', 42));
+
+    // Listeners cannot add songs.
+    expect(await guest.addTracks([song]), ControlError.unauthorized);
+    expect(host.coordinator!.state.trackById(song.id), isNull);
+
+    final promote = await host.session!.control(ControlAction.setRole,
+        targetDevice: guestId.deviceId, role: ParticipantRole.controller);
+    expect(promote.accepted, isTrue);
+    final roleDeadline = DateTime.now().add(const Duration(seconds: 5));
+    while (guest.session!.role != ParticipantRole.controller && DateTime.now().isBefore(roleDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    final progress = <(int, int)>[];
+    expect(await guest.addTracks([song], onProgress: (d, t) => progress.add((d, t))), isNull);
+    expect(progress.last, (1, 1));
+    final added = host.coordinator!.state.trackById(song.id)!;
+    expect(added.hostServes, isTrue);
+    expect(added.title, 'guest-song');
+    expect(File('${tmp.path}/cache-host/tracks/${song.id}.audio').existsSync(), isTrue);
+    // Adding the same song again is a no-op.
+    expect(await guest.addTracks([song]), isNull);
+    expect(host.coordinator!.state.playlist.where((t) => t.id == song.id).length, 1);
+
+    // The guest's song plays on every phone: the third phone downloads it from the host.
+    expect((await guest.session!.control(ControlAction.setTrack, trackId: song.id)).accepted, isTrue);
+    final deadline = DateTime.now().add(const Duration(seconds: 15));
+    final coord = host.coordinator!;
+    bool allPlaying() {
+      final g = coord.state.timeline.generation;
+      return coord.state.timeline.isPlaying &&
+          coord.state.timeline.trackId == song.id &&
+          [host, guest, other].every((d) => d.session!.engine.status.activeGeneration == g);
+    }
+
+    while (!allPlaying() && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(allPlaying(), isTrue);
+    expect(File('${tmp.path}/cache-other/tracks/${song.id}.audio').existsSync(), isTrue);
+
+    await other.leave();
+    await guest.leave();
+    await host.leave();
+  });
+
   test('library import deduplicates by content hash', () async {
     final store = MemoryAppStore();
     final lib = LibraryService(

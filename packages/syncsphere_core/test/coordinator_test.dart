@@ -195,6 +195,38 @@ void main() {
     });
   });
 
+  test('members who control can add songs the coordinator has; listeners cannot', () {
+    fakeAsync((fa) {
+      final f = Fixture(fa);
+      final uploaded = <String>{};
+      f.coord.trackAvailable = uploaded.contains;
+      final (host, _) = f.join('host-device');
+      final (p, _) = f.join('phone-1');
+      const song = TrackInfo(
+          id: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', title: 'C', sizeBytes: 9, durationUs: 1000000);
+      uploaded.add(song.id);
+      p.send(const ControlMsg(requestId: 1, action: ControlAction.addTrack, baseVersion: 0, info: song));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(p.last<ControlAckMsg>()!.error, ControlError.unauthorized);
+
+      host.send(const ControlMsg(
+          requestId: 1, action: ControlAction.setRole, baseVersion: 0, targetDevice: 'phone-1', role: ParticipantRole.controller));
+      fa.elapse(const Duration(milliseconds: 10));
+      // A song the coordinator does not have is refused (nobody could download it).
+      const missing = TrackInfo(
+          id: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', title: 'D', sizeBytes: 9);
+      p.send(const ControlMsg(requestId: 2, action: ControlAction.addTrack, baseVersion: 0, info: missing));
+      p.send(const ControlMsg(requestId: 3, action: ControlAction.addTrack, baseVersion: 0, info: song));
+      fa.elapse(const Duration(milliseconds: 10));
+      final acks = p.received.whereType<ControlAckMsg>().toList();
+      expect(acks[1].error, ControlError.invalid);
+      expect(acks[2].accepted, isTrue);
+      final added = f.coord.state.trackById(song.id)!;
+      expect(added.hostServes, isTrue);
+      expect(f.coord.state.playlist.length, tracks.length + 1);
+    });
+  });
+
   test('readiness barrier then future scheduled start', () {
     fakeAsync((fa) {
       final f = Fixture(fa, defaultRole: ParticipantRole.controller);

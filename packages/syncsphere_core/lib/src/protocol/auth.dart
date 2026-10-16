@@ -171,8 +171,14 @@ bool constantTimeEquals(String a, String b) {
 /// Signed authorisation for LAN track downloads:
 /// `<sessionId>.<expiryCoordMs>.<tag>` with
 /// `tag = HMAC(transferKey, "GET|<path>|<expiry>")`.
-String signTransfer(String sessionId, List<int> transferKey, String path, int expiryMs) =>
-    '$sessionId.$expiryMs.${macTag(transferKey, utf8.encode('GET|$path|$expiryMs'))}';
+String signTransfer(String sessionId, List<int> transferKey, String path, int expiryMs, {String method = 'GET'}) =>
+    '$sessionId.$expiryMs.${macTag(transferKey, utf8.encode('$method|$path|$expiryMs'))}';
+
+/// Signed authorisation for uploading a track to the coordinator
+/// (`PUT /uploads/<sha256>`); the MAC covers the method, so a download token
+/// can never be replayed as an upload.
+String signUpload(String sessionId, List<int> transferKey, String path, int expiryMs) =>
+    signTransfer(sessionId, transferKey, path, expiryMs, method: 'PUT');
 
 class TransferToken {
   final String sessionId;
@@ -188,6 +194,6 @@ class TransferToken {
     return TransferToken(parts[0], exp, parts[2]);
   }
 
-  bool verify(List<int> transferKey, String path) => constantTimeEquals(
-      tag, macTag(transferKey, utf8.encode('GET|$path|$expiryMs')));
+  bool verify(List<int> transferKey, String path, {String method = 'GET'}) => constantTimeEquals(
+      tag, macTag(transferKey, utf8.encode('$method|$path|$expiryMs')));
 }

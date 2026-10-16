@@ -172,6 +172,12 @@ class RoomCoordinator {
   /// to close. The app tears down its server and keeps playing as a guest.
   void Function(String endpoint, int epoch, String reason)? onSteppedDown;
 
+  /// Whether this coordinator has the file for a track (uploaded by a
+  /// member or in its library). A member's addTrack is accepted only for
+  /// such tracks, so every song in the playlist can be downloaded. Null:
+  /// members cannot add songs.
+  bool Function(String trackId)? trackAvailable;
+
   RoomCoordinator({
     required this.options,
     required this.clock,
@@ -360,6 +366,13 @@ class RoomCoordinator {
     final m = _members.bySession(sessionId);
     if (m == null || !m.isConnected) return null;
     return m.keys;
+  }
+
+  /// Whether the member behind [sessionId] is connected and may control the
+  /// music (used to authorise song uploads).
+  bool canControlSession(String sessionId) {
+    final m = _members.bySession(sessionId);
+    return m != null && m.isConnected && m.role.canControl;
   }
 
   /// Applies a control request on behalf of [deviceId] (used by the
@@ -740,6 +753,20 @@ class RoomCoordinator {
     }
 
     switch (c.action) {
+      case ControlAction.addTrack:
+        final info = c.info;
+        final available = trackAvailable;
+        if (info == null || available == null || !available(info.id)) {
+          return const ControlOutcome.fail(ControlError.invalid);
+        }
+        if (_state.trackById(info.id) != null) return ok; // idempotent
+        if (_state.playlist.length >= options.limits.maxPlaylistLength) {
+          return const ControlOutcome.fail(ControlError.invalid);
+        }
+        addTrack(info.copyWith(hostServes: true, availableCount: 0));
+        log.info('playlist.add', '${m.displayName} added "${info.title}"');
+        return ok;
+
       case ControlAction.calibrate:
         return _startCalibration(m);
 

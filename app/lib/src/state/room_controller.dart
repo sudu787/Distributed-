@@ -27,6 +27,9 @@ class RoomViewState {
   final String? error;
   final List<SyncEvent> events;
 
+  /// Songs being added from this phone: (done, total); null when idle.
+  final (int, int)? adding;
+
   const RoomViewState({
     this.status = RoomStatus.none,
     this.info,
@@ -40,6 +43,7 @@ class RoomViewState {
     this.role,
     this.error,
     this.events = const [],
+    this.adding,
   });
 
   bool get isLive => phase == SessionPhase.joined || phase == SessionPhase.syncing;
@@ -60,6 +64,8 @@ class RoomViewState {
     String? error,
     bool clearError = false,
     List<SyncEvent>? events,
+    (int, int)? adding,
+    bool clearAdding = false,
   }) =>
       RoomViewState(
         status: status ?? this.status,
@@ -74,6 +80,7 @@ class RoomViewState {
         role: role ?? this.role,
         error: clearError ? null : (error ?? this.error),
         events: events ?? this.events,
+        adding: clearAdding ? null : (adding ?? this.adding),
       );
 }
 
@@ -121,6 +128,21 @@ class RoomController extends Notifier<RoomViewState> {
   /// back automatically once this phone has been stable for ~10 s.
   Future<void> rejoinHostedRoom(HostedRoom room, RoomBeacon beacon) =>
       join(host: beacon.host!, port: beacon.port, joinKey: room.joinKey, roomId: room.roomId);
+
+  /// Sends the app to the background (Android); the party keeps playing.
+  Future<bool> moveToBackground() => _svc.hooks.moveToBackground();
+
+  /// Rejoins a party from "Recent parties": at the address its beacon
+  /// announces now (the host may have changed), else the last known one.
+  Future<void> joinRecentParty(RoomHistoryEntry entry, String joinKey, {RoomBeacon? beacon}) {
+    final host = beacon?.host ?? entry.host;
+    return join(host: host, port: beacon?.port ?? entry.port, joinKey: joinKey, roomId: entry.roomId);
+  }
+
+  Future<void> forgetRecentParty(String roomId) async {
+    await ref.read(appStoreProvider).removeRoomHistory(roomId);
+    ref.invalidate(roomHistoryProvider);
+  }
 
   Future<void> forgetHostedRoom() async {
     await ref.read(appStoreProvider).saveHostedRoom(null);
@@ -230,7 +252,22 @@ class RoomController extends Notifier<RoomViewState> {
     state = const RoomViewState();
   }
 
-  void addTracks(List<LibraryTrack> tracks) => _svc.addTracks(tracks);
+  /// Adds songs to the queue (the host directly; a guest with control
+  /// uploads them to the host). Returns a user-facing error or null.
+  Future<String?> addTracks(List<LibraryTrack> tracks) async {
+    if (tracks.isEmpty) return null;
+    state = state.copyWith(adding: (0, tracks.length));
+    try {
+      final err = await _svc.addTracks(tracks, onProgress: (done, total) {
+        if (state.status == RoomStatus.active) state = state.copyWith(adding: (done, total));
+      });
+      return err == null ? null : describeControlError(err, ControlAction.addTrack);
+    } catch (e) {
+      return 'Could not add songs: $e';
+    } finally {
+      state = state.copyWith(clearAdding: true);
+    }
+  }
 
   /// Sends a control request; returns a user-facing error or null.
   Future<String?> control(ControlAction action,
@@ -252,17 +289,7 @@ class RoomController extends Notifier<RoomViewState> {
         mode: mode,
         offsetUs: offsetUs);
     if (ack.accepted) return null;
-    return switch (ack.error) {
-      ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
-      ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
-      ControlError.invalid when action == ControlAction.calibrate =>
-        'Calibration needs microphone access and at least one connected device.',
-      ControlError.staleVersion => 'The room changed meanwhile — try again.',
-      ControlError.notConnected => 'Not connected to the room coordinator.',
-      ControlError.nothingToPlay => 'Nothing to play.',
-      ControlError.unknownTrack => 'That track is no longer in the room.',
-      final other => 'Request failed: $other',
-    };
+    return describeControlError(ack.error, action);
   }
 
   Future<void> setCalibration(int outputCalibrationUs) async {
@@ -412,3 +439,20 @@ class RoomController extends Notifier<RoomViewState> {
 }
 
 final roomControllerProvider = NotifierProvider<RoomController, RoomViewState>(RoomController.new);
+
+/// User-facing text for a rejected control request or upload.
+String describeControlError(String? error, ControlAction action) => switch (error) {
+      ControlError.unauthorized when action == ControlAction.addTrack =>
+        'Only the host and phones allowed to control the music can add songs.',
+      ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
+      ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
+      ControlError.invalid when action == ControlAction.calibrate =>
+        'Calibration needs microphone access and at least one connected device.',
+      ControlError.invalid when action == ControlAction.addTrack => 'The host could not add that song.',
+      ControlError.staleVersion => 'The room changed meanwhile — try again.',
+      ControlError.notConnected => 'Not connected to the room coordinator.',
+      ControlError.nothingToPlay => 'Nothing to play.',
+      ControlError.unknownTrack => 'That track is no longer in the room.',
+      final String e when e.startsWith('upload_failed') => 'Sending the song to the host failed. Check the Wi-Fi and try again.',
+      final other => 'Request failed: $other',
+    };

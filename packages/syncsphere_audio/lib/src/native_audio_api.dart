@@ -40,6 +40,13 @@ abstract class NativeAudioApi {
   /// seeking). Returns {path, sampleRate, channels, durationUs, decoder}.
   Future<Map<String, Object?>> exactCopy(String uri, String outPath);
 
+  /// Writes the embedded cover picture of [uri] as a JPEG (at most 512 px)
+  /// to [outPath]. Returns false when the file has no picture.
+  Future<bool> extractArtwork(String uri, String outPath);
+
+  /// Sends the app to the background without closing it.
+  Future<bool> moveToBack();
+
   Stream<Map<String, Object?>> get events;
 }
 
@@ -96,6 +103,13 @@ class MethodChannelAudioApi implements NativeAudioApi {
 
   @override
   Future<void> setChannelRole(String role) => _channel.invokeMethod<void>('setChannelRole', {'role': role});
+
+  @override
+  Future<bool> extractArtwork(String uri, String outPath) async =>
+      (await _channel.invokeMethod<bool>('extractArtwork', {'uri': uri, 'out': outPath})) ?? false;
+
+  @override
+  Future<bool> moveToBack() async => (await _channel.invokeMethod<bool>('moveToBack')) ?? false;
 
   @override
   Future<bool> requestPermission(String name) async =>

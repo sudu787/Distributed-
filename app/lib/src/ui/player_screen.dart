@@ -7,6 +7,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
+import 'haptics.dart';
 import 'room_screen.dart' show DeviceSettingsSheet;
 import 'widgets.dart';
 
@@ -38,12 +39,20 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
     super.dispose();
   }
 
-  Future<void> _ctl(ControlAction a, {int? positionUs, double? value, String? targetDevice}) =>
-      _result(ref.read(roomControllerProvider.notifier).control(a, positionUs: positionUs, value: value, targetDevice: targetDevice));
+  Future<void> _ctl(ControlAction a, {int? positionUs, double? value, String? targetDevice}) {
+    if (const {ControlAction.play, ControlAction.pause, ControlAction.next, ControlAction.previous, ControlAction.seek}
+        .contains(a)) {
+      haptic(ref, Haptic.action);
+    }
+    return _result(ref.read(roomControllerProvider.notifier).control(a, positionUs: positionUs, value: value, targetDevice: targetDevice));
+  }
 
   Future<void> _result(Future<String?> f) async {
     final err = await f;
-    if (err != null && mounted) showMessage(context, err, error: true);
+    if (err != null && mounted) {
+      haptic(ref, Haptic.alert);
+      showMessage(context, err, error: true);
+    }
   }
 
   @override
@@ -66,18 +75,9 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
-        AspectRatio(
-          aspectRatio: 1.6,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              gradient: LinearGradient(
-                colors: [cs.primaryContainer, cs.tertiaryContainer],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Icon(Icons.music_note, size: 88, color: cs.onPrimaryContainer),
+        Center(
+          child: LayoutBuilder(
+            builder: (context, c) => TrackArt(track?.id, size: c.maxWidth.clamp(120.0, 300.0) * 0.8),
           ),
         ),
         const SizedBox(height: 20),
@@ -112,7 +112,12 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
             isSelected: room?.shuffle ?? false,
             icon: const Icon(Icons.shuffle_rounded),
             selectedIcon: Icon(Icons.shuffle_on_rounded, color: cs.primary),
-            onPressed: canControl ? () => _result(ctl.setShuffle(!(room?.shuffle ?? false))) : null,
+            onPressed: canControl
+                ? () {
+                    haptic(ref, Haptic.tap);
+                    _result(ctl.setShuffle(!(room?.shuffle ?? false)));
+                  }
+                : null,
           ),
           const SizedBox(width: 4),
           IconButton(
@@ -138,7 +143,12 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
           const SizedBox(width: 4),
           _RepeatButton(
             mode: room?.repeat ?? PlaylistRepeat.off,
-            onPressed: canControl ? (next) => _result(ctl.setRepeat(next)) : null,
+            onPressed: canControl
+                ? (next) {
+                    haptic(ref, Haptic.tap);
+                    _result(ctl.setRepeat(next));
+                  }
+                : null,
           ),
         ]),
         if (!canControl)

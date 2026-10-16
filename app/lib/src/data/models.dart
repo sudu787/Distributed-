@@ -86,6 +86,13 @@ class DeviceIdentity {
       );
 }
 
+/// How many recent parties the app remembers.
+const kMaxRoomHistory = 5;
+
+/// A party this phone was in, newest first in the "Recent parties" list.
+/// [joinKey] lets the phone rejoin with one tap while the party is still
+/// running; it is stored only in app-private storage (null for entries
+/// saved by older versions).
 class RoomHistoryEntry {
   final String roomId;
   final String roomName;
@@ -93,6 +100,7 @@ class RoomHistoryEntry {
   final int port;
   final bool hosted;
   final DateTime at;
+  final String? joinKey;
 
   const RoomHistoryEntry({
     required this.roomId,
@@ -101,6 +109,7 @@ class RoomHistoryEntry {
     required this.port,
     required this.hosted,
     required this.at,
+    this.joinKey,
   });
 
   Map<String, Object?> toRow() => {
@@ -110,6 +119,7 @@ class RoomHistoryEntry {
         'port': port,
         'hosted': hosted ? 1 : 0,
         'at': at.millisecondsSinceEpoch,
+        'join_key': joinKey,
       };
 
   factory RoomHistoryEntry.fromRow(Map<String, Object?> r) => RoomHistoryEntry(
@@ -119,6 +129,7 @@ class RoomHistoryEntry {
         port: r['port']! as int,
         hosted: (r['hosted']! as int) == 1,
         at: DateTime.fromMillisecondsSinceEpoch(r['at']! as int),
+        joinKey: r['join_key'] as String?,
       );
 }
 

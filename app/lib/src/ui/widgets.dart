@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/providers.dart';
 import 'format.dart';
 
 class SectionHeader extends StatelessWidget {
@@ -96,4 +98,58 @@ void showMessage(BuildContext context, String message, {bool error = false}) {
     backgroundColor: error ? cs.error : null,
     behavior: SnackBarBehavior.floating,
   ));
+}
+
+/// Album art of a track with rounded corners; a colourful placeholder
+/// (picked from the track id) when the song has no picture.
+class TrackArt extends ConsumerWidget {
+  final String? trackId;
+  final double size;
+  const TrackArt(this.trackId, {super.key, this.size = 48});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final id = trackId;
+    final art = id == null ? null : ref.watch(artworkProvider(id)).value;
+    final radius = BorderRadius.circular(size * 0.14);
+    return ClipRRect(
+      borderRadius: radius,
+      child: SizedBox.square(
+        dimension: size,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: art != null
+              ? Image.file(art, key: ValueKey(art.path), fit: BoxFit.cover, gaplessPlayback: true)
+              : _ArtPlaceholder(id, size: size, key: ValueKey('ph-$id')),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtPlaceholder extends StatelessWidget {
+  final String? id;
+  final double size;
+  const _ArtPlaceholder(this.id, {super.key, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final seed = id == null ? 0 : id!.codeUnits.take(12).fold<int>(7, (h, c) => (h * 31 + c) & 0x7fffffff);
+    final hue = (seed % 360).toDouble();
+    Color tone(double h, double l) => HSLColor.fromAHSL(1, h % 360, 0.55, dark ? l * 0.6 : l).toColor();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: id == null
+            ? LinearGradient(colors: [cs.primaryContainer, cs.tertiaryContainer])
+            : LinearGradient(
+                colors: [tone(hue, 0.62), tone(hue + 40, 0.48)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+      ),
+      child: Center(child: Icon(Icons.music_note, size: size * 0.45, color: Colors.white.withValues(alpha: 0.9))),
+    );
+  }
 }

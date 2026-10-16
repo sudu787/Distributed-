@@ -11,6 +11,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 
 import 'src/app.dart';
 import 'src/data/sqflite_store.dart';
+import 'src/services/artwork_service.dart';
 import 'src/services/library_service.dart';
 import 'src/services/room_service.dart';
 import 'src/state/providers.dart';
@@ -62,8 +63,16 @@ Future<void> main() async {
     },
   );
 
+  final artwork = ArtworkService(
+    extract: native?.extractArtwork,
+    store: store,
+    artDir: Directory(p.join(cache.path, 'art')),
+    trackCacheDir: Directory(p.join(cache.path, 'tracks')),
+  );
+
   runApp(ProviderScope(
     overrides: [
+      artworkServiceProvider.overrideWithValue(artwork),
       appStoreProvider.overrideWithValue(store),
       libraryServiceProvider.overrideWithValue(library),
       roomServiceProvider.overrideWithValue(rooms),
@@ -109,6 +118,16 @@ class _AndroidHooks extends PlatformHooks {
     // Foreground service: keeps the room alive with the screen off.
     await background.start(title: roomName, text: 'Connected', playing: false);
     if (!background.running) log.warn('platform.background', 'background playback service unavailable');
+  }
+
+  @override
+  Future<bool> moveToBackground() async {
+    try {
+      return await api.moveToBack();
+    } catch (e) {
+      log.warn('platform.background', 'could not move to background: $e');
+      return false;
+    }
   }
 
   @override

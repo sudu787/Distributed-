@@ -160,6 +160,7 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `setChannelRole` | `mode` `stereo\|left\|right\|mono`, `dev?` | Channel role. A device may always change its own; others need control rights. | never |
 | `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
 | `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
+| `addTrack` | `info` (track object, §4) | Appends a song. Needs control rights, and the coordinator must already have the file (uploaded with `PUT /uploads/<id>`, §8, or in its library); otherwise `invalid`. Idempotent. | never |
 
 While a calibration runs, `play`, `pause`, `seek`, `setTrack`, `next`, `previous` and `calibrate` are refused with
 `busy`.
@@ -293,6 +294,32 @@ Range: bytes=<start>-            (optional, single range)
 | 429 | Too many concurrent transfers: 2 per session, 8 in total (`Retry-After: 2`) |
 
 The client verifies SHA-256 before use and restarts once on mismatch.
+
+### Uploads (guests adding songs)
+
+```
+PUT /uploads/<64 lowercase hex>
+X-SyncSphere-Auth: <sessionId>.<expiryCoordMs>.<b64url(HMAC(xfer, "PUT|/uploads/<id>|<expiry>")[0:16])>
+Content-Length: <bytes>
+```
+
+A member with control rights sends a song from its phone to the coordinator, then sends `addTrack`. The MAC covers
+the method, so a download token cannot authorize an upload. The coordinator stores the body only if its SHA-256 equals
+the id; from then on it serves the song under `/tracks/<id>` like any other.
+
+| Status | Meaning |
+|---|---|
+| 201 | Stored |
+| 400 | Malformed id or empty body |
+| 401 | Missing, invalid or expired token |
+| 403 | The member may not control the music (listener) |
+| 405 | This coordinator does not accept uploads |
+| 413 | Over the transfer limit (512 MiB) |
+| 422 | Content does not match the id |
+| 429 | This session already has an upload running (`Retry-After: 2`) |
+
+After a failover, the new coordinator also serves songs it had downloaded (including uploaded ones), so they stay
+playable.
 
 ## 9. Discovery beacon (UDP 47801)
 

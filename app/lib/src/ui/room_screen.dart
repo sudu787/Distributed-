@@ -8,6 +8,7 @@ import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'diagnostics_screen.dart';
 import 'format.dart';
+import 'haptics.dart';
 import 'player_screen.dart';
 import 'queue_view.dart';
 import 'widgets.dart';
@@ -31,62 +32,121 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final connected = room?.participants.where((p) => p.connection != ConnectionStatus.disconnected).length ?? 0;
     final playing = room?.timeline.isPlaying ?? false;
     final (health, label) = roomSyncSummary(s.diagnostics?.maxPairwiseErrorUs, live: s.isLive, playing: playing);
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(room?.roomName ?? s.info?.roomName ?? 'Room', overflow: TextOverflow.ellipsis),
-          Row(children: [
-            HealthDot(health, size: 8),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text('$connected phone${connected == 1 ? '' : 's'} · $label',
-                  style: Theme.of(context).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
-            ),
-          ]),
-        ]),
-        actions: [
-          if (s.isHost)
-            IconButton(
-              tooltip: 'Invite',
-              icon: const Icon(Icons.qr_code_2),
-              onPressed: () => showInvite(context, ref),
-            ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (v) {
-              if (v == 'diag') {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const DiagnosticsScreen()));
-              } else if (v == 'leave') {
-                _leave(context, s.isHost);
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'diag', child: ListTile(leading: Icon(Icons.monitor_heart_outlined), title: Text('Diagnostics'))),
-              PopupMenuItem(
-                value: 'leave',
-                child: ListTile(leading: const Icon(Icons.logout), title: Text(s.isHost ? 'End party' : 'Leave party')),
+    // Every phone feels it when the room changes song or starts/stops.
+    ref.listen(roomControllerProvider.select((v) => (v.room?.timeline.trackId, v.room?.timeline.isPlaying)),
+        (prev, next) {
+      if (prev == null || prev.$1 == null && prev.$2 == null) return;
+      if (next.$1 != prev.$1 && next.$1 != null) {
+        haptic(ref, Haptic.songChanged);
+      } else if (next.$2 != prev.$2) {
+        haptic(ref, Haptic.action);
+      }
+    });
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _onBack(context, s.isHost);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(room?.roomName ?? s.info?.roomName ?? 'Room', overflow: TextOverflow.ellipsis),
+            Row(children: [
+              HealthDot(health, size: 8),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text('$connected phone${connected == 1 ? '' : 's'} · $label',
+                    style: Theme.of(context).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
               ),
-            ],
-          ),
-        ],
-      ),
-      body: room == null
-          ? const Center(child: CircularProgressIndicator())
-          : switch (_tab) {
-              0 => const NowPlayingView(),
-              1 => const QueueView(),
-              _ => const SpeakersView(),
-            },
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
-          NavigationDestination(icon: Icon(Icons.queue_music_outlined), selectedIcon: Icon(Icons.queue_music), label: 'Queue'),
-          NavigationDestination(icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
-        ],
+            ]),
+          ]),
+          actions: [
+            if (s.isHost)
+              IconButton(
+                tooltip: 'Invite',
+                icon: const Icon(Icons.qr_code_2),
+                onPressed: () => showInvite(context, ref),
+              ),
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (v) {
+                if (v == 'diag') {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DiagnosticsScreen()));
+                } else if (v == 'leave') {
+                  _leave(context, s.isHost);
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                    value: 'diag',
+                    child: ListTile(leading: Icon(Icons.monitor_heart_outlined), title: Text('Diagnostics'))),
+                PopupMenuItem(
+                  value: 'leave',
+                  child:
+                      ListTile(leading: const Icon(Icons.logout), title: Text(s.isHost ? 'End party' : 'Leave party')),
+                ),
+              ],
+            ),
+          ],
+        ),
+        body: room == null
+            ? const Center(child: CircularProgressIndicator())
+            : switch (_tab) {
+                0 => const NowPlayingView(),
+                1 => const QueueView(),
+                _ => const SpeakersView(),
+              },
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(
+                icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
+            NavigationDestination(
+                icon: Icon(Icons.queue_music_outlined), selectedIcon: Icon(Icons.queue_music), label: 'Queue'),
+            NavigationDestination(
+                icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
+          ],
+        ),
       ),
     );
+  }
+
+  /// Back button in a party: never drop out of the party by accident.
+  Future<void> _onBack(BuildContext context, bool host) async {
+    haptic(ref, Haptic.tap);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const ListTile(title: Text('Leave the party?')),
+          ListTile(
+            leading: const Icon(Icons.music_note),
+            title: const Text('Keep playing in the background'),
+            subtitle: const Text('The music continues; open SyncSphere again any time'),
+            onTap: () => Navigator.pop(c, 'background'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: Text(host ? 'End party' : 'Leave party'),
+            subtitle: Text(host ? 'Stops the music on every phone' : 'Stops the music on this phone'),
+            onTap: () => Navigator.pop(c, 'leave'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.close),
+            title: const Text('Cancel'),
+            onTap: () => Navigator.pop(c),
+          ),
+        ]),
+      ),
+    );
+    if (!context.mounted) return;
+    if (choice == 'background') {
+      await ref.read(roomControllerProvider.notifier).moveToBackground();
+    } else if (choice == 'leave') {
+      await _leave(context, host);
+    }
   }
 
   Future<void> _leave(BuildContext context, bool host) async {
@@ -104,6 +164,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       );
       if (ok != true) return;
     }
+    haptic(ref, Haptic.action);
     await ref.read(roomControllerProvider.notifier).leave();
   }
 }
@@ -140,7 +201,8 @@ Future<void> showInvite(BuildContext context, WidgetRef ref) async {
               if (link != null) Text('Address ${link.hosts.first} · port ${link.port}', style: t.bodySmall),
             ],
             const SizedBox(height: 8),
-            Text('Anyone with this code can join. Share it only with people here.', style: t.bodySmall, textAlign: TextAlign.center),
+            Text('Anyone with this code can join. Share it only with people here.',
+                style: t.bodySmall, textAlign: TextAlign.center),
           ]),
         ),
       ),
@@ -171,7 +233,8 @@ class SpeakersView extends ConsumerWidget {
     final room = s.room!;
     final me = ref.watch(identityProvider).deviceId;
     final diag = {for (final d in s.diagnostics?.participants ?? const <ParticipantDiagnostics>[]) d.deviceId: d};
-    final others = room.participants.where((p) => p.deviceId != me && p.connection != ConnectionStatus.disconnected).length;
+    final others =
+        room.participants.where((p) => p.deviceId != me && p.connection != ConnectionStatus.disconnected).length;
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
@@ -183,8 +246,7 @@ class SpeakersView extends ConsumerWidget {
           ),
         const _ListeningSpot(),
         const SectionHeader('Phones'),
-        for (final p in room.participants)
-          _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
+        for (final p in room.participants) _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: Text(

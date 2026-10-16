@@ -469,6 +469,11 @@ enum ControlAction {
   /// `dev` (default: sender), `off`: output calibration offset in µs
   /// (manual adjustment; acoustic calibration sets it automatically).
   setCalibration,
+
+  /// `info`: the track to append to the playlist. The file must already be
+  /// on the coordinator (uploaded with `PUT /uploads/<id>`, or in its
+  /// library).
+  addTrack,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -493,6 +498,9 @@ class ControlMsg extends Message {
   /// Signed offset argument (µs) for setCalibration.
   final int? offsetUs;
 
+  /// Track metadata for addTrack.
+  final TrackInfo? info;
+
   const ControlMsg({
     required this.requestId,
     required this.action,
@@ -504,6 +512,7 @@ class ControlMsg extends Message {
     this.role,
     this.mode,
     this.offsetUs,
+    this.info,
   });
 
   @override
@@ -518,6 +527,7 @@ class ControlMsg extends Message {
         if (role != null) 'role': role!.name,
         if (mode != null) 'mode': mode,
         if (offsetUs != null) 'off': offsetUs,
+        if (info != null) 'info': info!.toJson(),
       };
 
   static ControlMsg read(Reader r) => ControlMsg(
@@ -531,7 +541,10 @@ class ControlMsg extends Message {
         role: r.optEnum('role', ParticipantRole.values),
         mode: r.optString('mode', maxLength: 16),
         offsetUs: r.optInteger('off', min: -kMaxCalibrationUs, max: kMaxCalibrationUs),
+        info: _optTrack(r.optMap('info')),
       );
+
+  static TrackInfo? _optTrack(Map<String, Object?>? j) => j == null ? null : TrackInfo.fromJson(j);
 }
 
 /// Largest accepted output calibration offset magnitude (µs).
