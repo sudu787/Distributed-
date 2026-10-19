@@ -123,6 +123,11 @@ class RoomKey {
   static String _ctx(String roomId, String deviceId, String cn, String sn) =>
       '$roomId|$deviceId|$cn|$sn';
 
+  /// Room-wide key for phone-to-phone chunk transfers: every member knows
+  /// it (it is derived from the join key), so any member can verify any
+  /// other member's request. Grants nothing beyond reading the room's songs.
+  List<int> peerKey() => _mac('peer', roomId);
+
   String clientProof(String deviceId, String clientNonce, String serverNonce) =>
       b64(_mac('c', _ctx(roomId, deviceId, clientNonce, serverNonce)));
 

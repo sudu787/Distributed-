@@ -96,7 +96,15 @@ class RoomService {
   BeaconBroadcaster? _beacon;
   TrackFileServer? _files;
   TrackDownloader? _downloader;
+  SwarmDownloader? _swarm;
   final Map<String, File> _served = {};
+
+  /// Chunk hashes of songs this phone serves (phone-to-phone sharing).
+  final ChunkIndex _chunks = ChunkIndex();
+
+  /// This phone's peer file server: other guests fetch song chunks from it.
+  HttpServer? _peerServer;
+  TrackFileServer? _peerFiles;
   DeviceIdentity? _identity;
   final List<StreamSubscription<Object?>> _subs = [];
   RoomDiscovery? _watch;
@@ -160,6 +168,7 @@ class RoomService {
         ..clear()
         ..addEntries(tracks.map((t) => MapEntry(t.id, File(t.path))));
       coord.setPlaylist([for (final t in tracks) t.toTrackInfo()]);
+      unawaited(_publishChunkRoots(coord, {for (final t in tracks) t.id: File(t.path)}));
       _files = _fileServerFor(coord);
       _server = await _bind(port);
       coord.serve(_server!);
@@ -351,6 +360,20 @@ class RoomService {
 
   TrackCache get _cache => TrackCache(Directory('${cacheDir.path}/tracks'));
 
+  /// Computes and publishes chunk roots so guests can share songs with each
+  /// other. Runs in the background; a song without a root is simply
+  /// downloaded whole from the host.
+  Future<void> _publishChunkRoots(RoomCoordinator coord, Map<String, File> files) async {
+    for (final e in files.entries) {
+      try {
+        final root = await _chunks.rootFor(e.key, e.value);
+        if (identical(coordinator, coord)) coord.setChunkRoot(e.key, root);
+      } catch (err) {
+        log.warn('swarm.index', 'could not index ${e.key.substring(0, 8)} for sharing: $err');
+      }
+    }
+  }
+
   /// Serves the room's songs and accepts songs uploaded by guests who may
   /// control the music. Uploads go into the track cache, where this phone's
   /// own player finds them too.
@@ -364,11 +387,15 @@ class RoomService {
       log: log,
       canUpload: coord.canControlSession,
       uploadDir: Directory('${cacheDir.path}/uploads'),
+      peerKey: () => coord.options.roomKey?.peerKey(),
+      chunksFor: _chunks.hashesFor,
+      partialFor: (id) => PartialTrack.peek(cache.dir, id),
       acceptUpload: (id, file) async {
         await cache.dir.create(recursive: true);
         final dest = cache.fileFor(id);
         if (!await dest.exists()) await file.copy(dest.path);
         _served[id] = dest;
+        unawaited(_publishChunkRoots(coord, {id: dest}));
       },
     );
   }
@@ -407,11 +434,15 @@ class RoomService {
     _identity = identity;
     final library = await store.libraryTracks();
     _downloader = TrackDownloader(log: log);
+    _swarm = SwarmDownloader(log: log);
+    final libraryFiles = {for (final t in library) t.id: File(t.path)};
+    await _startPeerServer(libraryFiles);
     final backend = await backendFactory(log);
     TrackResolver resolver = LibraryTrackResolver(
       library: {for (final t in library) t.id: File(t.path)},
       cache: _cache,
       downloader: _downloader!,
+      swarm: _swarm,
       log: log,
     );
     final convert = converterFor?.call(backend);
@@ -433,6 +464,7 @@ class RoomService {
         // redirect, and receive the role back (handback); see failover.dart.
         failover: _AppFailover(this, identity),
         recorder: recorderFor?.call(backend),
+        peerPort: _peerServer?.port,
         calibrationTracks: FileCalibrationTrackFactory(Directory('${cacheDir.path}/calibration')),
       ),
       connector: webSocketConnector(host, port),
@@ -460,6 +492,50 @@ class RoomService {
       ..add(s.stateStream.listen(_updateNowPlaying))
       ..add(hooks.commands.listen(_onExternalCommand));
   }
+
+  /// Starts this phone's peer file server: complete songs (My music, the
+  /// download cache) and songs still being assembled, for other guests.
+  /// Requests must carry a token signed with the room's peer key.
+  Future<void> _startPeerServer(Map<String, File> libraryFiles) async {
+    await _stopPeerServer();
+    final cache = _cache;
+    final files = TrackFileServer(
+      fileForTrack: (id) {
+        final lib = libraryFiles[id];
+        if (lib != null && lib.existsSync()) return lib;
+        final cached = cache.fileFor(id);
+        return cached.existsSync() ? cached : null;
+      },
+      keysForSession: (_) => null,
+      nowMs: () {
+        final e = session?.estimate;
+        final now = clock.nowMicros();
+        return (e == null ? now : e.toRemote(now)) ~/ 1000;
+      },
+      log: log,
+      peerKey: () => session?.peerKey,
+      chunksFor: _chunks.hashesFor,
+      partialFor: (id) => PartialTrack.peek(cache.dir, id),
+    );
+    try {
+      final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+      server.listen(files.handle, onError: (Object e) => log.warn('peer.server', '$e'));
+      _peerServer = server;
+      _peerFiles = files;
+    } catch (e) {
+      log.warn('peer.server', 'phone-to-phone sharing unavailable: $e');
+    }
+  }
+
+  Future<void> _stopPeerServer() async {
+    final s = _peerServer;
+    _peerServer = null;
+    _peerFiles = null;
+    await s?.close(force: true);
+  }
+
+  /// Bytes this phone served to other guests (diagnostics).
+  int get bytesSharedWithPeers => _peerFiles?.bytesServed ?? 0;
 
   void _updateNowPlaying(RoomState r) {
     final tl = r.timeline;
@@ -511,6 +587,7 @@ class RoomService {
     final s = session;
     session = null;
     await s?.close();
+    await _stopPeerServer();
     info = null;
   }
 
@@ -525,6 +602,7 @@ class RoomService {
         _served[t.id] = File(t.path);
         c.addTrack(t.toTrackInfo());
       }
+      unawaited(_publishChunkRoots(c, {for (final t in tracks) t.id: File(t.path)}));
       onProgress?.call(tracks.length, tracks.length);
       return null;
     }
@@ -595,6 +673,9 @@ class RoomService {
     _server = null;
     _downloader?.close();
     _downloader = null;
+    _swarm?.close();
+    _swarm = null;
+    await _stopPeerServer();
     info = null;
     promotedByFailover = false;
     await hooks.leaveRoom();

@@ -5,6 +5,7 @@ import 'dart:async';
 
 import '../audio/audio_backend.dart';
 import '../model/room_state.dart';
+import 'swarm.dart' show PeerContext;
 
 class TrackUnavailableException implements Exception {
   /// `missing_track`, `hash_mismatch`, `download_failed`, `too_large`.
@@ -35,6 +36,9 @@ class TransferContext {
 
 abstract class TrackResolver {
   void setTransferContext(TransferContext? ctx);
+
+  /// Phone-to-phone sharing: how to reach other members' peer servers.
+  void setPeerContext(PeerContext? ctx) {}
 
   /// Cheap local check (library index / cache), no network.
   Future<TrackAvailability> availability(TrackInfo track);

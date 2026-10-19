@@ -18,6 +18,7 @@ import '../model/room_state.dart';
 import '../observability/event_log.dart';
 import '../protocol/auth.dart';
 import 'track_hasher.dart';
+import 'swarm.dart';
 import 'track_resolver.dart';
 
 class TrackCache {
@@ -239,7 +240,11 @@ class LibraryTrackResolver extends TrackResolver {
   final TrackCache cache;
   final TrackDownloader downloader;
   final EventLog log;
+
+  /// Phone-to-phone sharing (null: whole-file downloads from the host).
+  final SwarmDownloader? swarm;
   TransferContext? _ctx;
+  PeerContext? _peers;
   final Map<String, Future<File>> _inFlight = {};
 
   LibraryTrackResolver({
@@ -247,10 +252,27 @@ class LibraryTrackResolver extends TrackResolver {
     required this.cache,
     required this.downloader,
     required this.log,
+    this.swarm,
   });
 
   @override
   void setTransferContext(TransferContext? ctx) => _ctx = ctx;
+
+  @override
+  void setPeerContext(PeerContext? ctx) => _peers = ctx;
+
+  bool _canSwarm(TrackInfo t) => swarm != null && _peers != null && t.chunkRoot != null && t.sourceUrl == null;
+
+  Future<File> _fetch(TrackInfo track, TransferContext? ctx) async {
+    if (_canSwarm(track)) {
+      try {
+        return await swarm!.download(track, cache, host: ctx, peers: _peers!);
+      } on TrackUnavailableException catch (e) {
+        log.warn('swarm.fallback', 'sharing ${track.title} between phones failed (${e.message}); downloading from the host');
+      }
+    }
+    return downloader.download(track, ctx, cache);
+  }
 
   @override
   Future<TrackAvailability> availability(TrackInfo track) async {
@@ -280,7 +302,7 @@ class LibraryTrackResolver extends TrackResolver {
     if (mode == DistributionMode.localOnly) {
       throw TrackUnavailableException('missing_track', 'no local copy of "${track.title}" (local-files mode)');
     }
-    final hasSource = track.sourceUrl != null;
+    final hasSource = track.sourceUrl != null || _canSwarm(track);
     if (!track.hostServes && !hasSource) {
       throw TrackUnavailableException('missing_track', 'host does not serve "${track.title}"');
     }
@@ -290,7 +312,7 @@ class LibraryTrackResolver extends TrackResolver {
     }
     // Note: the callback must not return the removed future, or
     // whenComplete would wait on itself.
-    final fut = _inFlight[track.id] ??= downloader.download(track, ctx, cache).whenComplete(() {
+    final fut = _inFlight[track.id] ??= _fetch(track, ctx).whenComplete(() {
       _inFlight.remove(track.id);
     });
     final file = await fut;

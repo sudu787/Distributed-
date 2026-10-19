@@ -108,6 +108,9 @@ class DeviceCapabilities {
   /// Acoustic calibration offset the device currently applies (µs).
   final int calibrationUs;
 
+  /// Port of the device's peer file server (phone-to-phone sharing).
+  final int? peerPort;
+
   const DeviceCapabilities({
     required this.rateControl,
     required this.backend,
@@ -116,6 +119,7 @@ class DeviceCapabilities {
     this.failoverPort,
     this.microphone = false,
     this.calibrationUs = 0,
+    this.peerPort,
   });
 
   Map<String, Object?> toJson() => {
@@ -126,6 +130,7 @@ class DeviceCapabilities {
         if (failoverPort != null) 'fport': failoverPort,
         if (microphone) 'mic': true,
         if (calibrationUs != 0) 'cal': calibrationUs,
+        if (peerPort != null) 'pport': peerPort,
       };
 
   factory DeviceCapabilities.fromJson(Map<String, Object?> j) {
@@ -138,6 +143,7 @@ class DeviceCapabilities {
       failoverPort: r.optInteger('fport', min: 1, max: 65535),
       microphone: r.optBoolean('mic') ?? false,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000) ?? 0,
+      peerPort: r.optInteger('pport', min: 1, max: 65535),
     );
   }
 }

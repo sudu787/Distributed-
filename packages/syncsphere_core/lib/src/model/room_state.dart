@@ -201,6 +201,11 @@ class TrackInfo {
   /// Attribution shown with the song, e.g. "via Audius".
   final String? credit;
 
+  /// SHA-256 over the track's chunk hashes (chunks.dart). Lets devices
+  /// download chunks from each other and verify the chunk list from any
+  /// peer. Null: whole-file download only.
+  final String? chunkRoot;
+
   const TrackInfo({
     required this.id,
     required this.title,
@@ -214,9 +219,10 @@ class TrackInfo {
     this.sourceUrl,
     this.artUrl,
     this.credit,
+    this.chunkRoot,
   });
 
-  TrackInfo copyWith({int? availableCount, bool? hostServes, int? durationUs}) =>
+  TrackInfo copyWith({int? availableCount, bool? hostServes, int? durationUs, String? chunkRoot}) =>
       TrackInfo(
         id: id,
         title: title,
@@ -230,6 +236,7 @@ class TrackInfo {
         sourceUrl: sourceUrl,
         artUrl: artUrl,
         credit: credit,
+        chunkRoot: chunkRoot ?? this.chunkRoot,
       );
 
   Map<String, Object?> toJson() => {
@@ -245,6 +252,7 @@ class TrackInfo {
         if (sourceUrl != null) 'src': sourceUrl,
         if (artUrl != null) 'art': artUrl,
         if (credit != null) 'credit': credit,
+        if (chunkRoot != null) 'croot': chunkRoot,
       };
 
   factory TrackInfo.fromJson(Map<String, Object?> j) {
@@ -266,7 +274,14 @@ class TrackInfo {
       sourceUrl: _optWebUrl(r, 'src'),
       artUrl: _optWebUrl(r, 'art'),
       credit: r.optString('credit', maxLength: 64),
+      chunkRoot: _optHash(r, 'croot'),
     );
+  }
+
+  static String? _optHash(Reader r, String key) {
+    final v = r.optString(key, maxLength: 64);
+    if (v != null && !isValidTrackId(v)) throw r.error(key, 'must be 64 lowercase hex chars');
+    return v;
   }
 
   static String? _optWebUrl(Reader r, String key) {
@@ -333,6 +348,10 @@ class ParticipantSummary {
   /// or null if the device was not calibrated in this room.
   final int? calibrationUs;
 
+  /// `host:port` of this device's peer file server (phone-to-phone song
+  /// sharing), or null.
+  final String? peer;
+
   const ParticipantSummary({
     required this.deviceId,
     required this.displayName,
@@ -344,6 +363,7 @@ class ParticipantSummary {
     this.endpoint,
     this.channel = ChannelRole.stereo,
     this.calibrationUs,
+    this.peer,
   });
 
   ParticipantSummary copyWith({
@@ -364,6 +384,7 @@ class ParticipantSummary {
         endpoint: endpoint,
         channel: channel,
         calibrationUs: calibrationUs,
+        peer: peer,
       );
 
   Map<String, Object?> toJson() => {
@@ -377,6 +398,7 @@ class ParticipantSummary {
         if (endpoint != null) 'ep': endpoint,
         if (channel != ChannelRole.stereo) 'ch': channel.name,
         if (calibrationUs != null) 'cal': calibrationUs,
+        if (peer != null) 'peer': peer,
       };
 
   factory ParticipantSummary.fromJson(Map<String, Object?> j) {
@@ -392,6 +414,7 @@ class ParticipantSummary {
       endpoint: r.optString('ep', maxLength: 128),
       channel: r.optEnum('ch', ChannelRole.values) ?? ChannelRole.stereo,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000),
+      peer: r.optString('peer', maxLength: 128),
     );
   }
 }

@@ -27,7 +27,7 @@ Ranked by value for effort in this codebase:
 | # | Technique | What it fixes here | Status |
 |---|---|---|---|
 | 1 | **φ accrual failure detector** (Hayashibara et al. 2004; as used in Akka and Cassandra) plus an adaptive stall margin | Fixed 3 s / 8 s timeouts were slow on good Wi-Fi and blind to the link's jitter | **Implemented**, see below |
-| 2 | **Peer-to-peer chunk swarm** (BitTorrent-style, content-addressed chunks with a chunk root) | The host's Wi-Fi uplink limits song start-up with 5–10 phones, and songs are lost with the host | Next |
+| 2 | **Peer-to-peer chunk swarm** (BitTorrent-style, content-addressed chunks with a chunk root) | The host's Wi-Fi uplink limits song start-up with 5–10 phones, and songs are lost with the host | **Implemented** (protocol §8). Next: use the peer servers for SWIM-style indirect probing before a failover |
 | 3 | **Majority lease and quorum election** (Raft-style leases with the existing epoch fencing) | A phone cut off from the others must not run a second coordinator. The isolation hold-off below is a cheap, partial version | Planned |
 | 4 | **Better time sync:** Kalman/least-squares skew estimation; Reference Broadcast Synchronization (receivers compare arrival times of the same UDP broadcast, removing sender jitter); Marzullo's intersection over several time sources | Tighter clock uncertainty, especially after a host change | Research, simulation first |
 | 5 | **CRDT queue** (RGA sequence plus last-writer-wins registers) | Queue edits during a failover or split, merged afterwards | Planned |

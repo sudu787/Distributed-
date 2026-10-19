@@ -180,6 +180,63 @@ void main() {
     await host.leave();
   });
 
+  test('phone-to-phone sharing: a late guest gets the song from another guest, not only the host', () async {
+    final clock = SystemMonotonicClock.instance;
+    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
+    Future<(RoomService, DeviceIdentity, MemoryAppStore)> device(String name) async {
+      final store = MemoryAppStore();
+      final svc = RoomService(
+        store: store,
+        cacheDir: Directory('${tmp.path}/cache-$name'),
+        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+        keyDeriver: fastKdf,
+        kdfIterations: 50,
+        watchForNewerCoordinator: false,
+      );
+      return (svc, await store.loadIdentity(defaultName: name), store);
+    }
+
+    final (host, hostId, hostStore) = await device('host');
+    final rnd = Random(77);
+    final big = File('${tmp.path}/big.mp3')..writeAsBytesSync(List<int>.generate(3 * 1024 * 1024 + 4321, (_) => rnd.nextInt(256)));
+    final song = await LibraryService(store: hostStore, libraryDir: Directory('${tmp.path}/hostlib'), log: EventLog(clock: clock))
+        .import(big);
+    final info = await host.host(identity: hostId, roomName: 'Share', tracks: [song], port: 0, openControl: true);
+    // The coordinator publishes the chunk root in the background.
+    final rootDeadline = DateTime.now().add(const Duration(seconds: 5));
+    while (host.coordinator!.state.playlist.single.chunkRoot == null && DateTime.now().isBefore(rootDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(host.coordinator!.state.playlist.single.chunkRoot, isNotNull);
+
+    final (first, firstId, _) = await device('first');
+    await first.join(identity: firstId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    Future<void> waitFile(String name) async {
+      final f = File('${tmp.path}/cache-$name/tracks/${song.id}.audio');
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (!f.existsSync() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(f.existsSync(), isTrue, reason: '$name has the song');
+    }
+
+    expect((await first.session!.control(ControlAction.play)).accepted, isTrue);
+    await waitFile('first');
+    expect(host.coordinator!.state.participants.firstWhere((p) => p.deviceId == firstId.deviceId).peer, isNotNull);
+
+    final (late, lateId, _) = await device('late');
+    // Joins while the song plays: it must fetch it now.
+    await late.join(identity: lateId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
+    await waitFile('late');
+    final done = late.log.recent(limit: 500, categoryPrefix: 'swarm.done').map((e) => e.message).join('\n');
+    expect(done, contains('from 1 phone(s)'), reason: done);
+    expect(first.bytesSharedWithPeers, greaterThan(0));
+
+    await late.leave();
+    await first.leave();
+    await host.leave();
+  });
+
   test('library import deduplicates by content hash', () async {
     final store = MemoryAppStore();
     final lib = LibraryService(

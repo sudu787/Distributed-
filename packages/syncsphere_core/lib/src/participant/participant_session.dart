@@ -21,6 +21,7 @@ import 'dart:math';
 import '../audio/audio_backend.dart';
 import '../config/sync_config.dart';
 import '../coordinator/failure_detector.dart';
+import '../distribution/swarm.dart';
 import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
@@ -90,6 +91,10 @@ class ParticipantOptions {
   final FailoverDelegate? failover;
   final FailoverPolicy failoverPolicy;
 
+  /// Port of this device's peer file server (phone-to-phone sharing), if
+  /// it runs one; advertised to the room.
+  final int? peerPort;
+
   const ParticipantOptions({
     required this.deviceId,
     required this.displayName,
@@ -107,6 +112,7 @@ class ParticipantOptions {
     this.failoverPolicy = const FailoverPolicy(),
     this.recorder,
     this.calibrationTracks,
+    this.peerPort,
   });
 }
 
@@ -244,6 +250,25 @@ class ParticipantSession implements ClockSource {
   DiagnosticsMsg? get diagnostics => _diagnostics;
   Stream<DiagnosticsMsg> get diagnosticsStream => _diagCtl.stream;
   ParticipantRole? get role => _role;
+
+  /// Room-wide key that authorises phone-to-phone chunk requests (null
+  /// before the first handshake).
+  List<int>? get peerKey => _roomKey?.peerKey();
+
+  /// Other members' peer servers (not this device, not the coordinator,
+  /// which serves the room anyway).
+  List<PeerSource> _peerSources() {
+    final s = _state;
+    if (s == null) return const [];
+    return [
+      for (final p in s.participants)
+        if (p.peer != null &&
+            p.deviceId != options.deviceId &&
+            p.deviceId != s.coordinatorId &&
+            p.connection != ConnectionStatus.disconnected)
+          if (Uri.tryParse('http://${p.peer}') case final u?) PeerSource(p.deviceId, u),
+    ];
+  }
   String? get sessionId => _sessionId;
   SyncConfig get config => _config;
   bool get isLive => _phase == SessionPhase.joined || _phase == SessionPhase.syncing;
@@ -511,6 +536,7 @@ class ParticipantSession implements ClockSource {
         failoverPort: options.failover?.failoverPort,
         microphone: options.recorder != null,
         calibrationUs: engine.outputCalibrationUs,
+        peerPort: options.peerPort,
       ),
     ));
   }
@@ -690,6 +716,16 @@ class ParticipantSession implements ClockSource {
             },
           );
     if (_transfer != null) resolver.setTransferContext(_transfer);
+    resolver.setPeerContext(PeerContext(
+      selfId: options.deviceId,
+      peerKey: _roomKey!.peerKey(),
+      coordinatorNowMs: () {
+        final e = estimate;
+        final now = clock.nowMicros();
+        return (e == null ? now : e.toRemote(now)) ~/ 1000;
+      },
+      peers: _peerSources,
+    ));
     log.info('session.joined', 'joined room ${c.roomId} as ${w.role.name}', {'session': w.sessionId});
     _setPhase(SessionPhase.syncing);
     _lastHeardUs = clock.nowMicros();

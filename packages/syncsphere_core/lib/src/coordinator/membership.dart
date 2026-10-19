@@ -31,6 +31,9 @@ class Member {
   /// Failover endpoint (`host:port`), if the device offered one.
   String? endpoint;
 
+  /// Peer file server (`host:port`) for phone-to-phone sharing.
+  String? peerEndpoint;
+
   /// Experimental stereo role and the room-calibration result; both survive
   /// reconnects.
   ChannelRole channel = ChannelRole.stereo;
@@ -90,6 +93,7 @@ class Member {
         endpoint: caps.canHost ? endpoint : null,
         channel: channel,
         calibrationUs: calibrationUs,
+        peer: isConnected ? peerEndpoint : null,
       );
 }
 

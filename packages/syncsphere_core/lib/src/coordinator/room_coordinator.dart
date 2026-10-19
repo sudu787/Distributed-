@@ -351,6 +351,15 @@ class RoomCoordinator {
     setPlaylist([..._state.playlist, t]);
   }
 
+  /// Publishes the chunk root of a playlist track (phone-to-phone sharing).
+  void setChunkRoot(String trackId, String root) {
+    final i = _state.playlist.indexWhere((t) => t.id == trackId);
+    if (i < 0 || _state.playlist[i].chunkRoot == root) return;
+    final list = [..._state.playlist];
+    list[i] = list[i].copyWith(chunkRoot: root);
+    _mutate(_state.copyWith(playlist: List.unmodifiable(list)));
+  }
+
   void removeTrack(String trackId) {
     if (_state.timeline.trackId == trackId && _state.timeline.isPlaying) {
       throw StateError('cannot remove the playing track');
@@ -534,6 +543,8 @@ class RoomCoordinator {
     }
     final fport = h.caps.failoverPort;
     m.endpoint = fport == null ? null : '${link.remoteHost}:$fport';
+    final pport = h.caps.peerPort;
+    m.peerEndpoint = pport == null ? null : '${link.remoteHost}:$pport';
     // The room becomes the source of truth for a device's calibration once
     // it joined; reconnects keep the room's value.
     if (existing == null) m.calibrationUs = h.caps.calibrationUs;
@@ -763,7 +774,9 @@ class RoomCoordinator {
         if (_state.playlist.length >= options.limits.maxPlaylistLength) {
           return const ControlOutcome.fail(ControlError.invalid);
         }
-        addTrack(info.copyWith(hostServes: true, availableCount: 0));
+        // The chunk root is computed by this coordinator from its own copy
+        // (setChunkRoot), never taken from the member.
+        addTrack(TrackInfo.fromJson({...info.toJson(), 'serves': true, 'avail': 0}..remove('croot')));
         log.info('playlist.add', '${m.displayName} added "${info.title}"');
         return ok;
 

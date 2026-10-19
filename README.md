@@ -50,6 +50,8 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
+- **Phone-to-phone sharing:** songs travel between guests in verified 512 KiB chunks (rarest first, BitTorrent-style).
+  With many phones the host's Wi-Fi is no longer the bottleneck, and songs survive the host leaving.
 - **Open music sources:** **Search Audius** (free music from independent artists, credited) or **From a link** (your
   own Navidrome or Jellyfin server, a podcast, any direct audio link). Every phone downloads the song from the source
   itself, so sync stays sample-exact; the host is the fallback. Spotify and YouTube can't be used this way, because of

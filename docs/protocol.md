@@ -127,6 +127,10 @@ All positions and times are integer microseconds. Every reported timing value is
   e.g. "via Audius"). With `src`, every device downloads the file from the source first (no auth header, up to 5
   redirects, same size cap) and falls back to `GET /tracks/<id>` from the coordinator. The SHA-256 `id` is checked
   either way, so a changed source falls back to the host's copy.
+- Tracks may carry `croot`: SHA-256 over the track's 512 KiB chunk hashes, computed by the coordinator from its own
+  copy (never taken from a member). It enables phone-to-phone sharing (§8).
+- Participants may carry `peer` (`host:port` of the device's peer file server, from `caps.pport` and the address the
+  coordinator sees).
 - `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
 - Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
@@ -336,6 +340,32 @@ the id; from then on it serves the song under `/tracks/<id>` like any other.
 
 After a failover, the new coordinator also serves songs it had downloaded (including uploaded ones), so they stay
 playable.
+
+### Phone-to-phone sharing (chunks)
+
+Every device runs a *peer file server* (port in `caps.pport`, published as the participant's `peer`). Peer servers
+and the coordinator answer:
+
+| Request | Answer |
+|---|---|
+| `GET /tracks/<id>/chunks` | `{"size": N, "hashes": ["<sha256 of chunk 0>", …]}` (512 KiB chunks; the last may be shorter) |
+| `GET /tracks/<id>/have` | `{"n": chunks, "bits": "<base64 bitmap>"}`, all ones for a complete copy |
+| `GET /tracks/<id>` + `Range` | The bytes, from a complete copy or from chunks a partial copy already has (otherwise 416) |
+
+Peer requests carry `X-SyncSphere-Auth: <deviceId>.<expiryCoordMs>.<b64url(HMAC(peerKey, "GET|<path>|<expiry>")[0:16])>`,
+where `peerKey = HMAC(roomKey, "peer|<roomId>")` is known to every member. The coordinator accepts session tokens and
+peer tokens. Uploads only ever accept session tokens.
+
+A downloader:
+1. fetches a chunk list from the coordinator or any peer and checks it against `croot`;
+2. polls the peers' `/have` every 2 s;
+3. fetches missing chunks rarest-first (4 in parallel, at most 2 per source, peers before the coordinator);
+4. checks each chunk's hash, and stops using a source after 2 bad chunks;
+5. checks the assembled file against the track id.
+
+Partial copies are kept as `<id>.swarm` + `<id>.have` + `<id>.chunks` in the cache (resumable) and are served to
+others while downloading. Without progress for 30 s, or without a `croot`, the device downloads the whole file from
+the coordinator as before. Tracks with a `src` URL use the source first (§4).
 
 ## 9. Discovery beacon (UDP 47801)
 
