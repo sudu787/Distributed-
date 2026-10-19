@@ -553,8 +553,16 @@ void main() {
     await host.crashForTesting();
     await waitFor(() => b.coordinator != null && c.session!.state?.coordinatorEpoch == 2 && c.session!.isLive, 'takeover by b');
 
+    final bLog = b.log;
     await b.leave(); // temporary host leaves: c takes over (epoch 3), party continues
-    await waitFor(() => c.coordinator != null && c.session!.isLive && c.session!.state?.coordinatorEpoch == 3, 'hand-off to c');
+    try {
+      await waitFor(() => c.coordinator != null && c.session!.isLive && c.session!.state?.coordinatorEpoch == 3, 'hand-off to c');
+    } catch (_) {
+      String dump(EventLog l) => l.recent(limit: 80, minLevel: EventLevel.info).map((e) => '  $e').join('\n');
+      // ignore: avoid_print
+      print('--- b\n${dump(bLog)}\n--- c (phase ${c.session?.phase}, epoch ${c.session?.state?.coordinatorEpoch})\n${dump(c.log)}');
+      rethrow;
+    }
     expect(c.session!.phase, isNot(SessionPhase.failed));
     await c.leave();
   });

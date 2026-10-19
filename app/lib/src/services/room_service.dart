@@ -645,11 +645,12 @@ class RoomService {
     final c = coordinator;
     // A phone that only stepped in for the host hands the party on rather
     // than ending it (planned leadership transfer).
-    if (c != null && (promotedByFailover || !endParty)) {
+    final passOn = c != null && (promotedByFailover || !endParty);
+    var handedOff = false;
+    if (passOn) {
       try {
-        if (await c.handOff().timeout(const Duration(seconds: 8), onTimeout: () => false)) {
-          await Future<void>.delayed(const Duration(milliseconds: 600));
-        }
+        handedOff = await c.handOff().timeout(const Duration(seconds: 8), onTimeout: () => false);
+        if (handedOff) await Future<void>.delayed(const Duration(milliseconds: 600));
       } catch (e) {
         log.warn('room.handoff', 'hand-off failed: $e');
       }
@@ -668,7 +669,16 @@ class RoomService {
     _beacon?.stop();
     _beacon = null;
     coordinator = null;
-    if (c != null) await c.close(reason: 'host left; room closed');
+    if (c != null) {
+      if (passOn && !handedOff) {
+        // Nobody confirmed the hand-off in time: leave without `bye`, so the
+        // other phones fail over and keep the party instead of ending it.
+        log.warn('room.handoff', 'hand-off not confirmed; leaving without ending the party');
+        await c.abort();
+      } else {
+        await c.close(reason: 'host left; room closed');
+      }
+    }
     await _server?.close();
     _server = null;
     _downloader?.close();
