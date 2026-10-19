@@ -116,7 +116,7 @@
     "bufferingStalls": 0,
     "playCalls": 3,
     "networkFrames": 498,
-    "networkBytes": 106479,
+    "networkBytes": 106485,
     "networkBytesPerDevicePerSecond": 99,
     "failedSessions": [
       "device-1",
@@ -126,7 +126,7 @@
       "device-0"
     ],
     "failureDetection": {
-      "detector": "phi",
+      "detector": "fixed",
       "memberFailures": 0,
       "sessionReconnects": 0,
       "hostChanges": 0,
@@ -139,5 +139,5 @@
     },
     "coordinatorWarnings": 1
   },
-  "wallClockMs": 42
+  "wallClockMs": 40
 }

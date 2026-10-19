@@ -115,6 +115,11 @@ flutter install                    # or: adb install build/app/outputs/flutter-a
 `app-debug.apk` and `app-release.apk` and uploads them as the `syncsphere-apks` artifact on the workflow run page.
 Download that artifact and install it with `adb install` or a file manager.
 
+**Updates keep your calibration.** Since October 2026 every build is signed with the same development key
+(`app/android/app/syncsphere-dev.keystore`, intentionally public), so a new APK installs over the old one and keeps
+the calibration, learned latency and library. Builds before that used a random key per CI run: uninstall such a build
+**once**, install the new one, and calibrate once more ("Calibrate to this spot").
+
 ### Using the app
 
 1. Install the app on 2+ phones on the same Wi-Fi or one phone's hotspot.

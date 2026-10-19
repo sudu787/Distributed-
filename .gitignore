@@ -27,3 +27,6 @@ benchmarks/out/
 
 # OS
 .DS_Store
+
+# Public development signing key (stable APK signature across builds; not a store key).
+!app/android/app/syncsphere-dev.keystore

@@ -325,7 +325,10 @@ class MembershipConfig {
 
   const MembershipConfig({
     this.heartbeatInterval = const Duration(seconds: 1),
-    this.detector = FailureDetectorKind.phi,
+    // Fixed 3 s / 8 s timeouts: what real phones were tested with. φ accrual
+    // is available but reacted to phone Wi-Fi power-save stalls with extra
+    // reconnects (and resyncs) in a real-phone test.
+    this.detector = FailureDetectorKind.fixed,
     this.suspectAfter = const Duration(seconds: 3),
     this.failAfter = const Duration(seconds: 8),
     this.suspectPhi = 8,

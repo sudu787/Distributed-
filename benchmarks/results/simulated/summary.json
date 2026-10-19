@@ -3,7 +3,7 @@
   "suite": "full",
   "seed": 42,
   "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"linux_x64\"",
-  "generatedAt": "2026-10-19T05:40:26.387993Z",
+  "generatedAt": "2026-10-19T13:51:31.866588Z",
   "results": [
     {
       "scenario": "matrix-lan-ideal-n2",
@@ -1452,19 +1452,19 @@
       },
       "clockErrUs": {
         "n": 480,
-        "median": 612.0,
-        "p95": 1407.0,
+        "median": 602.0,
+        "p95": 1323.0,
         "p99": 2053.0,
         "max": 2168.0,
-        "mean": 684.0
+        "mean": 633.0
       },
       "clockUncUs": {
         "n": 480,
-        "median": 4166.0,
-        "p95": 5234.0,
+        "median": 4158.0,
+        "p95": 5267.0,
         "p99": 5591.0,
         "max": 5852.0,
-        "mean": 4286.0
+        "mean": 4311.0
       },
       "coverage": 1.0,
       "recovery": {
@@ -1477,7 +1477,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1363,
+      "bytesPerDevPerS": 1350,
       "failed": 0
     },
     {
@@ -2167,7 +2167,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1121,
+      "bytesPerDevPerS": 1122,
       "failed": 0,
       "failover": {
         "promoted": "device-1",

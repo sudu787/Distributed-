@@ -237,6 +237,40 @@ void main() {
     await host.leave();
   });
 
+  test('chunk roots are computed only for the songs about to play, not the whole library', () async {
+    final clock = SystemMonotonicClock.instance;
+    final store = MemoryAppStore();
+    final lib = LibraryService(store: store, libraryDir: Directory('${tmp.path}/rootlib'), log: EventLog(clock: clock));
+    final songs = [for (var i = 0; i < 4; i++) await lib.import(await audioFile('r$i.mp3', 100 + i))];
+    final svc = RoomService(
+      store: store,
+      cacheDir: Directory('${tmp.path}/rootcache'),
+      backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+      keyDeriver: (r, k, i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i),
+      kdfIterations: 50,
+      watchForNewerCoordinator: false,
+    );
+    await svc.host(identity: await store.loadIdentity(defaultName: 'H'), roomName: 'Roots', tracks: songs, port: 0, openControl: true);
+    Future<void> waitRoots(Set<int> expected) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      Set<int> have() => {
+            for (var i = 0; i < songs.length; i++)
+              if (svc.coordinator!.state.playlist[i].chunkRoot != null) i,
+          };
+      while (!have().containsAll(expected) && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(have(), expected);
+    }
+
+    // Nothing playing yet: only the first song is prepared.
+    await waitRoots({0});
+    expect((await svc.session!.control(ControlAction.setTrack, trackId: songs[2].id)).accepted, isTrue);
+    // Now the current song (2) and the next one (3) as well.
+    await waitRoots({0, 2, 3});
+    await svc.leave();
+  });
+
   test('library import deduplicates by content hash', () async {
     final store = MemoryAppStore();
     final lib = LibraryService(

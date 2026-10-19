@@ -1,7 +1,7 @@
 # SyncSphere simulated benchmark results
 
 > **SIMULATED — virtual time, modelled clocks/network/audio devices. NOT hardware measurements.**  
-> suite `full`, seed `42`, generated 2026-10-19T05:40:26.387993Z  
+> suite `full`, seed `42`, generated 2026-10-19T13:51:31.866588Z  
 > Spread = max − min acoustic (ground-truth) position error across devices at the same instant, sampled every 50 ms. "Steady" excludes 3 s after each timeline change.
 
 | scenario | n | network | spread p50 | spread p95 | spread p99 | spread max | start skew p50 | start skew max | last-min p95 | cmd→audible p50 | clock err p95 (µs) | unc. coverage | recovery max | resyncs | failed |
@@ -26,7 +26,7 @@
 | matrix-hotspot-n3 | 3 | hotspot | 7.2 | 11.2 | 17.8 | 21.9 | 20.9 | 26.0 | 18.8 | 360.0 | 2158.0 | 1.0 | – | 0 | 0 |
 | matrix-hotspot-n5 | 5 | hotspot | 8.6 | 16.3 | 38.0 | 51.6 | 24.0 | 57.1 | 27.2 | 500.0 | 1622.0 | 1.0 | – | 0 | 0 |
 | matrix-hotspot-n10 | 10 | hotspot | 11.7 | 16.6 | 24.8 | 33.3 | 22.3 | 38.0 | 22.1 | 560.0 | 1888.0 | 1.0 | – | 0 | 0 |
-| partition-recovery-n5 | 5 | wifi-typical | 8.8 | 10.1 | 20.1 | 28.6 | 31.4 | 31.4 | 8.8 | 640.0 | 1407.0 | 1.0 | 50.0 | 0 | 0 |
+| partition-recovery-n5 | 5 | wifi-typical | 8.8 | 10.1 | 20.1 | 28.6 | 31.4 | 31.4 | 8.8 | 640.0 | 1323.0 | 1.0 | 50.0 | 0 | 0 |
 | coordinator-failure-n3 | 3 | wifi-good | 6.9 | 6.9 | 6.9 | 6.9 | 8.6 | 8.6 | 8.6 | 600.0 | 826.0 | 1.0 | – | 0 | 2 |
 | coordinator-failover-n5 | 5 | wifi-typical | 4.5 | 10.1 | 20.7 | 28.6 | 19.2 | 31.4 | 7.1 | 560.0 | 1649.0 | 1.0 | – | 0 | 0 |
 | detector-fixed-wifi-good-n4 | 4 | wifi-good | 5.7 | 7.6 | 8.3 | 16.3 | 14.5 | 14.5 | 9.6 | 600.0 | 343.0 | 1.0 | 50.0 | 0 | 0 |

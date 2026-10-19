@@ -26,7 +26,7 @@ Ranked by value for effort in this codebase:
 
 | # | Technique | What it fixes here | Status |
 |---|---|---|---|
-| 1 | **φ accrual failure detector** (Hayashibara et al. 2004; as used in Akka and Cassandra) plus an adaptive stall margin | Fixed 3 s / 8 s timeouts were slow on good Wi-Fi and blind to the link's jitter | **Implemented**, see below |
+| 1 | **φ accrual failure detector** (Hayashibara et al. 2004; as used in Akka and Cassandra) plus an adaptive stall margin | Fixed 3 s / 8 s timeouts were slow on good Wi-Fi and blind to the link's jitter | **Implemented, optional** (`detector: phi`); the default went back to fixed timeouts after a real-phone test, see below |
 | 2 | **Peer-to-peer chunk swarm** (BitTorrent-style, content-addressed chunks with a chunk root) | The host's Wi-Fi uplink limits song start-up with 5–10 phones, and songs are lost with the host | **Implemented** (protocol §8). Next: use the peer servers for SWIM-style indirect probing before a failover |
 | 3 | **Majority lease and quorum election** (Raft-style leases with the existing epoch fencing) | A phone cut off from the others must not run a second coordinator. The isolation hold-off below is a cheap, partial version | Planned |
 | 4 | **Better time sync:** Kalman/least-squares skew estimation; Reference Broadcast Synchronization (receivers compare arrival times of the same UDP broadcast, removing sender jitter); Marzullo's intersection over several time sources | Tighter clock uncertainty, especially after a host change | Research, simulation first |
@@ -34,6 +34,23 @@ Ranked by value for effort in this codebase:
 | 6 | **Hybrid Logical Clocks** in event logs | One causally ordered timeline across all phones' diagnostics | Small |
 | 7 | **Live PCM streaming** (RTP/RTCP-style timestamps, jitter buffer, Opus with in-band FEC) | Live sources (microphone, line-in, apps that allow capture) | Large |
 | 8 | **Predictive prefetch and anti-entropy** (Bloom-filter "what I have" summaries) | Next songs ready before they are needed | Small |
+
+### Real-phone feedback and rollback (October 2026)
+
+After the φ detector, open sources and phone-to-phone sharing shipped, a real-phone test sounded less in sync than the
+build before, until the phones were calibrated again. The sync engine itself (clock sync, scheduling, drift
+correction, audio plugin) had not changed. Three things around it had, and all three were fixed:
+
+1. **The calibration was wiped by the update.** Each CI build was signed with a fresh random debug key, so Android
+   refused to update and the app had to be uninstalled. That deletes the saved calibration and learned latency. Every
+   build is now signed with one fixed, public development key (`app/android/app/syncsphere-dev.keystore`). Phones
+   without a saved calibration also show a "Calibrate for the best sync" tip.
+2. **The φ detector reacted to phone Wi-Fi power-save stalls** with extra reconnects, and each one is followed by a
+   clock re-burst and resync corrections. The default is back to the fixed 3 s / 8 s timeouts; φ stays as an option and
+   in the benchmark.
+3. **Hashing competed with sync on the main isolate.** Chunk roots were computed for the whole library at party start,
+   on the same isolate that timestamps clock probes and runs drift control. Hashing of files of 2 MB or more now runs on
+   a background isolate, and roots are computed only for the pending, current and next songs.
 
 ### What was implemented: failure detection
 

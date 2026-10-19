@@ -8,7 +8,7 @@ import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'format.dart';
 import 'haptics.dart';
-import 'room_screen.dart' show DeviceSettingsSheet;
+import 'room_screen.dart' show DeviceSettingsSheet, startSpotCalibration;
 import 'widgets.dart';
 
 /// Playing tab: what is playing and the shared controls.
@@ -80,6 +80,7 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
             builder: (context, c) => TrackArt(track?.id, size: c.maxWidth.clamp(120.0, 300.0) * 0.8, url: track?.artUrl),
           ),
         ),
+        if (room != null && room.calibration == null) const _CalibrationTip(),
         const SizedBox(height: 20),
         Text(track?.title ?? 'Nothing playing', style: t.headlineSmall, textAlign: TextAlign.center),
         Text(
@@ -296,4 +297,56 @@ class _DebouncedSliderState extends State<DebouncedSlider> {
                 widget.onChanged!(v);
               },
       );
+}
+
+/// Shown until this phone has a saved calibration: a fresh install (or an
+/// app reinstall) loses it, and uncalibrated phones are audibly less in sync.
+class _CalibrationTip extends ConsumerWidget {
+  const _CalibrationTip();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final calibrated = ref.watch(identityProvider.select((i) => i.outputCalibrationUs != 0));
+    if (calibrated || ref.watch(calibrationTipDismissedProvider)) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    final ctl = ref.read(roomControllerProvider.notifier);
+    return Card(
+      margin: const EdgeInsets.only(top: 16),
+      color: cs.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.my_location, color: cs.onSecondaryContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Calibrate for the best sync',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(color: cs.onSecondaryContainer)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            'This phone has not been calibrated yet. Stand where you listen and let every phone click once; the app '
+            'remembers the result.',
+            style: TextStyle(color: cs.onSecondaryContainer),
+          ),
+          OverflowBar(alignment: MainAxisAlignment.end, spacing: 8, children: [
+            TextButton(
+              onPressed: () => ref.read(calibrationTipDismissedProvider.notifier).dismiss(),
+              child: const Text('Not now'),
+            ),
+            FilledButton.tonal(
+              onPressed: ctl.hasMicrophone
+                  ? () async {
+                      final r = await startSpotCalibration(context, ref);
+                      if (r.error != null && context.mounted) showMessage(context, r.error!, error: true);
+                    }
+                  : null,
+              child: const Text('Calibrate now'),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
 }

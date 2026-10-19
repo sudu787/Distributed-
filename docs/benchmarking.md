@@ -68,8 +68,9 @@ Highlights (SIMULATED):
 - Listening-spot calibration: spread at the listener drops from 192 ms to 4.6 ms median (p95 22 ms, mostly from the first
   ~10 s after music resumes). The devices' *output* spread rises to ~19 ms, which is intended: nearer speakers are
   delayed by their distance difference.
-- Failure detection: φ accrual declares a cut-off guest failed after 4.2 s on steady Wi-Fi (fixed timeouts: 8.2 s) and
-  after 5.2 s on stall-prone Wi-Fi (8.2 s), with one false alarm in 10 min there (fixed: none). The host never changed
+- Failure detection (optional φ accrual vs. the default fixed timeouts): φ declares a cut-off guest failed after 4.2 s on
+  steady Wi-Fi (fixed: 8.2 s) and after 5.2 s on stall-prone Wi-Fi (8.2 s), with one false alarm in 10 min there (fixed:
+  none). On real phones φ caused extra reconnects, so fixed is the default. The host never changed
   because of a stall, thanks to the 8 s silence gate and the isolation hold-off. See
   [research-next.md](research-next.md).
 - A channel-role switch costs a short blip (≤25 ms max in `channel-role-switch-n3`), then rate correction recovers.

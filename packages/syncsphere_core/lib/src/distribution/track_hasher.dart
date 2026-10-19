@@ -7,11 +7,24 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 
-/// Streams [file] through SHA-256 without loading it into memory.
+/// Files at least this large are hashed on a background isolate, so the
+/// main isolate (clock sync, drift control) is not held up.
+const kBackgroundHashBytes = 2 * 1024 * 1024;
+
+/// SHA-256 of [file], streamed (never loaded into memory). Large files are
+/// hashed on a background isolate.
 Future<String> sha256OfFile(File file) async {
+  final path = file.path;
+  if (await file.length() >= kBackgroundHashBytes) return Isolate.run(() => _sha256OfPath(path));
+  return _sha256OfPath(path);
+}
+
+Future<String> _sha256OfPath(String path) async {
+  final file = File(path);
   final out = _DigestSink();
   final input = sha256.startChunkedConversion(out);
   await for (final chunk in file.openRead()) {

@@ -29,6 +29,20 @@ android {
         versionName = flutter.versionName
     }
 
+    // One fixed signing key for every build (CI and local), so a new APK installs
+    // over the previous one and keeps the app's data (calibration, learned latency,
+    // library). Without it each CI run signs with a fresh random debug key and
+    // Android refuses the update until the app is uninstalled. This key is
+    // deliberately public: it is for development and sideloading, not for a store.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("syncsphere-dev.keystore")
+            storePassword = "syncsphere"
+            keyAlias = "syncsphere"
+            keyPassword = "syncsphere"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

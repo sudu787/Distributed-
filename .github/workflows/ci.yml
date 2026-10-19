@@ -86,6 +86,8 @@ jobs:
       - name: Build release APK (debug-signed, for sideloading tests)
         working-directory: app
         run: flutter build apk --release
+      - name: APK signing certificate (must be the same in every build)
+        run: keytool -printcert -jarfile app/build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA256|Owner"
       - uses: actions/upload-artifact@v4
         with:
           name: syncsphere-apks

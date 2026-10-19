@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 import 'package:test/test.dart';
 
@@ -74,19 +77,20 @@ void main() {
   });
 
   test('config round trip and hostile values are clamped', () {
-    const c = MembershipConfig(detector: FailureDetectorKind.fixed, failPhi: 9, minFailAfter: Duration(seconds: 5));
+    const c = MembershipConfig(detector: FailureDetectorKind.phi, failPhi: 9, minFailAfter: Duration(seconds: 5));
     final back = MembershipConfig.fromJson(c.toJson());
-    expect(back.detector, FailureDetectorKind.fixed);
+    expect(back.detector, FailureDetectorKind.phi);
     expect(back.failPhi, 9);
     expect(back.minFailAfter, const Duration(seconds: 5));
     final hostile = MembershipConfig.fromJson({'detector': 'nope', 'failPhi': 1e9, 'minStdDevMs': 0});
-    expect(hostile.detector, FailureDetectorKind.phi);
+    expect(hostile.detector, FailureDetectorKind.fixed, reason: 'unknown values fall back to the default');
+    expect(const MembershipConfig().detector, FailureDetectorKind.fixed);
     expect(hostile.failPhi, 50);
     expect(hostile.minStdDev, const Duration(milliseconds: 10));
   });
 
   test('membership sweep uses the phi detector', () {
-    final m = MembershipManager(cfg);
+    final m = MembershipManager(const MembershipConfig(detector: FailureDetectorKind.phi));
     final keys = RoomKey.derive(roomId: 'r', joinKey: 'K', iterations: 1).sessionKeys('dev-1', 'a', 'b');
     final member = m.admit(
         deviceId: 'dev-1',
@@ -105,5 +109,17 @@ void main() {
     expect(m.sweep(t + 3 * s).changed, isTrue, reason: 'suspect after ~2.5 s of silence');
     expect(member.connection, ConnectionStatus.suspect);
     expect(m.sweep(t + 4200000).failed, [member]);
+  });
+
+  test('large files are hashed on a background isolate with identical results', () async {
+    final dir = await Directory.systemTemp.createTemp('hash');
+    final big = File('${dir.path}/big')..writeAsBytesSync(List<int>.generate(kBackgroundHashBytes + 777, (i) => i * 31 % 251));
+    final small = File('${dir.path}/small')..writeAsBytesSync(big.readAsBytesSync().sublist(0, 1000));
+    expect(await sha256OfFile(big), sha256.convert(big.readAsBytesSync()).toString());
+    expect(await sha256OfFile(small), sha256.convert(small.readAsBytesSync()).toString());
+    final chunks = await chunkHashesOf(big);
+    expect(chunks.length, chunkCount(big.lengthSync()));
+    expect(chunks.first, sha256.convert(big.readAsBytesSync().sublist(0, kChunkSize)).toString());
+    await dir.delete(recursive: true);
   });
 }

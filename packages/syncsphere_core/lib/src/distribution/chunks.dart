@@ -10,9 +10,12 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+
+import 'track_hasher.dart' show kBackgroundHashBytes;
 
 const kChunkSize = 512 * 1024;
 
@@ -29,9 +32,16 @@ String chunkRootOf(List<String> hashes) => sha256.convert(utf8.encode(hashes.joi
 
 String hashChunk(List<int> bytes) => sha256.convert(bytes).toString();
 
-/// SHA-256 of every chunk of [file].
+/// SHA-256 of every chunk of [file] (on a background isolate for large
+/// files, see [kBackgroundHashBytes]).
 Future<List<String>> chunkHashesOf(File file) async {
-  final raf = await file.open();
+  final path = file.path;
+  if (await file.length() >= kBackgroundHashBytes) return Isolate.run(() => _chunkHashesOfPath(path));
+  return _chunkHashesOfPath(path);
+}
+
+Future<List<String>> _chunkHashesOfPath(String path) async {
+  final raf = await File(path).open();
   try {
     final size = await raf.length();
     final out = <String>[];

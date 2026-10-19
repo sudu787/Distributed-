@@ -215,19 +215,20 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 | | `rateEnterThresholdUs` / `rateExitThresholdUs` | 8000 / 3000 |
 | | `seekThresholdUs`, `seekThresholdNoRateUs`, `seekConfirmations`, `seekCooldownMs` | 250000, 45000, 2, 5000 |
 | | `correctionHorizonMs`, `maxRateDelta`, `minRateStep` | 4000, 0.015, 0.0005 |
-| membership | `heartbeatIntervalMs`, `detector` (`phi`\|`fixed`), `suspectPhi`, `failPhi`, `minSuspectAfterMs`, `minFailAfterMs`, `maxFailAfterMs`, `acceptablePauseMs`, `minStdDevMs`, `suspectAfterMs`, `failAfterMs` (fixed detector), `reconnectGraceMs` | 1000, phi, 8, 12, 2000, 4000, 16000, 500, 200, 3000, 8000, 90000 |
+| membership | `heartbeatIntervalMs`, `detector` (`phi`\|`fixed`), `suspectPhi`, `failPhi`, `minSuspectAfterMs`, `minFailAfterMs`, `maxFailAfterMs`, `acceptablePauseMs`, `minStdDevMs`, `suspectAfterMs`, `failAfterMs` (fixed detector), `reconnectGraceMs` | 1000, fixed, 8, 12, 2000, 4000, 16000, 500, 200, 3000, 8000, 90000 |
 | | `maxParticipants`, `handshakeTimeoutMs`, `maxAuthFailures`, `authWindowMs` | 16, 5000, 5, 60000 |
 
 ## 7. Liveness, failure and reconnection
 
 - Both sides send `hb` every second. Any frame proves liveness.
-- **Failure detection** (both directions) uses a φ accrual detector per link ([research-next.md](research-next.md)):
+- **Failure detection** (both directions) uses the fixed timeouts by default (*suspect* after 3 s, *failed* after 8 s of
+  silence). The optional φ accrual detector (`detector: phi`; [research-next.md](research-next.md)) works as follows:
   - it learns the heartbeat inter-arrival distribution (last 300) and computes φ = −log₁₀ P(a heartbeat this late);
   - *suspect* at φ ≥ 8, *failed* at φ ≥ 12;
   - never suspect before 2 s, never failed before 4 s or before 1.25 × the longest gap the link survived in the window;
   - always failed at 16 s.
 
-  `detector: fixed` restores the old 3 s / 8 s timeouts.
+  φ was the default briefly, but on real phones it caused extra reconnects, so the default went back to `fixed`.
 - **Coordinator → participant:** *suspect* is shown in the UI. *Failed* closes the link and marks the member
   `disconnected`. The member's slot (role, volume) is kept for the 90 s reconnect grace, then removed. Readiness
   barriers stop waiting for disconnected members.

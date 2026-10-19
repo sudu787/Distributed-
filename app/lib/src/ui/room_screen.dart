@@ -485,33 +485,39 @@ class _ListeningSpot extends ConsumerStatefulWidget {
   ConsumerState<_ListeningSpot> createState() => _ListeningSpotState();
 }
 
+/// Asks for confirmation and starts "calibrate to this spot" with this
+/// phone's microphone. Returns null on success, else a user-facing error
+/// (or null when the user cancelled; [started] tells them apart).
+Future<({bool started, String? error})> startSpotCalibration(BuildContext context, WidgetRef ref) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('Calibrate to this spot?'),
+      content: const Text(
+        'Stand where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
+        'clicks in turn. Keep the room quiet and the volumes as they are.\n\n'
+        'The recording stays on this phone; only timing results are shared.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
+      ],
+    ),
+  );
+  if (ok != true) return (started: false, error: null);
+  final err = await ref.read(roomControllerProvider.notifier).calibrateHere();
+  return (started: err == null, error: err);
+}
+
 class _ListeningSpotState extends ConsumerState<_ListeningSpot> {
   bool _requested = false;
 
   Future<void> _calibrate() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Calibrate to this spot?'),
-        content: const Text(
-          'Stand where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
-          'clicks in turn. Keep the room quiet and the volumes as they are.\n\n'
-          'The recording stays on this phone; only timing results are shared.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
-        ],
-      ),
-    );
-    if (ok != true) return;
     setState(() => _requested = true);
-    final err = await ref.read(roomControllerProvider.notifier).calibrateHere();
+    final r = await startSpotCalibration(context, ref);
     if (!mounted) return;
-    if (err != null) {
-      setState(() => _requested = false);
-      showMessage(context, err, error: true);
-    }
+    if (!r.started) setState(() => _requested = false);
+    if (r.error != null) showMessage(context, r.error!, error: true);
   }
 
   @override

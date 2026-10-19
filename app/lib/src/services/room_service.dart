@@ -101,6 +101,8 @@ class RoomService {
 
   /// Chunk hashes of songs this phone serves (phone-to-phone sharing).
   final ChunkIndex _chunks = ChunkIndex();
+  final Set<String> _rootsRequested = {};
+  StreamSubscription<RoomState>? _rootSub;
 
   /// This phone's peer file server: other guests fetch song chunks from it.
   HttpServer? _peerServer;
@@ -168,7 +170,6 @@ class RoomService {
         ..clear()
         ..addEntries(tracks.map((t) => MapEntry(t.id, File(t.path))));
       coord.setPlaylist([for (final t in tracks) t.toTrackInfo()]);
-      unawaited(_publishChunkRoots(coord, {for (final t in tracks) t.id: File(t.path)}));
       _files = _fileServerFor(coord);
       _server = await _bind(port);
       coord.serve(_server!);
@@ -283,7 +284,42 @@ class RoomService {
   }
 
   /// Wiring shared by a hosted, a failed-over and a handed-back coordinator.
+  /// Publishes chunk roots only for the songs about to play (pending,
+  /// current and next), computed on a background isolate, instead of hashing
+  /// the whole library when the party starts.
+  void _watchChunkRoots(RoomCoordinator coord) {
+    unawaited(_rootSub?.cancel());
+    _rootsRequested.clear();
+    void check(RoomState st) {
+      final ids = <String>{
+        if (st.pending != null) st.pending!.trackId,
+        if (st.timeline.trackId != null) st.timeline.trackId!,
+      };
+      final cur = st.pending?.trackId ?? st.timeline.trackId;
+      final i = cur == null ? -1 : st.playlist.indexWhere((t) => t.id == cur);
+      if (i >= 0 && i + 1 < st.playlist.length) ids.add(st.playlist[i + 1].id);
+      if (cur == null && st.playlist.isNotEmpty) ids.add(st.playlist.first.id);
+      final todo = <String, File>{
+        for (final id in ids)
+          if (!_rootsRequested.contains(id) && st.trackById(id)?.chunkRoot == null && _served[id] != null) id: _served[id]!,
+      };
+      if (todo.isEmpty) return;
+      _rootsRequested.addAll(todo.keys);
+      unawaited(_publishChunkRoots(coord, todo));
+    }
+
+    check(coord.state);
+    _rootSub = coord.stateStream.listen(check);
+  }
+
+  void _stopChunkRoots() {
+    unawaited(_rootSub?.cancel());
+    _rootSub = null;
+    _rootsRequested.clear();
+  }
+
   void _attachCoordinator(RoomCoordinator coord) {
+    _watchChunkRoots(coord);
     coord.onSteppedDown = (endpoint, epoch, reason) => _onSteppedDown(coord, endpoint, epoch, reason);
     _stopWatch();
     if (!watchForNewerCoordinator) return;
@@ -326,6 +362,7 @@ class RoomService {
     log.warn('room.stepdown',
         reason == 'handover' ? 'host role handed to $endpoint (epoch $epoch)' : 'a newer coordinator runs at $endpoint; following it');
     _stopWatch();
+    _stopChunkRoots();
     coordinator = null;
     promotedByFailover = false;
     _beacon?.stop();
@@ -576,6 +613,7 @@ class RoomService {
   /// so guests exercise failover.
   Future<void> crashForTesting() async {
     _stopWatch();
+    _stopChunkRoots();
     _cancelSubs();
     final c = coordinator;
     coordinator = null;
@@ -602,7 +640,6 @@ class RoomService {
         _served[t.id] = File(t.path);
         c.addTrack(t.toTrackInfo());
       }
-      unawaited(_publishChunkRoots(c, {for (final t in tracks) t.id: File(t.path)}));
       onProgress?.call(tracks.length, tracks.length);
       return null;
     }
@@ -662,6 +699,7 @@ class RoomService {
       await store.saveHostedRoom(null);
     }
     _stopWatch();
+    _stopChunkRoots();
     _cancelSubs();
     final s = session;
     session = null;

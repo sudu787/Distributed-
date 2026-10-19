@@ -181,7 +181,7 @@ void main() {
     expect(fd['hostChanges'], 0, reason: 'the cut-off phone must not start a second coordinator');
     expect(r.metrics['failover'], isNull);
     expect(r.metrics['failedSessions'], isEmpty);
-    expect(fd['guestFailureDetectedAfterMs'], [inInclusiveRange(4000, 5000)], reason: 'phi detector on a steady link');
+    expect(fd['guestFailureDetectedAfterMs'], [inInclusiveRange(8000, 9000)], reason: 'default fixed 8 s timeout');
   });
 
   test('without failover enabled the room reports that it must be recreated', () {
