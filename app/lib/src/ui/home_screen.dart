@@ -133,6 +133,15 @@ class HomeScreen extends ConsumerWidget {
                 value: ref.watch(hapticsProvider),
                 onChanged: (v) => ref.read(hapticsProvider.notifier).set(v),
               ),
+              SwitchListTile(
+                secondary: const Icon(Icons.mic_none),
+                title: const Text('Help measure the room'),
+                subtitle: const Text('For surround: let another phone in the party use this phone\'s microphone for '
+                    'about 30 seconds while it measures where the phones are. The recording stays on this phone; '
+                    'only click times and levels are shared.'),
+                value: ref.watch(roomMeasurementProvider),
+                onChanged: (v) => ref.read(roomMeasurementProvider.notifier).set(v),
+              ),
             ]),
           ),
         ),

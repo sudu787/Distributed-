@@ -13,6 +13,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:args/args.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
@@ -166,6 +167,34 @@ List<Scenario> _suite(String name, int seed) {
         ],
         seed: seed,
       ),
+    // Surround calibration: every phone records the clicks, so the phones'
+    // positions are measured (two-way ranging + MDS). Listener at the seat,
+    // C/L/R at 2 m, SL/SR at 1.8 m on ITU angles. No reverberation or
+    // multipath is simulated, so real rooms will be worse.
+    Scenario(
+      name: 'surround-calibration-n6',
+      participants: 6,
+      network: NetworkCondition.wifiGood,
+      duration: const Duration(seconds: 80),
+      profiles: const [
+        DeviceAudioProfile.flagship,
+        DeviceAudioProfile.midrange,
+        DeviceAudioProfile.bluetoothUncalibrated
+      ],
+      listenerIndex: 0,
+      positionsM: [
+        (0.0, 0.0),
+        for (final (az, r) in const [(0.0, 2.0), (-30.0, 2.0), (30.0, 2.0), (-110.0, 1.8), (110.0, 1.8)])
+          (r * sin(az * pi / 180), r * cos(az * pi / 180)),
+      ],
+      frontIndex: 1,
+      leftIndex: 2,
+      actions: const [
+        ScheduledAction(Duration(seconds: 3), CalibrateAction(surround: true)),
+        ScheduledAction(Duration(seconds: 45), PlayAction()),
+      ],
+      seed: seed,
+    ),
     Scenario(
       name: 'channel-role-switch-n3',
       participants: 3,
@@ -258,6 +287,7 @@ Future<void> main(List<String> argv) async {
       if (m['failover'] != null) 'failover': m['failover'],
       if (sc.name.startsWith('detector-')) 'failureDetection': m['failureDetection'],
       if (m['listenerSpreadMs_steady'] != null) 'listenerSpread': q('listenerSpreadMs_steady'),
+      if (m['surroundCalibration'] != null) 'surroundCalibration': m['surroundCalibration'],
     });
     stdout.writeln('${sc.name.padRight(36)} spread p50/p95/max '
         '${_f(q('interDeviceSpreadMs_steady'), 'median')}/${_f(q('interDeviceSpreadMs_steady'), 'p95')}/${_f(q('interDeviceSpreadMs_steady'), 'max')} ms  '

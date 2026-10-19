@@ -43,6 +43,9 @@ class _Segment {
   bool firstMeasurementDone = false;
   final bool isResync;
 
+  /// Channel role the native segment was prepared with.
+  ChannelRole role = ChannelRole.stereo;
+
   /// Position gained (+) or lost (−) through playback-rate corrections
   /// since the start, so start-latency learning can subtract it.
   double rateCorrectionUs = 0;
@@ -362,7 +365,7 @@ class PlaybackEngine {
         if (identical(_standby, seg)) _standby = null;
         return;
       }
-      await _prepareSegment(seg.id, src, p.positionUs, p.trackId);
+      await _prepareSegment(seg, src, p.positionUs, p.trackId);
       if (!identical(_standby, seg)) return; // superseded meanwhile
       if (!_stillRelevant(p.generation)) {
         _standby = null;
@@ -458,7 +461,7 @@ class PlaybackEngine {
         _markAvailable(track.id);
         if (_state?.timeline.generation != tl.generation) return;
         if (!resync) _standby = seg;
-        await _prepareSegment(seg.id, src, pos, tl.trackId!);
+        await _prepareSegment(seg, src, pos, tl.trackId!);
         _updatePrepareEstimate(clock.nowMicros() - t0);
         if (_state?.timeline.generation != tl.generation || !_state!.timeline.isPlaying) return;
         seg.status = SegmentStatus.prepared;
@@ -556,6 +559,15 @@ class PlaybackEngine {
     }
     final settleAt = (a.targetOutLocalUs ?? now) + config.drift.settleTime.inMicroseconds;
     if (now < settleAt) return;
+    // A role change can miss the segment that ends up playing (it arrived
+    // while that segment was being prepared, or its switch-over resync was
+    // dropped). Without this the phone would keep the old channel until the
+    // next song.
+    if (a.role != _channel && !s.isCalibrationTrack(tl.trackId) && !_lateJoinInFlight) {
+      log.info('engine.channel', 'playing segment has role ${a.role.name}, want ${_channel.name}; switching');
+      _lateJoin(tl, resync: true);
+      return;
+    }
     final est = clockSource.estimate;
     if (est == null) return;
     final sample = await backend.samplePosition();
@@ -696,13 +708,14 @@ class PlaybackEngine {
   /// Prepares a native segment with the right channel role: calibration
   /// clicks always play unmixed (a surround matrix would cancel a mono
   /// click), music plays this phone's role.
-  Future<void> _prepareSegment(int segmentId, TrackSource src, int positionUs, String trackId) async {
+  Future<void> _prepareSegment(_Segment seg, TrackSource src, int positionUs, String trackId) async {
     final role = (_state?.isCalibrationTrack(trackId) ?? false) ? ChannelRole.stereo : _channel;
     if (role != _backendRole) {
       await backend.setChannelRole(role);
       _backendRole = role;
     }
-    await backend.prepare(segmentId: segmentId, source: src, positionUs: positionUs);
+    seg.role = role;
+    await backend.prepare(segmentId: seg.id, source: src, positionUs: positionUs);
   }
 
   void _applyVolume(RoomState s) {

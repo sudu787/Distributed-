@@ -15,6 +15,9 @@ import '../time/clock_sync.dart';
 import 'calibration_analysis.dart';
 import 'click_track.dart';
 
+/// Error a phone reports when its owner has not allowed room measurement.
+const kCalibrationDeclined = 'declined';
+
 /// Produces this device's personalized click track for a plan.
 abstract class CalibrationTrackFactory {
   Future<TrackSource> sourceFor(CalibrationPlan plan, int deviceIndex);
@@ -54,6 +57,14 @@ class CalibrationListener {
   final ClockEstimate? Function() estimate;
   final void Function(Message m) send;
   final EventLog log;
+
+  /// Whether another phone may record with this phone's microphone (a
+  /// surround measurement it started). The owner opts in; when this
+  /// returns false the phone declines at once and records nothing.
+  final bool Function() allowRemote;
+
+  /// Called when this phone declined to record for another phone's plan.
+  final void Function(CalibrationPlan plan)? onDeclined;
   int? _activePlan;
 
   /// Last outcome, for diagnostics screens.
@@ -66,12 +77,27 @@ class CalibrationListener {
     required this.estimate,
     required this.send,
     required this.log,
-  });
+    bool Function()? allowRemote,
+    this.onDeclined,
+  }) : allowRemote = allowRemote ?? _always;
+
+  static bool _always() => true;
 
   void onState(RoomState s) {
     final plan = s.calibration;
     final tl = s.timeline;
-    if (plan == null || plan.listener != deviceId || _activePlan == plan.id) return;
+    if (plan == null || _activePlan == plan.id) return;
+    // The listener measures timing at the seat; in a surround calibration
+    // every other recorder also listens, for the distances between phones.
+    if (plan.listener != deviceId && !plan.recorders.contains(deviceId)) return;
+    if (plan.listener != deviceId && !allowRemote()) {
+      _activePlan = plan.id;
+      log.info(
+          'calibration.declined', 'not recording for another phone\'s room measurement (not allowed on this phone)');
+      send(CalibrationResultMsg(calibrationId: plan.id, error: kCalibrationDeclined));
+      onDeclined?.call(plan);
+      return;
+    }
     if (!tl.isPlaying || tl.trackId != plan.trackId) return;
     final est = estimate();
     if (est == null) return;
@@ -104,6 +130,10 @@ class CalibrationListener {
         calibrationId: plan.id,
         arrivals: {for (final d in out.devices) if (d.arrivalsBySlot.isNotEmpty) d.deviceId: d.arrivalsBySlot},
         undetected: out.undetected,
+        levels: {
+          for (final d in out.devices)
+            if (d.levelDb != null) d.deviceId: d.levelDb!
+        },
       ));
     } catch (e) {
       log.error('calibration.error', 'calibration recording failed: $e');

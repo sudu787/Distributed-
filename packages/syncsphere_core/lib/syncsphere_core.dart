@@ -38,4 +38,6 @@ export 'src/participant/failover.dart';
 export 'src/model/calibration_plan.dart';
 export 'src/calibration/click_track.dart';
 export 'src/calibration/calibration_analysis.dart';
+export 'src/calibration/channel_test.dart';
+export 'src/calibration/layout.dart';
 export 'src/calibration/calibration_runtime.dart';

@@ -23,6 +23,7 @@ import '../config/sync_config.dart';
 import '../coordinator/failure_detector.dart';
 import '../distribution/swarm.dart';
 import '../distribution/track_resolver.dart';
+import '../model/calibration_plan.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
 import '../protocol/auth.dart';
@@ -83,6 +84,13 @@ class ParticipantOptions {
   /// Microphone access; makes this device able to lead a room calibration.
   final CalibrationRecorder? recorder;
 
+  /// Whether a surround measurement started on another phone may record
+  /// with this phone's microphone (the owner's choice). Null: allowed.
+  final bool Function()? allowRemoteCalibration;
+
+  /// This phone declined to record for another phone's measurement.
+  final void Function(CalibrationPlan plan)? onRemoteCalibrationDeclined;
+
   /// Where calibration click tracks are written (default: a temp folder).
   final CalibrationTrackFactory? calibrationTracks;
 
@@ -111,6 +119,8 @@ class ParticipantOptions {
     this.failover,
     this.failoverPolicy = const FailoverPolicy(),
     this.recorder,
+    this.allowRemoteCalibration,
+    this.onRemoteCalibrationDeclined,
     this.calibrationTracks,
     this.peerPort,
   });
@@ -237,6 +247,8 @@ class ParticipantSession implements ClockSource {
         estimate: () => estimate,
         send: _sendIfActive,
         log: this.log,
+        allowRemote: options.allowRemoteCalibration,
+        onDeclined: options.onRemoteCalibrationDeclined,
       );
     }
   }

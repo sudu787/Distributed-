@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:math';
 
 
+import '../calibration/layout.dart';
 import '../config/sync_config.dart';
 import '../calibration/calibration_analysis.dart';
 import '../model/calibration_plan.dart';
@@ -801,7 +802,7 @@ class RoomCoordinator {
         return ok;
 
       case ControlAction.calibrate:
-        return _startCalibration(m);
+        return _startCalibration(m, surround: c.mode == 'surround');
 
       case ControlAction.play:
         if (tl.isPlaying || (_state.pending?.autoPlay ?? false)) return ok; // idempotent
@@ -887,7 +888,7 @@ class RoomCoordinator {
   Timer? _calibrationTimer;
   (String, int)? _preCalibration;
 
-  ControlOutcome _startCalibration(Member listener) {
+  ControlOutcome _startCalibration(Member listener, {bool surround = false}) {
     if (!listener.caps.microphone) {
       log.warn('calibration.reject', '${listener.displayName} has no microphone for calibration');
       return const ControlOutcome.fail(ControlError.invalid);
@@ -903,8 +904,22 @@ class RoomCoordinator {
     _preCalibration = curTrack == null || _state.isCalibrationTrack(curTrack)
         ? null
         : (curTrack, _state.pending?.positionUs ?? tl.expectedPositionAt(now));
-    final plan = CalibrationPlan(id: ++_calibrationSeq, listener: listener.deviceId, order: order);
+    // Surround: every connected phone with a microphone records too, so
+    // the distances between phones can be measured.
+    final recorders = surround
+        ? [
+            for (final m in _members.all)
+              if (m.connection == ConnectionStatus.connected && m.caps.microphone) m.deviceId
+          ]
+        : const <String>[];
+    if (surround && recorders.length < 2) return const ControlOutcome.fail(ControlError.invalid);
+    final plan =
+        CalibrationPlan(id: ++_calibrationSeq, listener: listener.deviceId, order: order, recorders: recorders);
     _calibrationReports.clear();
+    _surroundObs.clear();
+    _surroundReplied.clear();
+    _surroundLevels = const {};
+    _listenerDone = false;
     log.info('calibration.start',
         'calibrating ${order.length} device(s) to ${listener.displayName}\'s position (plan ${plan.id})',
         {'devices': order.length, 'durationMs': plan.durationUs ~/ 1000});
@@ -921,12 +936,34 @@ class RoomCoordinator {
     return const ControlOutcome.ok();
   }
 
+  // Surround calibration: every recorder's click arrivals, and the click
+  // levels heard by the listener.
+  final Map<String, Map<String, Map<int, int>>> _surroundObs = {};
+  final Set<String> _surroundReplied = {};
+  Map<String, double> _surroundLevels = const {};
+  bool _listenerDone = false;
+  Timer? _surroundGrace;
+
   void _onCalibrationResult(Member from, CalibrationResultMsg r) {
     final plan = _state.calibration;
-    if (plan == null || r.calibrationId != plan.id || from.deviceId != plan.listener) {
+    if (plan == null || r.calibrationId != plan.id) {
       log.debug('calibration.stale', 'ignoring calibration result ${r.calibrationId} from ${from.deviceId}');
       return;
     }
+    if (plan.isSurround && plan.recorders.contains(from.deviceId)) {
+      _surroundReplied.add(from.deviceId);
+      if (r.error == null) {
+        _surroundObs[from.deviceId] = r.arrivals;
+      } else {
+        log.info('calibration.recorder', '${from.displayName} did not record: ${r.error}');
+      }
+    }
+    if (from.deviceId != plan.listener) {
+      if (!plan.recorders.contains(from.deviceId)) return;
+      if (_listenerDone && plan.recorders.every(_surroundReplied.contains)) _finishSurround(plan);
+      return;
+    }
+    _surroundLevels = r.levels;
     final tl = _state.timeline;
     if (r.error != null) {
       log.warn('calibration.failed', 'calibration failed on the listener: ${r.error}');
@@ -951,6 +988,49 @@ class RoomCoordinator {
           'calibration applied to ${corrections.length} device(s)${r.undetected.isEmpty ? '' : '; not heard: ${r.undetected.join(', ')}'}',
           {for (final e in corrections.entries) e.key: e.value});
     }
+    if (!plan.isSurround || r.error != null) {
+      _endCalibration();
+      return;
+    }
+    // Wait (briefly) for the other phones' recordings.
+    _listenerDone = true;
+    if (plan.recorders.every(_surroundReplied.contains)) {
+      _finishSurround(plan);
+    } else {
+      _surroundGrace?.cancel();
+      _surroundGrace = Timer(const Duration(seconds: 6), () => _finishSurround(plan));
+    }
+  }
+
+  /// Distances between phones (two-way ranging), then positions (MDS);
+  /// published as the room's [SpeakerLayout].
+  void _finishSurround(CalibrationPlan plan) {
+    _surroundGrace?.cancel();
+    _surroundGrace = null;
+    if (_state.calibration?.id != plan.id) return;
+    final d = pairwiseDistances(plan: plan, arrivals: _surroundObs);
+    final ids = completeSubset([
+      for (final id in plan.recorders)
+        if (_surroundObs.containsKey(id)) id
+    ], d);
+    if (ids.length >= 3 && ids.contains(plan.listener)) {
+      final pos = classicalMds(ids, d);
+      final layout = SpeakerLayout(
+        id: plan.id,
+        listener: plan.listener,
+        positions: {for (final e in pos.entries) e.key: (e.value.x, e.value.y)},
+        levelsDb: _surroundLevels,
+        residualM: layoutResidual(pos, d),
+      );
+      log.info(
+          'calibration.layout',
+          'measured positions of ${ids.length} phones (fit residual ${(layout.residualM * 100).round()} cm)',
+          {for (final e in pos.entries) e.key: '${e.value.x.toStringAsFixed(2)},${e.value.y.toStringAsFixed(2)}'});
+      _mutate(_state.copyWith(layout: layout));
+    } else {
+      log.warn('calibration.layout',
+          'not enough phones heard each other to measure the layout (${ids.length}; need 3 including the listener)');
+    }
     _endCalibration();
   }
 
@@ -972,6 +1052,8 @@ class RoomCoordinator {
   }
 
   void _endCalibration() {
+    _surroundGrace?.cancel();
+    _surroundGrace = null;
     _calibrationTimer?.cancel();
     _calibrationTimer = null;
     if (_state.calibration == null) return;

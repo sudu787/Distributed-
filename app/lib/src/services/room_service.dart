@@ -116,6 +116,15 @@ class RoomService {
   /// host disappeared.
   bool promotedByFailover = false;
 
+  /// Whether a surround measurement started on another phone may record
+  /// with this phone's microphone (the owner's "Help measure the room"
+  /// setting; off by default).
+  bool allowRoomMeasurement = false;
+
+  /// Device ids of phones whose room measurement this phone declined.
+  final StreamController<String> _declined = StreamController.broadcast();
+  Stream<String> get measurementDeclined => _declined.stream;
+
   RoomService({
     required this.store,
     required this.backendFactory,
@@ -501,6 +510,8 @@ class RoomService {
         // redirect, and receive the role back (handback); see failover.dart.
         failover: _AppFailover(this, identity),
         recorder: recorderFor?.call(backend),
+        allowRemoteCalibration: () => allowRoomMeasurement,
+        onRemoteCalibrationDeclined: (plan) => _declined.add(plan.listener),
         peerPort: _peerServer?.port,
         calibrationTracks: FileCalibrationTrackFactory(Directory('${cacheDir.path}/calibration')),
       ),

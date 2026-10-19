@@ -76,6 +76,7 @@ Future<void> main() async {
       appStoreProvider.overrideWithValue(store),
       libraryServiceProvider.overrideWithValue(library),
       roomServiceProvider.overrideWithValue(rooms),
+      if (native != null) microphonePermissionProvider.overrideWithValue(() => native.requestPermission('microphone')),
       initialIdentityProvider.overrideWithValue(identity),
     ],
     child: const SyncSphereApp(),

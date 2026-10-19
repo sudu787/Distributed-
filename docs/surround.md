@@ -71,34 +71,75 @@ calibration).
     ±8 ms band. That is still inside the Haas window.
   - Calibration clicks are played without the role delay, so calibration does not cancel it.
 - **Identify:** tap a phone on the map to make it flash its role and vibrate.
+- **Every speaker of a phone plays that phone's channel.** A phone with two loudspeakers set to Right plays the right
+  channel from both. Most songs carry the voice, bass and drums in *both* channels, so a left/right pair playing a song
+  can sound almost the same from both phones. **Test sound** (on the speaker map) plays three low beeps on the left
+  channel only, three high beeps on the right only, then a tone in both channels in phase (left, right and center
+  phones) and one in anti-phase (only the surround phones). The file is generated identically on every phone.
+- **Role changes take effect mid-song.** The role is fixed in each native player, so a change starts a fresh segment.
+  If a change arrived while the song was still starting, it used to be lost until the next song: one phone stayed on
+  full stereo next to the other's single channel, which sounds like "the right channel on both phones". The engine
+  now checks the playing segment's role on every drift tick and switches if it is wrong (regression test in
+  `simulation_test.dart`).
 
-## 6. Next: surround calibration with every phone's microphone
+## 6. Surround calibration with every phone's microphone (implemented)
 
-The current calibration uses one microphone (the listener's phone) and fixes *timing* at the seat. For surround, every
-phone with a microphone can record during the same click sequence. That gives the room layout without any manual
-placement.
+"Calibrate to this spot" uses one microphone (the listener's phone) and fixes *timing* at the seat. **Measure
+automatically** (in the Surround sheet) has every phone with a microphone record the same click sequence. That gives
+the room layout without placing anything by hand.
 
+- **Consent:** another phone's microphone is used only if its owner turned on **Help measure the room** in Settings
+  (off by default). Otherwise that phone declines at once, records nothing, and shows who asked, with a button to allow
+  it next time. Recordings never leave a phone; only click arrival times and levels are sent.
 - **Distances without trusting clocks:** two-way sensing (BeepBeep; Peng et al., SenSys 2007, ~1–2 cm on phones).
   - With A_x(y) = arrival of y's click in phone x's own recording:
-    d_xy = c/2 · [(A_x(y) − A_x(x)) − (A_y(y) − A_y(x))] + (d_xx + d_yy)/2.
+    d_xy = c/2 · [(A_x(y) − A_x(x)) − (A_y(y) − A_y(x))] + (d_xx + d_yy)/2, with d_xx = 8 cm (speaker to own mic).
   - Every term is a difference inside one recording, so clock offsets and output-latency jitter cancel.
-- **Layout:** classical multidimensional scaling on the distance matrix (Birchfield and Subramanya), with the seat
-  phone at the origin.
-  - The user taps the phone *in front* (rotation) and the phone *on the left* (mirror).
-  - MDS is sensitive to outliers, so a residual check flags bad pairs.
-- **Automatic roles** from each phone's angle (2 phones → L/R; 3 → L/R/C; 5+ → C, L/R, SL/SR).
-- **Level matching** from the click levels at the seat (surrounds −3 dB).
+  - Median over the 3 rounds.
+- **Layout:** classical multidimensional scaling of the distance matrix (Birchfield and Subramanya), computed by the
+  coordinator for the largest set of phones that heard each other. It needs 3 phones including the seat phone.
+  - On the seat phone the user taps the phone(s) *in front*: the center phone, or the front-left and front-right
+    phones, in which case forward is midway between them. Then they tap a phone *on the left* (mirror).
+  - MDS is sensitive to outliers. The fit residual is shown, with a warning above 25 cm.
+- **Automatic roles** from each phone's angle: 2 phones → L/R. Otherwise the phone nearest straight ahead (within
+  ±20°) is center, phones within ±75° are front L/R, and phones further round are SL/SR.
+- **Level matching** from the click levels at the seat. Every phone is brought down to the quietest front phone, and
+  the surrounds a further 3 dB, using its device volume. The seat phone itself is left out.
+- **Timing** at the seat comes from the same run (the listener's recording, exactly as "Calibrate to this spot").
+
+**Simulated result** (`surround-calibration-n6`, seed 42: listener + C, L, R at 2 m, SL, SR at 1.8 m, two phones on
+uncalibrated Bluetooth):
+
+| metric | value |
+|---|---|
+| pairwise distance error | median 0.8 cm, max 2.0 cm |
+| angle error after orienting | median 0.3°, max 0.5° |
+| suggested roles | C, L, R, SL, SR, all correct |
+| spread at the listener afterwards | median 7.4 ms, p95 14.2 ms (without any calibration: about 180 ms on seeds 1 and 2) |
+
+Over three seeds on good and typical Wi-Fi, the worst distance error was 7.4 cm and the worst angle error 1.4°. On
+seeds 1 and 2 the timing at the seat matched "Calibrate to this spot" in the same room to within 0.1 ms (median). The
+simulation has **no reverberation, multipath or speaker directivity**, and onsets are found in clean recordings.
+Real rooms will be worse, so the residual warning and manual assignment stay. These are SIMULATED numbers, not
+hardware measurements.
+
 - **Arbitrary layouts:** VBAP (vector base amplitude panning, Pulkki 1997) can map virtual channels onto real phone
-  angles. Because it relies on phantom images, it needs the sub-ms alignment discussed above, so it stays optional.
+  angles. Because it relies on phantom images, it needs the sub-ms alignment discussed above, so it stays future
+  work.
 
 ## 7. Real-phone test procedure
 
-1. Five phones on one Wi-Fi network, same volume. Put the room in Surround (C, L, R, SL, SR) around a chair.
-2. Sit in the chair, run "Calibrate to this spot" from your phone.
-3. Play a stereo track with a centred voice and lots of reverb (live recordings work well). Expected: the voice stays
+1. Five phones on one Wi-Fi network, same volume, placed around a chair (C, L, R, SL, SR). Turn on "Help measure the
+   room" on each.
+2. Sit in the chair with a sixth phone, open Speakers → Surround → **Measure**. Tap the front phone and a left phone,
+   check the map matches the room, then **Use this layout**. (Or assign positions by hand and run "Calibrate to this
+   spot".)
+3. Play **Test sound**: the low beeps should come only from the left phones, the high beeps only from the right, the
+   third tone from the front three and the last tone only from behind.
+4. Play a stereo track with a centred voice and lots of reverb (live recordings work well). Expected: the voice stays
    in front, and reverb and audience come from around you.
-4. Play a 5.1 test file (channel-ID announcements) and confirm each phone speaks its own channel.
-5. Optionally record at the seat with a measurement microphone and run `tools/onset_skew.py` on a click track to
+5. Play a 5.1 test file (channel-ID announcements) and confirm each phone speaks its own channel.
+6. Optionally record at the seat with a measurement microphone and run `tools/onset_skew.py` on a click track to
    measure front alignment and the rear delay.
 
 ## Sources

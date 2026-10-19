@@ -20,6 +20,7 @@ import 'package:fake_async/fake_async.dart';
 
 import '../audio/audio_backend.dart';
 import '../calibration/calibration_analysis.dart';
+import '../calibration/layout.dart';
 import '../calibration/calibration_runtime.dart';
 import '../calibration/click_track.dart';
 import '../config/sync_config.dart';
@@ -133,9 +134,11 @@ class PartitionAction extends SimAction {
 
 /// The listener device requests an acoustic calibration to its position.
 class CalibrateAction extends SimAction {
-  const CalibrateAction();
+  /// Surround calibration: every phone records (needs Scenario.positionsM).
+  final bool surround;
+  const CalibrateAction({this.surround = false});
   @override
-  String get label => 'calibrate';
+  String get label => surround ? 'calibrate-surround' : 'calibrate';
 }
 
 /// A participant switches its own channel role (distributed stereo).
@@ -203,6 +206,19 @@ class Scenario {
   /// Distance (m) from each device to the listener, cycled like [profiles].
   final List<double> distancesM;
 
+  /// 2-D room positions (m) of every device. When set, every device has a
+  /// (simulated) microphone that hears every other device with the right
+  /// propagation delay, and listener distances derive from these positions.
+  final List<(double, double)>? positionsM;
+
+  /// For surround-calibration metrics: which devices the user would tap as
+  /// "in front" and "on the left".
+  final int? frontIndex;
+  final int? leftIndex;
+
+  /// Devices whose owner did not allow room measurement from other phones.
+  final Set<int> declineRemoteRecording;
+
   const Scenario({
     required this.name,
     required this.participants,
@@ -221,7 +237,27 @@ class Scenario {
     this.handback = const HandbackPolicy(),
     this.listenerIndex,
     this.distancesM = const [1.0],
+    this.positionsM,
+    this.frontIndex,
+    this.leftIndex,
+    this.declineRemoteRecording = const {},
   });
+
+  /// Distance (m) between devices [a] and [b] (speaker to own mic for a == b).
+  double distanceBetween(int a, int b) {
+    final p = positionsM;
+    if (p == null) return a == b ? kSelfDistanceM : distancesM[b % distancesM.length];
+    if (a == b) return kSelfDistanceM;
+    final (ax, ay) = p[a];
+    final (bx, by) = p[b];
+    return sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
+  }
+
+  /// Distance from each device to the listener.
+  double listenerDistance(int i) {
+    if (positionsM == null || listenerIndex == null) return distancesM[i % distancesM.length];
+    return i == listenerIndex ? 0.3 : distanceBetween(listenerIndex!, i);
+  }
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -236,7 +272,11 @@ class Scenario {
         if (failover) 'failover': true,
         if (failover) 'handbackStableForS': handback.stableFor.inSeconds,
         if (listenerIndex != null) 'listener': listenerIndex,
-        if (listenerIndex != null) 'distancesM': distancesM,
+        if (listenerIndex != null && positionsM == null) 'distancesM': distancesM,
+        if (positionsM != null)
+          'positionsM': [
+            for (final (x, y) in positionsM!) [x, y]
+          ],
       };
 }
 
@@ -442,17 +482,23 @@ class SimulationRunner {
           joinKey: 'SIMKEY01',
           outputCalibrationUs: sc.outputCalibrationUs[i % sc.outputCalibrationUs.length],
           failover: failover,
-          recorder: sc.listenerIndex == i
+          recorder: sc.listenerIndex == i || sc.positionsM != null
               ? SimMicrophone(
                   trueNowUs: trueNow,
                   listenerClock: clk,
                   devices: () => [
-                    for (final d in devices) (d.id, d.backend, sc.distancesM[d.index % sc.distancesM.length])
+                    for (final d in devices)
+                      (
+                        d.id,
+                        d.backend,
+                        sc.positionsM != null ? sc.distanceBetween(i, d.index) : sc.listenerDistance(d.index)
+                      )
                   ],
                   plan: () => coordinator.state.calibration,
                   random: Random(sc.seed * 7 + i),
                 )
               : null,
+          allowRemoteCalibration: sc.declineRemoteRecording.contains(i) ? () => false : null,
           calibrationTracks: const _SimCalibrationTracks(),
         ),
         connector: net.connector(id, address, link),
@@ -620,10 +666,11 @@ class SimulationRunner {
           control(ControlAction.seek, pos: position.inMicroseconds);
         case NextTrackAction():
           control(ControlAction.next);
-        case CalibrateAction():
+        case CalibrateAction(:final surround):
           final li = sc.listenerIndex;
           if (li == null) throw StateError('CalibrateAction needs Scenario.listenerIndex');
-          unawaited(devices[li].session.control(ControlAction.calibrate).then((ack) {
+          unawaited(
+              devices[li].session.control(ControlAction.calibrate, mode: surround ? 'surround' : null).then((ack) {
             logEvent(ack.accepted ? 'calibration-started' : 'calibration-rejected', {'error': ack.error});
           }));
         case ChannelRoleAction(:final participant, :final role):
@@ -708,9 +755,7 @@ class SimulationRunner {
     // listener's position (343 m/s).
     final listenerSpread = SampleStats();
     if (sc.listenerIndex != null) {
-      final propUs = {
-        for (var i = 0; i < sc.participants; i++) 'device-$i': sc.distancesM[i % sc.distancesM.length] / 343.0 * 1e6
-      };
+      final propUs = {for (var i = 0; i < sc.participants; i++) 'device-$i': sc.listenerDistance(i) / 343.0 * 1e6};
       for (final smp in samples) {
         if (smp.errors.length < 2) continue;
         if (timelines[smp.generation] == null) continue;
@@ -821,6 +866,7 @@ class SimulationRunner {
       'networkBytesPerDevicePerSecond': sc.participants == 0
           ? 0
           : (net.bytesSent / sc.participants / max(1, sc.duration.inSeconds)).round(),
+      if (sc.positionsM != null) 'surroundCalibration': _surroundMetrics(sc, coordinator.state.layout),
       'failedSessions': failedSessions,
       'killedDevices': dead.toList(),
       'failureDetection': {
@@ -993,3 +1039,42 @@ class _FnClock implements MonotonicClock {
   int nowMicros() => f();
 }
 
+
+/// How well a surround calibration recovered the (simulated) room: pairwise
+/// distance errors, angle errors after orienting with the true front/left
+/// phones, and the roles that would be suggested.
+Map<String, Object?> _surroundMetrics(Scenario sc, SpeakerLayout? layout) {
+  if (layout == null) return {'measured': false};
+  final pos = {for (final e in layout.positions.entries) e.key: Point(e.value.$1, e.value.$2)};
+  int idx(String id) => int.parse(id.substring('device-'.length));
+  final distErr = SampleStats();
+  final ids = pos.keys.toList();
+  for (var a = 0; a < ids.length; a++) {
+    for (var b = a + 1; b < ids.length; b++) {
+      final est = pos[ids[a]]!.distanceTo(pos[ids[b]]!);
+      distErr.add((est - sc.distanceBetween(idx(ids[a]), idx(ids[b]))).abs() * 100);
+    }
+  }
+  final out = <String, Object?>{
+    'measured': true,
+    'phones': ids.length,
+    'fitResidualCm': (layout.residualM * 100).round(),
+    'distanceErrorCm': distErr.summary(),
+  };
+  final f = sc.frontIndex, l = sc.leftIndex, li = sc.listenerIndex;
+  if (f != null && l != null && li != null && pos.containsKey('device-$f') && pos.containsKey('device-$l')) {
+    final placed = orientLayout(pos, listener: 'device-$li', front: ['device-$f'], left: 'device-$l');
+    final (lx, ly) = sc.positionsM![li];
+    final azErr = SampleStats();
+    for (final e in placed.entries) {
+      final (x, y) = sc.positionsM![idx(e.key)];
+      final trueAz = atan2(x - lx, y - ly) * 180 / pi;
+      var d = (e.value.azimuthDeg - trueAz).abs();
+      if (d > 180) d = 360 - d;
+      azErr.add(d);
+    }
+    out['azimuthErrorDeg'] = azErr.summary();
+    out['roles'] = {for (final e in assignSurroundRoles(placed).entries) e.key: e.value.name};
+  }
+  return out;
+}

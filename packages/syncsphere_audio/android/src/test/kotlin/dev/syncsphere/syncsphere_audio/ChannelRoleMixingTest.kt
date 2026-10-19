@@ -1,8 +1,13 @@
 package dev.syncsphere.syncsphere_audio
 
+import androidx.media3.common.C
+import androidx.media3.common.audio.AudioProcessor
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 class ChannelRoleMixingTest {
@@ -69,5 +74,40 @@ class ChannelRoleMixingTest {
         assertNull(ChannelRoleMixing.coefficientsFor("left", 1))
         assertNull(ChannelRoleMixing.coefficientsFor("left", 8))
         assertEquals(12, ChannelRoleMixing.coefficientsFor("center", 6)!!.size)
+    }
+
+    /** Runs interleaved 16-bit stereo PCM through the real processor. */
+    private fun process(role: String, interleaved: ShortArray): ShortArray? {
+        val p = ChannelRoleProcessor(role)
+        val fmt = p.configure(AudioProcessor.AudioFormat(44100, 2, C.ENCODING_PCM_16BIT))
+        if (!p.isActive) return null
+        assertEquals(2, fmt.channelCount)
+        @Suppress("DEPRECATION")
+        p.flush()
+        val buf = ByteBuffer.allocateDirect(interleaved.size * 2).order(ByteOrder.nativeOrder())
+        interleaved.forEach { buf.putShort(it) }
+        buf.flip()
+        p.queueInput(buf)
+        val o = p.output
+        return ShortArray(o.remaining() / 2) { o.short }
+    }
+
+    @Test
+    fun processorSendsOnlyItsChannelToBothSpeakers() {
+        // Two frames: (L, R) = (1000, -3000), (2000, 500).
+        val pcm = shortArrayOf(1000, -3000, 2000, 500)
+        assertContentEquals(shortArrayOf(1000, 1000, 2000, 2000), process("left", pcm))
+        assertContentEquals(shortArrayOf(-3000, -3000, 500, 500), process("right", pcm))
+        assertContentEquals(shortArrayOf(-1000, -1000, 1250, 1250), process("mono", pcm))
+        // Stereo leaves the audio untouched (processor inactive).
+        assertNull(process("stereo", pcm))
+    }
+
+    @Test
+    fun leftOnlySoundIsSilentOnTheRightPhone() {
+        // The speaker test's left beeps: nothing in the right channel.
+        val pcm = shortArrayOf(12000, 0, -8000, 0)
+        assertContentEquals(shortArrayOf(0, 0, 0, 0), process("right", pcm))
+        assertFalse(process("left", pcm)!!.all { it.toInt() == 0 })
     }
 }

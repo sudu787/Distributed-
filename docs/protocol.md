@@ -95,7 +95,7 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `rep` | C→S | `{gen, at, pos, exp, err, rate, buf, off, unc, rtt, mode, ps}` | Sync report: coordinator-domain measurement time, rendered and expected position, error = pos − exp (µs), current rate, buffered µs, clock offset and uncertainty, RTT p95, correction mode (`idle|waiting|inSync|rateCorrecting|resyncing`), player state |
 | `evt` | C→S | `{kind, gen, detail?, data}` | `started` (data: `startErrorUs`, `playCallLateUs`, `latencyCompUs`), `lateJoin` (`lateUs`), `resync` (`posUs`), `stall`, `rejoined` (`recoveryUs`, `errorUs`), `error` |
 | `avail` | C→S | `{tracks:[{id, a}]}` | Track availability: `unknown|available|fetching|missing|mismatch`. Partial updates allowed. |
-| `cal.res` | C→S | `{id, arr: {dev: {slot: µs}}, missing?: [dev], err?}` | Acoustic calibration result from the plan's listener (§5.1): per device, each detected click's arrival minus its scheduled time (common recorder offset included). Slots are string keys; ≤256 devices, ≤100 slots each. |
+| `cal.res` | C→S | `{id, arr: {dev: {slot: µs}}, missing?: [dev], lvl?: {dev: dBFS}, err?}` | Acoustic calibration result from the plan's listener, or from any recorder of a surround measurement (§5.2): per device, each detected click's arrival minus its scheduled time (common recorder offset included), and the median click peak level. Slots are string keys; ≤256 devices, ≤100 slots each. `err: "declined"`: the phone's owner has not allowed room measurement from other phones. |
 | `diag` | S→C | `{parts:[{id, err?, unc?, off?, rtt?, mode, age?, rate, ps, be}], maxPair?}` | Aggregated diagnostics, about 1 Hz. Not versioned state. |
 | `bye` | both | `{reason}` | Graceful leave (C→S removes the member) or room closed (S→C, fatal for the client) |
 | `err` | S→C | `{code, reason}` | Non-fatal error report |
@@ -135,7 +135,11 @@ All positions and times are integer microseconds. Every reported timing value is
 - Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`, `center`,
   `surroundLeft`, `surroundRight`; rear surround roles play 15 ms later, see [surround.md](surround.md)); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
-- `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its click track id is
+- `layout` (room level, optional): the last surround measurement (§5.2), `{id, listener, pos: {dev: [x, y]}, lvl?:
+  {dev: dBFS}, res}`. Positions are metres in an arbitrary rotation and mirror image; `res` is the RMS misfit of the
+  distances (m).
+- `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its plan may list `rec` (recording
+  devices) for a surround measurement. Its click track id is
   `sha256("syncsphere-calibration-v1|<id>|<listener>")`; `trackById` resolves it to a synthetic track that every device
   generates locally.
 
@@ -168,7 +172,7 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `setShuffle` | `val` (≥0.5 = on) | Shuffle order (reshuffled when turned on or when the playlist changes) | never |
 | `setChannelRole` | `mode` `stereo\|left\|right\|mono\|center\|surroundLeft\|surroundRight`, `dev?` | Channel role. A device may always change its own; others need control rights. Surround roles (`center`, `surroundLeft`, `surroundRight`) are refused with `invalid` unless every connected member sent `caps.sur: true`. | never |
 | `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
-| `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
+| `calibrate` | `mode?` (`surround`) | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. With `mode: surround`, every connected phone with `caps.mic` records too (§5.2); needs at least two. | — |
 | `identify` | `dev?` | That phone flashes its channel and vibrates for 3 s (state `ident: {dev, seq, until}`). Own phone always; others need control rights. | never |
 | `addTrack` | `info` (track object, §4) | Appends a song. Needs control rights, and the coordinator must already have the file (uploaded with `PUT /uploads/<id>`, §8, or in its library); otherwise `invalid`. Idempotent. | never |
 
@@ -200,6 +204,24 @@ and volume churn do not make playback commands stale. Ack error codes: `unauthor
 
 The corrections align sound **at the listener's position**, including propagation delay (about 2.9 ms per metre) and
 Bluetooth or speaker latency that software estimates cannot see. Other positions in the room are not aligned by this.
+
+### 5.2 Surround measurement (every phone listens)
+
+1. `calibrate` with `mode: surround`. The plan carries `rec`: the listener plus every other connected phone with
+   `caps.mic`. The click sequence is the same as §5.1.
+2. Each recorder that its owner allows (app setting "Help measure the room", off by default) records the whole sequence
+   and sends `cal.res` with its arrivals and levels. A phone that is not allowed answers at once with `err: "declined"`
+   and records nothing. Recordings never leave the phones.
+3. The listener's result applies timing corrections exactly as in §5.1. The coordinator then waits for every recorder's
+   answer (at most 6 s more) and computes:
+   - pairwise distances by two-way ranging: `d_xy = c/2 · [(A_x(y) − A_x(x)) − (A_y(y) − A_y(x))] + d_self`, where
+     `A_x(y)` is the arrival of y's click in x's recording, c = 343 m/s and `d_self` = 0.08 m (speaker to own
+     microphone). Every term is a difference within one recording, so clock offsets and output latency cancel. Median
+     over the rounds;
+   - the largest set of phones with all pairs measured, then 2-D positions by classical multidimensional scaling.
+4. With at least 3 phones including the listener, it publishes `layout`. The listener's app asks the user for the
+   phone(s) in front and a phone on the left, which fixes rotation and mirror image, and then suggests roles from the
+   angles and volume trims from the levels. It applies them with ordinary `setChannelRole` and `deviceVolume` requests.
 
 ## 6. Synchronization configuration (`welcome.config`)
 

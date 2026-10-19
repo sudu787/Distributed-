@@ -860,11 +860,15 @@ class CalibrationResultMsg extends Message {
   /// Non-null when the listener could not measure at all.
   final String? error;
 
+  /// Click level per device at this recorder (dBFS), for level matching.
+  final Map<String, double> levels;
+
   const CalibrationResultMsg({
     required this.calibrationId,
     this.arrivals = const {},
     this.undetected = const [],
     this.error,
+    this.levels = const {},
   });
 
   @override
@@ -875,6 +879,7 @@ class CalibrationResultMsg extends Message {
         },
         if (undetected.isNotEmpty) 'missing': undetected,
         if (error != null) 'err': error,
+        if (levels.isNotEmpty) 'lvl': levels,
       };
 
   static CalibrationResultMsg read(Reader r) {
@@ -898,7 +903,22 @@ class CalibrationResultMsg extends Message {
       arrivals: arr,
       undetected: r.has('missing') ? r.stringList('missing', maxLength: 256, maxItemLength: 64) : const [],
       error: r.optString('err', maxLength: 256),
+      levels: _levels(r),
     );
+  }
+
+  static Map<String, double> _levels(Reader r) {
+    final raw = r.optMap('lvl');
+    if (raw == null) return const {};
+    if (raw.length > 256) throw r.error('lvl', 'too many devices');
+    final out = <String, double>{};
+    raw.forEach((dev, v) {
+      if (dev.length > 64 || v is! num || !v.isFinite || v < -200 || v > 20) {
+        throw r.error('lvl', 'invalid level for $dev');
+      }
+      out[dev] = v.toDouble();
+    });
+    return out;
   }
 }
 

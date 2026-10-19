@@ -53,6 +53,32 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       final me = ref.read(roomControllerProvider).room?.participant(myId);
       unawaited(showIdentifyOverlay(context, ref, me?.channel ?? ChannelRole.stereo, me?.displayName ?? 'This phone'));
     });
+    // A surround measurement finished: the phone that measured orients it.
+    ref.listen(roomControllerProvider.select((v) => (v.room != null, v.room?.layout)), (prev, next) {
+      final layout = next.$2;
+      if (prev == null || !prev.$1 || layout == null || layout.id == prev.$2?.id) return;
+      if (layout.listener != ref.read(identityProvider).deviceId) return;
+      unawaited(showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => SurroundOrientSheet(layout: layout),
+      ));
+    });
+    // Another phone wanted this phone's microphone for a room measurement.
+    ref.listen(roomControllerProvider.select((v) => v.declinedMeasurement), (prev, next) {
+      if (next == null || next.$1 == prev?.$1) return;
+      final who = ref.read(roomControllerProvider).room?.participant(next.$2)?.displayName ?? 'Another phone';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text('$who wanted to measure the room with this phone\'s microphone. '
+            '"Help measure the room" is off.'),
+        action: SnackBarAction(
+          label: 'Allow next time',
+          onPressed: () => ref.read(roomMeasurementProvider.notifier).set(true),
+        ),
+      ));
+    });
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {

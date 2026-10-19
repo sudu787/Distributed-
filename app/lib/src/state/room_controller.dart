@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_audio/syncsphere_audio.dart';
@@ -30,6 +31,10 @@ class RoomViewState {
   /// Songs being added from this phone: (done, total); null when idle.
   final (int, int)? adding;
 
+  /// (count, device id): this phone declined to record for that phone's
+  /// room measurement ("Help measure the room" is off).
+  final (int, String)? declinedMeasurement;
+
   const RoomViewState({
     this.status = RoomStatus.none,
     this.info,
@@ -44,6 +49,7 @@ class RoomViewState {
     this.error,
     this.events = const [],
     this.adding,
+    this.declinedMeasurement,
   });
 
   bool get isLive => phase == SessionPhase.joined || phase == SessionPhase.syncing;
@@ -66,6 +72,7 @@ class RoomViewState {
     List<SyncEvent>? events,
     (int, int)? adding,
     bool clearAdding = false,
+    (int, String)? declinedMeasurement,
   }) =>
       RoomViewState(
         status: status ?? this.status,
@@ -81,6 +88,7 @@ class RoomViewState {
         error: clearError ? null : (error ?? this.error),
         events: events ?? this.events,
         adding: clearAdding ? null : (adding ?? this.adding),
+        declinedMeasurement: declinedMeasurement ?? this.declinedMeasurement,
       );
 }
 
@@ -93,6 +101,7 @@ class RoomController extends Notifier<RoomViewState> {
   @override
   RoomViewState build() {
     ref.onDispose(_detach);
+    ref.listen<bool>(roomMeasurementProvider, (_, on) => _svc.allowRoomMeasurement = on);
     return const RoomViewState();
   }
 
@@ -179,8 +188,11 @@ class RoomController extends Notifier<RoomViewState> {
 
   void _attach(RoomInfo info) {
     final s = _svc.session!;
+    _svc.allowRoomMeasurement = ref.read(roomMeasurementProvider);
     state = RoomViewState(status: RoomStatus.active, info: info, room: s.state, phase: s.phase, role: s.role);
     _subs
+      ..add(_svc.measurementDeclined.listen((id) =>
+          state = state.copyWith(declinedMeasurement: ((state.declinedMeasurement?.$1 ?? 0) + 1, id))))
       ..add(s.stateStream.listen((r) => state = state.copyWith(room: r, role: s.role)))
       ..add(s.phaseStream.listen((p) {
         state = state.copyWith(
@@ -328,6 +340,38 @@ class RoomController extends Notifier<RoomViewState> {
 
   /// Starts an acoustic calibration measured by this device's microphone.
   Future<String?> calibrateHere() => control(ControlAction.calibrate);
+
+  /// Surround calibration: every phone with a microphone records, so the
+  /// room can measure where the phones are (needs 3 or more phones).
+  Future<String?> calibrateSurround() => control(ControlAction.calibrate, mode: 'surround');
+
+  /// Adds the speaker test sound (beeps on the left channel only, then the
+  /// right only, then center and surround parts) and plays it now.
+  Future<String?> playSpeakerTest() async {
+    final tmp = await Directory.systemTemp.createTemp('speaker-test');
+    try {
+      final f = File('${tmp.path}/speaker-test.wav');
+      await f.writeAsBytes(speakerTestWav());
+      final track = await ref.read(libraryServiceProvider).import(f, title: kSpeakerTestTitle, artist: 'SyncSphere');
+      ref.invalidate(libraryProvider);
+      final err = await addTracks([track]);
+      if (err != null) return err;
+      // The new playlist entry may still be on its way to this phone.
+      for (var i = 0; i < 20 && state.room?.trackById(track.id) == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      var e = await control(ControlAction.setTrack, trackId: track.id);
+      if (e != null) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        e = await control(ControlAction.setTrack, trackId: track.id);
+      }
+      return e;
+    } catch (e) {
+      return 'Could not prepare the test sound: $e';
+    } finally {
+      unawaited(tmp.delete(recursive: true).then((_) {}, onError: (Object _) {}));
+    }
+  }
 
   /// Whether this device can take part as the calibration listener.
   bool get hasMicrophone => _svc.session?.calibrationListener != null;

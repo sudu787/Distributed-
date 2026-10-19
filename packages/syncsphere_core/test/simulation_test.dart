@@ -159,6 +159,26 @@ void main() {
     expect((steady['max'] as num).toDouble(), lessThan(30));
   });
 
+  test('a stereo pair set while a song is starting still splits left/right', () {
+    // Regression: a role change that arrived while the starting segment was
+    // being prepared was lost, so that phone kept playing full stereo for
+    // the whole song (heard as "the right channel on both phones").
+    for (final ms in [0, 300, 600]) {
+      final r = SimulationRunner(Scenario(
+        name: 'pair-at-start-$ms',
+        participants: 2,
+        network: NetworkCondition.wifiTypical,
+        duration: const Duration(seconds: 30),
+        actions: [
+          const ScheduledAction(Duration(seconds: 3), PlayAction()),
+          ScheduledAction(Duration(milliseconds: 3000 + ms), const ChannelRoleAction(0, ChannelRole.left)),
+          ScheduledAction(Duration(milliseconds: 3000 + ms), const ChannelRoleAction(1, ChannelRole.right)),
+        ],
+      )).run();
+      expect(r.metrics['activeChannelRoles'], ['left', 'right'], reason: 'role change $ms ms after play');
+    }
+  });
+
   test('a rear surround phone plays 15 ms after the front phones (Haas delay), and stays there', () {
     final r = SimulationRunner(const Scenario(
       name: 'surround-delay',

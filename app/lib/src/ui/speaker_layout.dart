@@ -144,6 +144,21 @@ class SpeakerLayoutCard extends ConsumerWidget {
             ]),
           ],
           OverflowBar(alignment: MainAxisAlignment.end, spacing: 8, children: [
+            if (s.canControl)
+              TextButton.icon(
+                icon: const Icon(Icons.graphic_eq),
+                label: const Text('Test sound'),
+                onPressed: () async {
+                  haptic(ref, Haptic.action);
+                  final err = await ctl.playSpeakerTest();
+                  if (!context.mounted) return;
+                  showMessage(
+                    context,
+                    err ?? 'Playing the speaker test: low beeps = left, high beeps = right, then center, then surround.',
+                    error: err != null,
+                  );
+                },
+              ),
             if (s.canControl && lefts > 0 && rights > 0)
               TextButton.icon(
                 icon: const Icon(Icons.swap_horiz),
@@ -157,6 +172,17 @@ class SpeakerLayoutCard extends ConsumerWidget {
                     }
                   }
                 },
+              ),
+            if (s.canControl && room.layout != null && room.layout!.listener == me)
+              TextButton.icon(
+                icon: const Icon(Icons.explore_outlined),
+                label: const Text('Measured layout'),
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  showDragHandle: true,
+                  isScrollControlled: true,
+                  builder: (_) => SurroundOrientSheet(layout: room.layout!),
+                ),
               ),
             if (s.canControl && live.length >= 3)
               OutlinedButton.icon(
@@ -181,7 +207,12 @@ class SpeakerLayoutCard extends ConsumerWidget {
                 ),
               ),
           ]),
-          Text('Tap a phone to make it flash and show its channel.', style: t.bodySmall),
+          Text(
+            'Tap a phone to make it flash and show its channel. Each phone plays its channel on all of its own '
+            'speakers. Most songs have the voice, bass and drums in both channels, so a left/right pair can sound '
+            'alike: the test sound plays low beeps only on the left and high beeps only on the right.',
+            style: t.bodySmall,
+          ),
         ]),
       ),
     );
@@ -362,6 +393,29 @@ class SurroundSetupSheet extends ConsumerStatefulWidget {
 }
 
 class _SurroundSetupSheetState extends ConsumerState<SurroundSetupSheet> {
+  Future<void> _measure(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Measure the room?'),
+        content: const Text(
+          'Sit where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
+          'clicks in turn and the others listen. Keep the room quiet and the volumes as they are.\n\n'
+          'Recordings stay on each phone; only click times and levels are shared.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final err = await ref.read(roomControllerProvider.notifier).calibrateSurround();
+    if (!context.mounted) return;
+    Navigator.pop(context);
+    showMessage(context, err ?? 'Measuring… keep still and quiet.', error: err != null);
+  }
+
   static const positions = [
     (ChannelRole.left, 'Front left'),
     (ChannelRole.right, 'Front right'),
@@ -395,6 +449,39 @@ class _SurroundSetupSheetState extends ConsumerState<SurroundSetupSheet> {
             'behind); 5.1 files play their real channels. Tap a name twice to unassign it.',
             style: t.bodySmall,
           ),
+          if (ref.watch(roomControllerProvider).canControl && ctl.hasMicrophone && live.length >= 3) ...[
+            const SizedBox(height: 12),
+            Card(
+              margin: EdgeInsets.zero,
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.auto_awesome),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text('Measure automatically', style: t.titleSmall)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Sit in your seat with this phone. Every phone clicks in turn while the others listen, so '
+                    'SyncSphere can work out where they are; then you tap the phone in front of you and the one on '
+                    'your left. Each phone takes part only if "Help measure the room" is on in its settings.',
+                    style: t.bodySmall,
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.tonal(
+                      onPressed: () => _measure(context),
+                      child: const Text('Measure'),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text('Or assign the positions yourself:', style: t.titleSmall),
+          ],
           for (final (role, label) in positions) ...[
             const SizedBox(height: 14),
             Row(children: [ChannelBadge(role), const SizedBox(width: 8), Expanded(child: Text(label, style: t.titleSmall))]),
@@ -441,5 +528,193 @@ class _SurroundSetupSheetState extends ConsumerState<SurroundSetupSheet> {
         ]),
       ),
     );
+  }
+}
+
+/// After a surround measurement, on the phone that measured: the room knows
+/// the distances between phones but not which way you face. Tap the phone
+/// in front of you and the one on your left; roles and volume trims follow.
+class SurroundOrientSheet extends ConsumerStatefulWidget {
+  final SpeakerLayout layout;
+  const SurroundOrientSheet({super.key, required this.layout});
+
+  @override
+  ConsumerState<SurroundOrientSheet> createState() => _SurroundOrientSheetState();
+}
+
+class _SurroundOrientSheetState extends ConsumerState<SurroundOrientSheet> {
+  final Set<String> _front = {};
+  String? _left;
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final room = ref.watch(roomControllerProvider).room;
+    if (room == null) return const SizedBox.shrink();
+    final me = ref.watch(identityProvider).deviceId;
+    final layout = widget.layout;
+    final t = Theme.of(context).textTheme;
+    final ctl = ref.read(roomControllerProvider.notifier);
+    final ids = [
+      for (final id in layout.positions.keys)
+        if (id != layout.listener && room.participant(id) != null) id
+    ];
+    String name(String id) {
+      final n = room.participant(id)?.displayName ?? id;
+      return id == me ? '$n (you)' : n;
+    }
+
+    Map<String, Placement>? placed;
+    var roles = const <String, ChannelRole>{};
+    var trims = const <String, double>{};
+    // A left phone that is the only front phone gives no mirror information.
+    if (_front.isNotEmpty && _left != null && !(_front.length == 1 && _front.contains(_left))) {
+      placed = orientLayout(
+        {for (final e in layout.positions.entries) e.key: Point(e.value.$1, e.value.$2)},
+        listener: layout.listener,
+        front: _front.toList(),
+        left: _left!,
+      )..removeWhere((id, _) => !ids.contains(id));
+      roles = assignSurroundRoles(placed);
+      trims = levelTrimsDb(layout.levelsDb, roles);
+    }
+
+    Widget picker(String label, bool Function(String) selected, void Function(String) toggle) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: t.titleSmall),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final id in ids)
+                FilterChip(label: Text(name(id)), selected: selected(id), onSelected: (_) => setState(() => toggle(id))),
+            ]),
+          ],
+        );
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Room measured', style: t.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            'Found ${ids.length} phone${ids.length == 1 ? '' : 's'} around you. Now tell SyncSphere which way you face.',
+            style: t.bodySmall,
+          ),
+          if (layout.residualM > 0.25) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Some distances did not fit well (about ${(layout.residualM * 100).round()} cm off), for example because '
+              'of echoes. Check the result, measure again, or assign the positions yourself.',
+              style: t.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            Text('Not sure which is which?', style: t.bodySmall),
+            for (final id in ids)
+              ActionChip(
+                avatar: const Icon(Icons.flash_on, size: 16),
+                label: Text(name(id)),
+                onPressed: () => ctl.identify(id),
+              ),
+          ]),
+          const SizedBox(height: 14),
+          picker('1. The phone in front of you (or the two front phones, left and right)', _front.contains, (id) {
+            if (!_front.remove(id)) _front.add(id);
+          }),
+          const SizedBox(height: 14),
+          picker('2. A phone on your left', (id) => _left == id, (id) => _left = _left == id ? null : id),
+          if (placed != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(height: 200, child: _MeasuredMap(placed: placed, roles: roles, name: name)),
+            for (final id in ids)
+              if (placed[id] != null)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: ChannelBadge(roles[id] ?? ChannelRole.stereo),
+                  title: Text(name(id)),
+                  subtitle: Text('${_angleText(placed[id]!.azimuthDeg)}, ${placed[id]!.distanceM.toStringAsFixed(1)} m'
+                      '${(trims[id] ?? 0) < -0.5 ? ' · volume ${trims[id]!.toStringAsFixed(0)} dB' : ''}'),
+                ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      String? err;
+                      for (final e in roles.entries) {
+                        final p = room.participant(e.key);
+                        if (p == null) continue;
+                        if (p.channel != e.value) {
+                          err ??= await ctl.setChannelRole(e.value, deviceId: e.key == me ? null : e.key);
+                        }
+                        final trim = trims[e.key] ?? 0;
+                        if (trim < -0.5) {
+                          err ??= await ctl.control(ControlAction.deviceVolume,
+                              value: (p.volume * pow(10, trim / 20)).clamp(0.05, 1.0).toDouble(), targetDevice: e.key);
+                        }
+                      }
+                      if (!context.mounted) return;
+                      haptic(ref, err == null ? Haptic.action : Haptic.alert);
+                      Navigator.pop(context);
+                      showMessage(context, err ?? 'Surround is set from the measurement. Try the test sound.',
+                          error: err != null);
+                    },
+              child: const Text('Use this layout'),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  static String _angleText(double az) {
+    final a = az.round();
+    if (a.abs() <= 5) return 'straight ahead';
+    return '${a.abs()}° ${a < 0 ? 'left' : 'right'}';
+  }
+}
+
+/// Measured phone positions around the listener (front at the top).
+class _MeasuredMap extends StatelessWidget {
+  final Map<String, Placement> placed;
+  final Map<String, ChannelRole> roles;
+  final String Function(String id) name;
+  const _MeasuredMap({required this.placed, required this.roles, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final far = placed.values.map((p) => p.distanceM).fold<double>(0.5, max);
+    return LayoutBuilder(builder: (context, c) {
+      final center = Offset(c.maxWidth / 2, c.maxHeight / 2);
+      final radius = min(c.maxWidth / 2 - 40, c.maxHeight / 2 - 22);
+      return Stack(children: [
+        Positioned.fill(child: CustomPaint(painter: _RoomPainter(center, radius, Theme.of(context).dividerColor))),
+        Positioned(
+          left: center.dx - 12,
+          top: center.dy - 12,
+          child: const Icon(Icons.person, size: 24),
+        ),
+        for (final e in placed.entries)
+          () {
+            final a = e.value.azimuthDeg * pi / 180;
+            final r = radius * (e.value.distanceM / far).clamp(0.2, 1.0);
+            final pos = center + Offset(sin(a) * r, -cos(a) * r);
+            return Positioned(
+              left: pos.dx - 40,
+              top: pos.dy - 18,
+              width: 80,
+              child: Column(children: [
+                ChannelBadge(roles[e.key] ?? ChannelRole.stereo),
+                Text(name(e.key), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: t.labelSmall),
+              ]),
+            );
+          }(),
+      ]);
+    });
   }
 }

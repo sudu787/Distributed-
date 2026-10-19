@@ -32,6 +32,10 @@ The suite is deterministic for a given `--seed` (default 42). It covers:
 - **Listening-spot calibration:** 4 devices at 0.3, 2, 4.5 and 7 m from the listener (one on uncalibrated
   Bluetooth), without and with "calibrate to this spot". A virtual microphone synthesizes the recording (propagation,
   noise, 18 ms input timestamp error); the metric is the spread *at the listener*, propagation included.
+- **Surround measurement** (`surround-calibration-n6`): a listener plus 5 phones on ITU angles; every phone has a
+  virtual microphone that hears the others with the right propagation delay. It reports pairwise distance error,
+  angle error after orienting, the suggested roles and the spread at the listener. There is no reverberation or
+  multipath in the model.
 - **Channel-role switches** during playback (a fresh segment per switch).
 - **Drift over 60 min:** ±100 ppm clock skew and ±80 ppm audio-clock error, with correction disabled vs. enabled.
 - **Failure detectors** (`detector-{fixed,phi}-{wifi-good,wifi-flaky}-n4`): 10 min of playback, a guest cut off for

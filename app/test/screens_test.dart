@@ -25,6 +25,7 @@ import 'package:syncsphere/src/ui/room_screen.dart';
 import 'package:syncsphere/src/ui/speaker_layout.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 import 'dart:io';
+import 'dart:math';
 
 const _identity = DeviceIdentity(deviceId: 'dev-me', displayName: 'My Phone');
 
@@ -255,6 +256,7 @@ void main() {
     expect(find.text('L'), findsWidgets);
     expect(find.text('R'), findsWidgets);
     expect(find.text('Swap L/R'), findsOneWidget);
+    expect(find.text('Test sound'), findsOneWidget);
     await tester.tap(find.text('Kitchen').first);
     await tester.pump();
     expect(ctl.sent, contains(ControlAction.identify));
@@ -288,6 +290,74 @@ void main() {
     expect(ctl.sent, contains(ControlAction.setChannelRole));
     expect(roleAngle(ChannelRole.surroundLeft), -110);
     expect(roleStyle(ChannelRole.center).short, 'C');
+  });
+
+  testWidgets('surround measurement: pick the front phones and a left phone; roles and volume trims follow',
+      (tester) async {
+    _phone(tester);
+    final base = _roomState();
+    final room = base.room!;
+    // True room (listener facing +y); the measurement only knows distances,
+    // so the published layout is rotated, mirrored and shifted.
+    final truth = {
+      'dev-me': (0.0, 0.0),
+      'fl': (-1.0, 1.732),
+      'fr': (1.0, 1.732),
+      'bl': (-1.691, -0.616),
+      'br': (1.691, -0.616),
+    };
+    const a = 70 * pi / 180;
+    final layout = SpeakerLayout(
+      id: 3,
+      listener: 'dev-me',
+      positions: {
+        for (final e in truth.entries)
+          e.key: (-(e.value.$1 * cos(a) - e.value.$2 * sin(a)) + 1, e.value.$1 * sin(a) + e.value.$2 * cos(a) - 2),
+      },
+      levelsDb: const {'dev-me': -3, 'fl': -20, 'fr': -24, 'bl': -18, 'br': -19},
+      residualM: 0.02,
+    );
+    final names = {'dev-me': 'My Phone', 'fl': 'Front L', 'fr': 'Front R', 'bl': 'Back L', 'br': 'Back R'};
+    final state = base.copyWith(
+      room: RoomState(
+        roomId: room.roomId,
+        roomName: room.roomName,
+        coordinatorId: room.coordinatorId,
+        version: room.version + 1,
+        timeline: room.timeline,
+        playlist: room.playlist,
+        layout: layout,
+        participants: [
+          for (final e in names.entries)
+            ParticipantSummary(
+                deviceId: e.key,
+                displayName: e.value,
+                role: e.key == 'dev-me' ? ParticipantRole.host : ParticipantRole.listener,
+                connection: ConnectionStatus.connected),
+        ],
+      ),
+    );
+    final ctl = _FakeRoomController(state);
+    await tester.pumpWidget(_wrap(Scaffold(body: SurroundOrientSheet(layout: layout)), _overrides(state, controller: ctl)));
+    await tester.pump();
+    expect(find.textContaining('Found 4 phones'), findsOneWidget);
+    expect(find.text('Use this layout'), findsNothing);
+    await tester.tap(find.widgetWithText(FilterChip, 'Front L').at(0));
+    await tester.tap(find.widgetWithText(FilterChip, 'Front R').at(0));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilterChip, 'Front L').at(1));
+    await tester.pump();
+    for (final badge in ['L', 'R', 'SL', 'SR']) {
+      expect(find.text(badge), findsWidgets, reason: badge);
+    }
+    expect(find.text('30° left, 2.0 m · volume -4 dB'), findsOneWidget);
+    expect(find.text('30° right, 2.0 m'), findsOneWidget);
+    expect(find.textContaining('110° right, 1.8 m · volume -8 dB'), findsOneWidget);
+    await tester.tap(find.text('Use this layout'));
+    await tester.pump();
+    expect(ctl.sent.where((x) => x == ControlAction.setChannelRole).length, 4);
+    // Trims down to the quietest front phone (Front R); rears 3 dB lower.
+    expect(ctl.sent.where((x) => x == ControlAction.deviceVolume).length, 3);
   });
 
   testWidgets('queue shows upload progress', (tester) async {

@@ -465,6 +465,62 @@ class IdentifyRequest {
   }
 }
 
+/// Result of a surround calibration: phone positions (m) in an arbitrary
+/// rotation with the [listener] somewhere in it (oriented on the listener's
+/// phone by tapping the front and the left phone, see calibration/layout.dart),
+/// click levels at the listener (dBFS) and the fit's RMS residual (m).
+class SpeakerLayout {
+  final int id;
+  final String listener;
+  final Map<String, (double, double)> positions;
+  final Map<String, double> levelsDb;
+  final double residualM;
+  const SpeakerLayout({
+    required this.id,
+    required this.listener,
+    required this.positions,
+    this.levelsDb = const {},
+    this.residualM = 0,
+  });
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'listener': listener,
+        'pos': {
+          for (final e in positions.entries) e.key: [_r(e.value.$1), _r(e.value.$2)]
+        },
+        if (levelsDb.isNotEmpty) 'lvl': {for (final e in levelsDb.entries) e.key: _r(e.value)},
+        'res': _r(residualM),
+      };
+
+  static double _r(double v) => (v * 1000).round() / 1000;
+
+  factory SpeakerLayout.fromJson(Map<String, Object?> j) {
+    final r = Reader(j, 'layout');
+    final pos = <String, (double, double)>{};
+    final raw = r.map('pos');
+    if (raw.length > 64) throw r.error('pos', 'too many devices');
+    raw.forEach((k, v) {
+      if (k.length > 64 || v is! List || v.length != 2 || v.any((e) => e is! num || !e.isFinite || e.abs() > 1000)) {
+        throw r.error('pos', 'invalid position for $k');
+      }
+      pos[k] = ((v[0] as num).toDouble(), (v[1] as num).toDouble());
+    });
+    final lvl = <String, double>{};
+    (r.optMap('lvl') ?? const {}).forEach((k, v) {
+      if (k.length > 64 || v is! num || !v.isFinite) throw r.error('lvl', 'invalid level for $k');
+      lvl[k] = v.toDouble();
+    });
+    return SpeakerLayout(
+      id: r.integer('id', min: 0),
+      listener: r.string('listener', maxLength: 64),
+      positions: pos,
+      levelsDb: lvl,
+      residualM: r.number('res', min: 0, max: 1000),
+    );
+  }
+}
+
 class RoomState {
   final String roomId;
   final String roomName;
@@ -495,6 +551,9 @@ class RoomState {
   /// Latest "identify this phone" request (see [IdentifyRequest]).
   final IdentifyRequest? identify;
 
+  /// Latest surround calibration result (see [SpeakerLayout]).
+  final SpeakerLayout? layout;
+
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -512,6 +571,7 @@ class RoomState {
     this.calibration,
     this.preferredCoordinator,
     this.identify,
+    this.layout,
   });
 
   TrackInfo? trackById(String? id) {
@@ -555,6 +615,7 @@ class RoomState {
     bool clearCalibration = false,
     String? preferredCoordinator,
     IdentifyRequest? identify,
+    SpeakerLayout? layout,
   }) =>
       RoomState(
         roomId: roomId,
@@ -573,6 +634,7 @@ class RoomState {
         calibration: clearCalibration ? null : (calibration ?? this.calibration),
         preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
         identify: identify ?? this.identify,
+        layout: layout ?? this.layout,
       );
 
   Map<String, Object?> toJson() => {
@@ -592,6 +654,7 @@ class RoomState {
         if (calibration != null) 'cal': calibration!.toJson(),
         if (preferredCoordinator != null) 'pref': preferredCoordinator,
         if (identify != null) 'ident': identify!.toJson(),
+        if (layout != null) 'layout': layout!.toJson(),
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -621,6 +684,7 @@ class RoomState {
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
       preferredCoordinator: r.optString('pref', maxLength: 64),
       identify: r.optMap('ident') == null ? null : IdentifyRequest.fromJson(r.optMap('ident')!),
+      layout: r.optMap('layout') == null ? null : SpeakerLayout.fromJson(r.optMap('layout')!),
     );
   }
 }

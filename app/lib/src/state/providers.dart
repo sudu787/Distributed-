@@ -61,6 +61,43 @@ class IdentityNotifier extends Notifier<DeviceIdentity> {
 
 final identityProvider = NotifierProvider<IdentityNotifier, DeviceIdentity>(IdentityNotifier.new);
 
+/// "Help measure the room": another phone's surround measurement may
+/// record ~30 s with this phone's microphone. Off by default; the recording
+/// never leaves the phone, only click times and levels are shared.
+class RoomMeasurementSetting extends Notifier<bool> {
+  static const key = 'roomMeasure';
+
+  @override
+  bool build() {
+    _load();
+    return false;
+  }
+
+  Future<void> _load() async {
+    try {
+      final v = await ref.read(appStoreProvider).setting(key);
+      if (v != null) state = v == '1';
+    } catch (_) {
+      // No store (tests): keep the default (off).
+    }
+  }
+
+  /// Turning it on asks for the microphone permission now, so the prompt
+  /// does not appear in the middle of someone else's measurement. Returns
+  /// the new value (still off when the permission was refused).
+  Future<bool> set(bool on) async {
+    if (on && !await ref.read(microphonePermissionProvider)()) on = false;
+    state = on;
+    await ref.read(appStoreProvider).saveSetting(key, on ? '1' : '0');
+    return on;
+  }
+}
+
+/// Asks for the microphone permission (Android); true when granted.
+final microphonePermissionProvider = Provider<Future<bool> Function()>((ref) => () async => true);
+
+final roomMeasurementProvider = NotifierProvider<RoomMeasurementSetting, bool>(RoomMeasurementSetting.new);
+
 /// The device's track library.
 class LibraryNotifier extends AsyncNotifier<List<LibraryTrack>> {
   @override

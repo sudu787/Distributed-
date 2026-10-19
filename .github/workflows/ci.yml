@@ -86,11 +86,17 @@ jobs:
       - name: Build release APK (debug-signed, for sideloading tests)
         working-directory: app
         run: flutter build apk --release
-      - name: APK signing certificate (must be the same in every build)
-        run: keytool -printcert -jarfile app/build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA256|Owner"
       - uses: actions/upload-artifact@v4
         with:
           name: syncsphere-apks
           path: |
             app/build/app/outputs/flutter-apk/app-debug.apk
             app/build/app/outputs/flutter-apk/app-release.apk
+      # The APK is signed with APK Signature Scheme v2/v3 only (no JAR
+      # signature), so keytool -printcert cannot read it; apksigner can. The
+      # digest must stay the committed dev key's, or phones cannot update.
+      - name: APK signing certificate (must be the same in every build)
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee cert.txt
+          grep -q "SHA-256 digest: 2ccdc35abf37151daada9696cca6c15899337ac18e2c2a899bfedda2cecdee4a" cert.txt

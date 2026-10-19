@@ -55,6 +55,11 @@ explicitly **not confidentiality**. The UI says to share the key only with peopl
 - **Microphone (acoustic calibration):** recording happens only on the listener's phone, only for the calibration
   segment (15–30 s), after an explicit confirmation and the Android permission prompt. The recording is analyzed on
   the phone and deleted; only per-click timing numbers (`cal.res`) are sent to the coordinator.
+- **Microphone (surround measurement):** a measurement started on one phone records on *other* phones only if each
+  owner turned on "Help measure the room" (off by default; turning it on asks for the Android permission). Otherwise
+  the phone declines without recording and tells its owner who asked. The same limits apply: one click sequence,
+  analyzed on the phone, only click times and levels (`cal.res`) are sent. A member with control rights can start
+  measurements repeatedly; each one is visible (the music pauses, Android shows the microphone indicator).
 
 - Device ids are random per installation, not hardware identifiers.
 - No data leaves the local network and nothing is sent to any server. There is no analytics.

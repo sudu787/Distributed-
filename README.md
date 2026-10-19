@@ -51,7 +51,10 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   (or **Identify**) to make it flash "LEFT"/"RIGHT" and vibrate, so you know which physical phone is which.
 - **Surround (5.1-style):** assign phones to front left/right, center and surround left/right (**Surround** on the
   Speakers tab). Stereo songs are upmixed: voices stay in front, room sound goes behind with a 15 ms Haas delay. 5.1
-  files play their real channels. See [docs/surround.md](docs/surround.md) for the research behind it.
+  files play their real channels. **Measure** has every phone listen to the others' clicks to find where they are
+  (only phones whose owner turned on "Help measure the room"); you tap the front and a left phone, and roles and
+  volumes are set for you. **Test sound** plays beeps on the left channel only, then the right only, to check who
+  plays what. See [docs/surround.md](docs/surround.md) for the research behind it.
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.

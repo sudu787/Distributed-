@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import java.nio.ByteBuffer
+import kotlin.math.roundToInt
 
 /**
  * Channel roles: each phone (usually one loudspeaker) plays one point of a
@@ -104,7 +105,8 @@ class ChannelRoleProcessor(private val role: String) : BaseAudioProcessor() {
                 var v = 0f
                 for (c in 0 until inChannels) v += frame[c] * m[c * 2 + o]
                 v = v.coerceIn(-1f, 1f)
-                if (isFloat) out.putFloat(v) else out.putShort((v * 32767f).toInt().toShort())
+                // ×32768 and rounding: a single routed channel comes out bit-exact.
+                if (isFloat) out.putFloat(v) else out.putShort((v * 32768f).roundToInt().coerceIn(-32768, 32767).toShort())
             }
         }
         inputBuffer.position(inputBuffer.limit())
