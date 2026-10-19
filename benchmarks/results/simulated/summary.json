@@ -3,7 +3,7 @@
   "suite": "full",
   "seed": 42,
   "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"linux_x64\"",
-  "generatedAt": "2026-10-15T18:18:32.328147Z",
+  "generatedAt": "2026-10-19T05:40:26.387993Z",
   "results": [
     {
       "scenario": "matrix-lan-ideal-n2",
@@ -72,7 +72,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 816,
+      "bytesPerDevPerS": 817,
       "failed": 0
     },
     {
@@ -142,7 +142,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 972,
+      "bytesPerDevPerS": 973,
       "failed": 0
     },
     {
@@ -212,7 +212,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1332,
+      "bytesPerDevPerS": 1333,
       "failed": 0
     },
     {
@@ -282,7 +282,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2169,
+      "bytesPerDevPerS": 2171,
       "failed": 0
     },
     {
@@ -352,7 +352,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 832,
+      "bytesPerDevPerS": 833,
       "failed": 0
     },
     {
@@ -422,7 +422,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 992,
+      "bytesPerDevPerS": 993,
       "failed": 0
     },
     {
@@ -492,7 +492,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1340,
+      "bytesPerDevPerS": 1341,
       "failed": 0
     },
     {
@@ -562,7 +562,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2190,
+      "bytesPerDevPerS": 2192,
       "failed": 0
     },
     {
@@ -632,7 +632,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 903,
+      "bytesPerDevPerS": 904,
       "failed": 0
     },
     {
@@ -702,7 +702,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1076,
+      "bytesPerDevPerS": 1077,
       "failed": 0
     },
     {
@@ -772,7 +772,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1437,
+      "bytesPerDevPerS": 1439,
       "failed": 0
     },
     {
@@ -842,7 +842,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2302,
+      "bytesPerDevPerS": 2304,
       "failed": 0
     },
     {
@@ -912,7 +912,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 901,
+      "bytesPerDevPerS": 902,
       "failed": 0
     },
     {
@@ -982,7 +982,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1081,
+      "bytesPerDevPerS": 1082,
       "failed": 0
     },
     {
@@ -1052,7 +1052,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1445,
+      "bytesPerDevPerS": 1446,
       "failed": 0
     },
     {
@@ -1122,7 +1122,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2314,
+      "bytesPerDevPerS": 2315,
       "failed": 0
     },
     {
@@ -1192,7 +1192,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 884,
+      "bytesPerDevPerS": 885,
       "failed": 0
     },
     {
@@ -1262,7 +1262,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1079,
+      "bytesPerDevPerS": 1080,
       "failed": 0
     },
     {
@@ -1332,7 +1332,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1433,
+      "bytesPerDevPerS": 1434,
       "failed": 0
     },
     {
@@ -1402,7 +1402,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 2305,
+      "bytesPerDevPerS": 2307,
       "failed": 0
     },
     {
@@ -1452,19 +1452,19 @@
       },
       "clockErrUs": {
         "n": 480,
-        "median": 602.0,
-        "p95": 1323.0,
+        "median": 612.0,
+        "p95": 1407.0,
         "p99": 2053.0,
         "max": 2168.0,
-        "mean": 633.0
+        "mean": 684.0
       },
       "clockUncUs": {
         "n": 480,
-        "median": 4158.0,
-        "p95": 5267.0,
+        "median": 4166.0,
+        "p95": 5234.0,
         "p99": 5591.0,
         "max": 5852.0,
-        "mean": 4311.0
+        "mean": 4286.0
       },
       "coverage": 1.0,
       "recovery": {
@@ -1477,7 +1477,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1348,
+      "bytesPerDevPerS": 1363,
       "failed": 0
     },
     {
@@ -1547,7 +1547,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 98,
+      "bytesPerDevPerS": 99,
       "failed": 2
     },
     {
@@ -1617,7 +1617,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1092,
+      "bytesPerDevPerS": 1095,
       "failed": 0,
       "failover": {
         "promoted": "device-2",
@@ -1649,6 +1649,454 @@
             "device": "device-2",
             "epoch": 3
           }
+        ]
+      }
+    },
+    {
+      "scenario": "detector-fixed-wifi-good-n4",
+      "n": 4,
+      "network": "wifi-good",
+      "durationS": 660,
+      "spreadSteady": {
+        "n": 13028,
+        "median": 5.67,
+        "p95": 7.6,
+        "p99": 8.3,
+        "max": 16.32,
+        "mean": 5.2
+      },
+      "spreadAll": {
+        "n": 13089,
+        "median": 5.67,
+        "p95": 7.67,
+        "p99": 9.62,
+        "max": 16.32,
+        "mean": 5.24
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 14.47,
+        "p95": 14.47,
+        "p99": 14.47,
+        "max": 14.47,
+        "mean": 14.47
+      },
+      "driftLastMinute": {
+        "n": 1160,
+        "median": 3.22,
+        "p95": 9.62,
+        "p99": 15.42,
+        "max": 16.32,
+        "mean": 4.22
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 600.0,
+        "p95": 600.0,
+        "p99": 600.0,
+        "max": 600.0,
+        "mean": 600.0
+      },
+      "clockErrUs": {
+        "n": 1936,
+        "median": 91.0,
+        "p95": 343.0,
+        "p99": 606.0,
+        "max": 1262.0,
+        "mean": 124.0
+      },
+      "clockUncUs": {
+        "n": 1936,
+        "median": 2304.0,
+        "p95": 2861.0,
+        "p99": 3498.0,
+        "max": 4045.0,
+        "mean": 2370.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 1,
+        "median": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "max": 50.0,
+        "mean": 50.0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 973,
+      "failed": 0,
+      "failover": {
+        "promoted": "device-1",
+        "promotedAfterKillMs": 2009,
+        "allSurvivorsAudibleAfterKillMs": 2050,
+        "spreadMs_15sAfterPromotion": {
+          "n": 300,
+          "median": 3.24,
+          "p95": 15.06,
+          "p99": 16.12,
+          "max": 16.32,
+          "mean": 5.51
+        },
+        "finalEpoch": 2,
+        "finalCoordinator": "device-1",
+        "history": [
+          {
+            "trueMs": 0,
+            "device": "device-0",
+            "epoch": 1
+          },
+          {
+            "trueMs": 622809,
+            "device": "device-1",
+            "epoch": 2
+          }
+        ]
+      },
+      "failureDetection": {
+        "detector": "fixed",
+        "memberFailures": 1,
+        "sessionReconnects": 4,
+        "hostChanges": 1,
+        "linkStalls": 0,
+        "guestFailureDetectedAfterMs": [
+          8200
+        ]
+      }
+    },
+    {
+      "scenario": "detector-fixed-wifi-flaky-n4",
+      "n": 4,
+      "network": "wifi-flaky",
+      "durationS": 660,
+      "spreadSteady": {
+        "n": 13025,
+        "median": 4.05,
+        "p95": 7.95,
+        "p99": 8.07,
+        "max": 13.79,
+        "mean": 4.77
+      },
+      "spreadAll": {
+        "n": 13086,
+        "median": 4.09,
+        "p95": 7.96,
+        "p99": 8.08,
+        "max": 14.85,
+        "mean": 4.82
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 14.81,
+        "p95": 14.81,
+        "p99": 14.81,
+        "max": 14.81,
+        "mean": 14.81
+      },
+      "driftLastMinute": {
+        "n": 1160,
+        "median": 3.69,
+        "p95": 5.6,
+        "p99": 8.47,
+        "max": 9.12,
+        "mean": 3.99
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 720.0,
+        "p95": 720.0,
+        "p99": 720.0,
+        "max": 720.0,
+        "mean": 720.0
+      },
+      "clockErrUs": {
+        "n": 1936,
+        "median": 557.0,
+        "p95": 1310.0,
+        "p99": 2091.0,
+        "max": 3355.0,
+        "mean": 612.0
+      },
+      "clockUncUs": {
+        "n": 1936,
+        "median": 4049.0,
+        "p95": 5083.0,
+        "p99": 6045.0,
+        "max": 7252.0,
+        "mean": 4150.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 1,
+        "median": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "max": 50.0,
+        "mean": 50.0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 1196,
+      "failed": 0,
+      "failover": {
+        "promoted": "device-1",
+        "promotedAfterKillMs": 2023,
+        "allSurvivorsAudibleAfterKillMs": 2050,
+        "spreadMs_15sAfterPromotion": {
+          "n": 300,
+          "median": 4.12,
+          "p95": 8.29,
+          "p99": 8.97,
+          "max": 9.12,
+          "mean": 4.28
+        },
+        "finalEpoch": 2,
+        "finalCoordinator": "device-1",
+        "history": [
+          {
+            "trueMs": 0,
+            "device": "device-0",
+            "epoch": 1
+          },
+          {
+            "trueMs": 622823,
+            "device": "device-1",
+            "epoch": 2
+          }
+        ]
+      },
+      "failureDetection": {
+        "detector": "fixed",
+        "memberFailures": 1,
+        "sessionReconnects": 4,
+        "hostChanges": 1,
+        "linkStalls": 42,
+        "guestFailureDetectedAfterMs": [
+          8200
+        ]
+      }
+    },
+    {
+      "scenario": "detector-phi-wifi-good-n4",
+      "n": 4,
+      "network": "wifi-good",
+      "durationS": 660,
+      "spreadSteady": {
+        "n": 13028,
+        "median": 5.67,
+        "p95": 7.6,
+        "p99": 8.3,
+        "max": 16.32,
+        "mean": 5.2
+      },
+      "spreadAll": {
+        "n": 13089,
+        "median": 5.67,
+        "p95": 7.68,
+        "p99": 9.76,
+        "max": 16.32,
+        "mean": 5.25
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 14.47,
+        "p95": 14.47,
+        "p99": 14.47,
+        "max": 14.47,
+        "mean": 14.47
+      },
+      "driftLastMinute": {
+        "n": 1160,
+        "median": 3.21,
+        "p95": 9.9,
+        "p99": 15.42,
+        "max": 16.32,
+        "mean": 4.25
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 600.0,
+        "p95": 600.0,
+        "p99": 600.0,
+        "max": 600.0,
+        "mean": 600.0
+      },
+      "clockErrUs": {
+        "n": 1936,
+        "median": 86.0,
+        "p95": 326.0,
+        "p99": 487.0,
+        "max": 1124.0,
+        "mean": 117.0
+      },
+      "clockUncUs": {
+        "n": 1936,
+        "median": 2310.0,
+        "p95": 2849.0,
+        "p99": 3545.0,
+        "max": 4358.0,
+        "mean": 2374.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 1,
+        "median": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "max": 50.0,
+        "mean": 50.0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 971,
+      "failed": 0,
+      "failover": {
+        "promoted": "device-1",
+        "promotedAfterKillMs": 2005,
+        "allSurvivorsAudibleAfterKillMs": 2050,
+        "spreadMs_15sAfterPromotion": {
+          "n": 300,
+          "median": 3.23,
+          "p95": 15.06,
+          "p99": 16.12,
+          "max": 16.32,
+          "mean": 5.45
+        },
+        "finalEpoch": 2,
+        "finalCoordinator": "device-1",
+        "history": [
+          {
+            "trueMs": 0,
+            "device": "device-0",
+            "epoch": 1
+          },
+          {
+            "trueMs": 622805,
+            "device": "device-1",
+            "epoch": 2
+          }
+        ]
+      },
+      "failureDetection": {
+        "detector": "phi",
+        "memberFailures": 1,
+        "sessionReconnects": 4,
+        "hostChanges": 1,
+        "linkStalls": 0,
+        "guestFailureDetectedAfterMs": [
+          4200
+        ]
+      }
+    },
+    {
+      "scenario": "detector-phi-wifi-flaky-n4",
+      "n": 4,
+      "network": "wifi-flaky",
+      "durationS": 660,
+      "spreadSteady": {
+        "n": 13025,
+        "median": 3.5,
+        "p95": 7.95,
+        "p99": 8.06,
+        "max": 13.79,
+        "mean": 4.54
+      },
+      "spreadAll": {
+        "n": 13086,
+        "median": 3.52,
+        "p95": 7.96,
+        "p99": 8.08,
+        "max": 14.85,
+        "mean": 4.59
+      },
+      "startSkew": {
+        "n": 1,
+        "median": 14.81,
+        "p95": 14.81,
+        "p99": 14.81,
+        "max": 14.81,
+        "mean": 14.81
+      },
+      "driftLastMinute": {
+        "n": 1160,
+        "median": 1.23,
+        "p95": 6.04,
+        "p99": 6.09,
+        "max": 6.1,
+        "mean": 3.09
+      },
+      "commandLatency": {
+        "n": 1,
+        "median": 720.0,
+        "p95": 720.0,
+        "p99": 720.0,
+        "max": 720.0,
+        "mean": 720.0
+      },
+      "clockErrUs": {
+        "n": 1936,
+        "median": 591.0,
+        "p95": 1328.0,
+        "p99": 1840.0,
+        "max": 3265.0,
+        "mean": 644.0
+      },
+      "clockUncUs": {
+        "n": 1936,
+        "median": 4151.0,
+        "p95": 5049.0,
+        "p99": 5708.0,
+        "max": 7401.0,
+        "mean": 4246.0
+      },
+      "coverage": 1.0,
+      "recovery": {
+        "n": 1,
+        "median": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "max": 50.0,
+        "mean": 50.0
+      },
+      "resyncs": 0,
+      "stalls": 0,
+      "bytesPerDevPerS": 1126,
+      "failed": 0,
+      "failover": {
+        "promoted": "device-1",
+        "promotedAfterKillMs": 2020,
+        "allSurvivorsAudibleAfterKillMs": 2050,
+        "spreadMs_15sAfterPromotion": {
+          "n": 300,
+          "median": 2.72,
+          "p95": 4.74,
+          "p99": 4.76,
+          "max": 4.89,
+          "mean": 2.77
+        },
+        "finalEpoch": 2,
+        "finalCoordinator": "device-1",
+        "history": [
+          {
+            "trueMs": 0,
+            "device": "device-0",
+            "epoch": 1
+          },
+          {
+            "trueMs": 622820,
+            "device": "device-1",
+            "epoch": 2
+          }
+        ]
+      },
+      "failureDetection": {
+        "detector": "phi",
+        "memberFailures": 2,
+        "sessionReconnects": 5,
+        "hostChanges": 1,
+        "linkStalls": 48,
+        "guestFailureDetectedAfterMs": [
+          5200
         ]
       }
     },
@@ -1719,7 +2167,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1117,
+      "bytesPerDevPerS": 1121,
       "failed": 0,
       "failover": {
         "promoted": "device-1",
@@ -1900,7 +2348,7 @@
       },
       "resyncs": 1,
       "stalls": 0,
-      "bytesPerDevPerS": 794,
+      "bytesPerDevPerS": 796,
       "failed": 0
     },
     {
@@ -1970,7 +2418,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 768,
+      "bytesPerDevPerS": 770,
       "failed": 0
     },
     {
@@ -2040,7 +2488,7 @@
       },
       "resyncs": 1,
       "stalls": 0,
-      "bytesPerDevPerS": 989,
+      "bytesPerDevPerS": 992,
       "failed": 0,
       "listenerSpread": {
         "n": 628,
@@ -2118,7 +2566,7 @@
       },
       "resyncs": 1,
       "stalls": 0,
-      "bytesPerDevPerS": 1294,
+      "bytesPerDevPerS": 1296,
       "failed": 0,
       "listenerSpread": {
         "n": 628,
@@ -2196,7 +2644,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 1048,
+      "bytesPerDevPerS": 1051,
       "failed": 0
     },
     {
@@ -2336,7 +2784,7 @@
       },
       "resyncs": 0,
       "stalls": 0,
-      "bytesPerDevPerS": 833,
+      "bytesPerDevPerS": 834,
       "failed": 0
     }
   ]

@@ -167,6 +167,7 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
 - [Roadmap: failover, precision backend, calibration, spatial audio](docs/roadmap.md)
 - [Troubleshooting: discovery and Android audio](docs/troubleshooting.md)
 - [Comparison with similar apps (AmpMe, SoundSeeder, Auracast, …) and a fair test plan](docs/comparison.md)
+- [Research: next distributed-systems techniques, Spotify/YouTube/DRM findings, open music sources](docs/research-next.md)
 
 ## Known blockers and next steps
 

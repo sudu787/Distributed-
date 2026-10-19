@@ -54,7 +54,9 @@ class Fixture {
         joinKey: kKey,
         kdfIterations: 5,
         defaultRole: defaultRole,
-        config: SyncConfig(membership: MembershipConfig(maxParticipants: maxParticipants)),
+        // Raw test clients send no heartbeats: keep the fixed-timeout detector.
+        config: SyncConfig(
+            membership: MembershipConfig(maxParticipants: maxParticipants, detector: FailureDetectorKind.fixed)),
         preferredCoordinator: preferredCoordinator,
         coordinatorEpoch: epoch,
       ),

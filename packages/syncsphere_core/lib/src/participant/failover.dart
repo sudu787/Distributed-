@@ -58,9 +58,32 @@ class FailoverPolicy {
   /// Connection attempts to a candidate before moving to the next one.
   final int attemptsPerCandidate;
 
+  /// When the link was declared dead because the coordinator went *silent*
+  /// (no FIN/RST, e.g. Wi-Fi blip or power-save stall), failover also waits
+  /// until nothing has been heard for this long. The failure detector can
+  /// react within ~4 s on a steady link (reconnect attempts start at once),
+  /// but promoting a successor is disruptive and there is no quorum to stop
+  /// a briefly cut-off phone from promoting itself, so a short blip must not
+  /// be enough. A closed connection without `bye` (the host app died) keeps
+  /// the fast path ([failoverAfter]).
+  final Duration silenceBeforeFailover;
+
+  /// Before promoting *itself*, a device that is not first in the
+  /// succession order and could not reach any successor ahead of it waits
+  /// this much longer (on top of [silenceBeforeFailover]) and goes round
+  /// again, coordinator first. If nobody ahead answers, the likeliest
+  /// explanation is that *this* phone is cut off (a Wi-Fi blip), not that
+  /// the host and every phone ahead died together; promoting would create a
+  /// second coordinator that later pulls the whole room over to the phone
+  /// that dropped out. It also avoids two successors promoting at once when
+  /// the one ahead is merely a little slower.
+  final Duration isolationHoldOff;
+
   const FailoverPolicy({
     this.failoverAfter = const Duration(seconds: 2),
     this.attemptsPerCandidate = 3,
+    this.silenceBeforeFailover = const Duration(seconds: 8),
+    this.isolationHoldOff = const Duration(seconds: 20),
   });
 }
 

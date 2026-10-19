@@ -81,6 +81,25 @@ List<Scenario> _suite(String name, int seed) {
       ],
       seed: seed,
     ),
+    // Failure detectors compared (fixed 3 s / 8 s timeouts vs φ accrual):
+    // 10 min on Wi-Fi with 2–5 s stalls about every 40 s per phone (false
+    // alarms), then a guest cut off for 10 s and the host killed (detection).
+    for (final kind in FailureDetectorKind.values)
+      for (final net in [NetworkCondition.wifiGood, NetworkCondition.wifiFlaky])
+        Scenario(
+          name: 'detector-${kind.name}-${net.name}-n4',
+          participants: 4,
+          network: net,
+          duration: const Duration(minutes: 11),
+          failover: true,
+          config: SyncConfig(membership: MembershipConfig(detector: kind)),
+          actions: const [
+            ScheduledAction(Duration(seconds: 3), PlayAction()),
+            ScheduledAction(Duration(seconds: 560), PartitionAction(3, Duration(seconds: 10))),
+            ScheduledAction(Duration(seconds: 620), KillCoordinatorAction()),
+          ],
+          seed: seed,
+        ),
     // Host dies, the next phone takes over, the host comes back and gets the
     // role back after 10 s of stable connection (planned handover).
     Scenario(
@@ -237,6 +256,7 @@ Future<void> main(List<String> argv) async {
       'bytesPerDevPerS': m['networkBytesPerDevicePerSecond'],
       'failed': (m['failedSessions'] as List).length,
       if (m['failover'] != null) 'failover': m['failover'],
+      if (sc.name.startsWith('detector-')) 'failureDetection': m['failureDetection'],
       if (m['listenerSpreadMs_steady'] != null) 'listenerSpread': q('listenerSpreadMs_steady'),
     });
     stdout.writeln('${sc.name.padRight(36)} spread p50/p95/max '
@@ -295,6 +315,24 @@ String _markdown(Map<String, Object?> meta, List<Map<String, Object?>> rows) {
       b.writeln('| ${r['scenario']} | ${f['finalEpoch']} | ${f['finalCoordinator']} | ${f['promoted']} | ${f['promotedAfterKillMs']} | '
           '${_f(sp, 'p95')} / ${_f(sp, 'max')} | ${f['handbackDevice'] ?? '–'} | '
           '${hb == null ? '–' : '${_f(hb, 'p95')} / ${_f(hb, 'max')}'} |');
+    }
+  }
+  final fd = rows.where((r) => r['failureDetection'] != null).toList();
+  if (fd.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('## Failure detectors: fixed timeouts vs φ accrual (SIMULATED)')
+      ..writeln()
+      ..writeln('10 min of playback (no device fails), then a guest is cut off for 10 s and the host is killed. '
+          '"False" counts are before any real failure.')
+      ..writeln()
+      ..writeln('| scenario | link stalls | member links closed | session reconnects | host changes | guest cut off → declared failed (ms) | host killed → successor (ms) |')
+      ..writeln('|---|---|---|---|---|---|---|');
+    for (final r in fd) {
+      final f = r['failureDetection'] as Map<String, Object?>;
+      final fo = r['failover'] as Map<String, Object?>?;
+      b.writeln('| ${r['scenario']} | ${f['linkStalls']} | ${f['memberFailures']} | ${f['sessionReconnects']} | '
+          '${f['hostChanges']} | ${(f['guestFailureDetectedAfterMs'] as List).join(', ')} | ${fo?['promotedAfterKillMs'] ?? '–'} |');
     }
   }
   final ls = rows.where((r) => r['listenerSpread'] != null).toList();

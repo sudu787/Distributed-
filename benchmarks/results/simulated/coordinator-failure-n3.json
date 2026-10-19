@@ -112,12 +112,12 @@
     },
     "unrecoveredDevices": [],
     "resyncSeeks": 0,
-    "rateChanges": 18,
+    "rateChanges": 14,
     "bufferingStalls": 0,
     "playCalls": 3,
     "networkFrames": 498,
-    "networkBytes": 105996,
-    "networkBytesPerDevicePerSecond": 98,
+    "networkBytes": 106479,
+    "networkBytesPerDevicePerSecond": 99,
     "failedSessions": [
       "device-1",
       "device-2"
@@ -125,11 +125,19 @@
     "killedDevices": [
       "device-0"
     ],
+    "failureDetection": {
+      "detector": "phi",
+      "memberFailures": 0,
+      "sessionReconnects": 0,
+      "hostChanges": 0,
+      "linkStalls": 0,
+      "guestFailureDetectedAfterMs": []
+    },
     "failureReasons": {
       "device-1": "unreachable: coordinator unreachable; the room may need to be recreated",
       "device-2": "unreachable: coordinator unreachable; the room may need to be recreated"
     },
     "coordinatorWarnings": 1
   },
-  "wallClockMs": 43
+  "wallClockMs": 42
 }

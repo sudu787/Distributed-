@@ -120,13 +120,21 @@
     "bufferingStalls": 0,
     "playCalls": 9,
     "networkFrames": 2822,
-    "networkBytes": 655234,
-    "networkBytesPerDevicePerSecond": 1092,
+    "networkBytes": 657166,
+    "networkBytesPerDevicePerSecond": 1095,
     "failedSessions": [],
     "killedDevices": [
       "device-0",
       "device-1"
     ],
+    "failureDetection": {
+      "detector": "phi",
+      "memberFailures": 0,
+      "sessionReconnects": 7,
+      "hostChanges": 2,
+      "linkStalls": 0,
+      "guestFailureDetectedAfterMs": []
+    },
     "failover": {
       "promoted": "device-2",
       "promotedAfterKillMs": 2014,
@@ -162,5 +170,5 @@
     "failureReasons": {},
     "coordinatorWarnings": 1
   },
-  "wallClockMs": 216
+  "wallClockMs": 225
 }

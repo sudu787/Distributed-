@@ -207,24 +207,36 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 | | `rateEnterThresholdUs` / `rateExitThresholdUs` | 8000 / 3000 |
 | | `seekThresholdUs`, `seekThresholdNoRateUs`, `seekConfirmations`, `seekCooldownMs` | 250000, 45000, 2, 5000 |
 | | `correctionHorizonMs`, `maxRateDelta`, `minRateStep` | 4000, 0.015, 0.0005 |
-| membership | `heartbeatIntervalMs`, `suspectAfterMs`, `failAfterMs`, `reconnectGraceMs` | 1000, 3000, 8000, 90000 |
+| membership | `heartbeatIntervalMs`, `detector` (`phi`\|`fixed`), `suspectPhi`, `failPhi`, `minSuspectAfterMs`, `minFailAfterMs`, `maxFailAfterMs`, `acceptablePauseMs`, `minStdDevMs`, `suspectAfterMs`, `failAfterMs` (fixed detector), `reconnectGraceMs` | 1000, phi, 8, 12, 2000, 4000, 16000, 500, 200, 3000, 8000, 90000 |
 | | `maxParticipants`, `handshakeTimeoutMs`, `maxAuthFailures`, `authWindowMs` | 16, 5000, 5, 60000 |
 
 ## 7. Liveness, failure and reconnection
 
-- Both sides send `hb` every second. Any frame resets the silence timer.
-- **Coordinator → participant:** silent for 3 s → `suspect` (shown in the UI); 8 s → link closed and the member marked
+- Both sides send `hb` every second. Any frame proves liveness.
+- **Failure detection** (both directions) uses a φ accrual detector per link ([research-next.md](research-next.md)):
+  - it learns the heartbeat inter-arrival distribution (last 300) and computes φ = −log₁₀ P(a heartbeat this late);
+  - *suspect* at φ ≥ 8, *failed* at φ ≥ 12;
+  - never suspect before 2 s, never failed before 4 s or before 1.25 × the longest gap the link survived in the window;
+  - always failed at 16 s.
+
+  `detector: fixed` restores the old 3 s / 8 s timeouts.
+- **Coordinator → participant:** *suspect* is shown in the UI. *Failed* closes the link and marks the member
   `disconnected`. The member's slot (role, volume) is kept for the 90 s reconnect grace, then removed. Readiness
   barriers stop waiting for disconnected members.
-- **Participant → coordinator:** silent for 3 s → "coordinator not responding"; 8 s → close and reconnect with
-  exponential backoff (0.5 s × 2ⁿ, capped at 8 s, ±20 % jitter, at most 30 attempts). After that the session fails with
-  `unreachable: … the room may need to be recreated`.
+- **Participant → coordinator:**
+  - *Suspect* shows "coordinator not responding".
+  - *Failed* closes and reconnects with exponential backoff (0.5 s × 2ⁿ, capped at 8 s, ±20 % jitter, at most 30
+    attempts). After that the session fails with `unreachable: … the room may need to be recreated`.
+  - When the link died by silence, failover additionally waits until nothing was heard for 8 s.
 - While disconnected, a participant keeps playing the last timeline and refuses local control requests
   (`not_connected`). On reconnect it re-authenticates, receives the current state in `welcome`, runs a new clock burst,
   and joins the timeline. It emits `evt{rejoined}` once its measured error is back inside the correction band.
 - A newer authenticated link for the same device supersedes the older one; frames from the old link are dropped.
 
 ### Failover (succession)
+
+*Isolation hold-off:* a phone that is next to promote itself but reached none of the successors ahead of it waits 20 s
+longer and retries from the coordinator, because it is most likely the one cut off.
 
 1. **Candidates.** `successionOrder(state)` lists the participants with `canHost` and an `ep` whose `conn` is not
    `disconnected`, excluding `coord`: the `pref` device (original host) first when eligible, then list (admission)

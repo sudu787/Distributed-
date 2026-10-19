@@ -71,10 +71,25 @@ class NetworkCondition {
     LinkProfile(base: Duration(milliseconds: 6), jitterMean: Duration(milliseconds: 9), lossRate: 0.01, spikeRate: 0.05, spike: Duration(milliseconds: 150)),
   );
 
+  /// Typical Wi-Fi plus a 2–5 s stall about every 40 s per phone (roaming,
+  /// deep power save). Used to compare failure detectors.
+  static const wifiFlaky = NetworkCondition(
+    'wifi-flaky',
+    LinkProfile(
+        base: Duration(milliseconds: 3),
+        jitterMean: Duration(milliseconds: 5),
+        lossRate: 0.005,
+        spikeRate: 0.02,
+        spike: Duration(milliseconds: 60),
+        stallMeanGap: Duration(seconds: 40)),
+    LinkProfile(base: Duration(milliseconds: 4), jitterMean: Duration(milliseconds: 8), lossRate: 0.005, spikeRate: 0.04, spike: Duration(milliseconds: 100)),
+  );
+
+  /// The benchmark matrix (wifi-flaky is only used by the detector scenarios).
   static const all = [lanIdeal, wifiGood, wifiTypical, wifiCongested, hotspot];
 
   static NetworkCondition byName(String n) =>
-      all.firstWhere((c) => c.name == n, orElse: () => throw ArgumentError('unknown network $n'));
+      [...all, wifiFlaky].firstWhere((c) => c.name == n, orElse: () => throw ArgumentError('unknown network $n'));
 }
 
 sealed class SimAction {
@@ -349,6 +364,18 @@ class SimulationRunner {
       {'trueMs': 0, 'device': 'device-0', 'epoch': 1}
     ];
     final simEvents = <Map<String, Object?>>[];
+    // Failure-detector bookkeeping: coordinator-side member failures (true
+    // time, device) and partition starts (true time, device).
+    final memberFailures = <(int, String)>[];
+    final partitionStarts = <(int, String)>[];
+    final logSubs = <StreamSubscription<SyncEvent>>[];
+    EventLog watchCoordinatorLog(EventLog l) {
+      logSubs.add(l.stream.listen((e) {
+        if (e.category == 'member.failed') memberFailures.add((trueNow(), e.data['device'] as String? ?? '?'));
+      }));
+      return l;
+    }
+
     void logEvent(String what, [Map<String, Object?> data = const {}]) {
       simEvents.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'event': what, ...data});
     }
@@ -382,7 +409,7 @@ class SimulationRunner {
                     handback: sc.handback,
                   ),
                   clock: clk,
-                  log: EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer),
+                  log: watchCoordinatorLog(EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer)),
                   restoredState: req.state,
                 );
                 final previous = coordinator;
@@ -468,6 +495,7 @@ class SimulationRunner {
 
     // Record every playing timeline and the true time it was published.
     watchTimelines(coordinator, hostClock);
+    watchCoordinatorLog(coordLog);
     final dead = <String>{};
 
     for (final d in devices) {
@@ -604,6 +632,7 @@ class SimulationRunner {
           }));
         case PartitionAction(:final participant, :final duration):
           final d = devices[participant];
+          partitionStarts.add((trueNow(), d.id));
           d.link.partition();
           Timer(duration, () {
             d.link.heal();
@@ -639,6 +668,9 @@ class SimulationRunner {
 
     sampler.cancel();
     for (final sub in tlSubs) {
+      unawaited(sub.cancel());
+    }
+    for (final sub in logSubs) {
       unawaited(sub.cancel());
     }
     clockSampler.cancel();
@@ -791,6 +823,20 @@ class SimulationRunner {
           : (net.bytesSent / sc.participants / max(1, sc.duration.inSeconds)).round(),
       'failedSessions': failedSessions,
       'killedDevices': dead.toList(),
+      'failureDetection': {
+        'detector': sc.config.membership.detector.name,
+        // Coordinator closed a member's link for silence (false positives
+        // when no device actually died).
+        'memberFailures': memberFailures.length,
+        'sessionReconnects': devices.fold<int>(0, (n, d) => n + d.session.reconnectCount),
+        'hostChanges': coordinatorHistory.length - 1,
+        'linkStalls': devices.fold<int>(0, (n, d) => n + d.link.stalls.where((w) => w.$1 < trueNow()).length),
+        // Time from a guest being cut off until the coordinator declared it failed.
+        'guestFailureDetectedAfterMs': [
+          for (final (at, dev) in partitionStarts)
+            ...memberFailures.where((f) => f.$2 == dev && f.$1 >= at).take(1).map((f) => (f.$1 - at) ~/ 1000),
+        ],
+      },
       if (promotedDevice != null) 'failover': {
         'promoted': promotedDevice,
         'promotedAfterKillMs': (promotedAtUs! - killedAtUs!) ~/ 1000,

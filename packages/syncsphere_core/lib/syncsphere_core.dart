@@ -15,6 +15,7 @@ export 'src/transport/memory_transport.dart';
 export 'src/transport/websocket_transport.dart';
 export 'src/observability/event_log.dart';
 export 'src/observability/stats.dart';
+export 'src/coordinator/failure_detector.dart';
 export 'src/coordinator/lead_time.dart';
 export 'src/coordinator/membership.dart';
 export 'src/coordinator/room_coordinator.dart';

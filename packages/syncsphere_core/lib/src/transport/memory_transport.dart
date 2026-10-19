@@ -34,6 +34,15 @@ class LinkProfile {
   final double spikeRate;
   final Duration spike;
 
+  /// Link-wide stalls (roaming, deep power save, interference): on average
+  /// one every [stallMeanGap] (exponential gaps; null = never), each
+  /// lasting between [stallMin] and [stallMax]. Nothing is delivered in
+  /// either direction during a stall; frames are held, not lost (TCP).
+  /// Read from the uplink profile.
+  final Duration? stallMeanGap;
+  final Duration stallMin;
+  final Duration stallMax;
+
   const LinkProfile({
     this.base = const Duration(milliseconds: 1),
     this.jitterMean = Duration.zero,
@@ -41,6 +50,9 @@ class LinkProfile {
     this.rto = const Duration(milliseconds: 200),
     this.spikeRate = 0,
     this.spike = const Duration(milliseconds: 100),
+    this.stallMeanGap,
+    this.stallMin = const Duration(seconds: 2),
+    this.stallMax = const Duration(seconds: 5),
   });
 
   int sampleMicros(Random rnd) {
@@ -71,6 +83,32 @@ class Link {
   Link({required this.uplink, required this.downlink});
 
   bool get partitioned => _partitioned;
+
+  // Stall windows [start, end) in µs, generated lazily and in order.
+  final List<(int, int)> _stalls = [];
+  int _stallHorizonUs = 0;
+
+  /// The time a frame due at [atUs] is actually delivered: the end of the
+  /// stall covering [atUs], if any.
+  int deliveryTime(int atUs, Random rnd) {
+    final gap = uplink.stallMeanGap;
+    if (gap == null) return atUs;
+    if (_stalls.isEmpty && _stallHorizonUs == 0) _stallHorizonUs = atUs; // first frame: start the schedule now
+    while (_stallHorizonUs <= atUs) {
+      final start = _stallHorizonUs + (-log(1 - rnd.nextDouble()) * gap.inMicroseconds).round();
+      final len = uplink.stallMin.inMicroseconds +
+          (rnd.nextDouble() * (uplink.stallMax.inMicroseconds - uplink.stallMin.inMicroseconds)).round();
+      _stalls.add((start, start + len));
+      _stallHorizonUs = start + len;
+    }
+    for (final (s, e) in _stalls) {
+      if (atUs >= s && atUs < e) return e;
+    }
+    return atUs;
+  }
+
+  /// Stall windows generated so far (for reports).
+  List<(int, int)> get stalls => List.unmodifiable(_stalls);
 
   void partition() => _partitioned = true;
 
@@ -130,7 +168,7 @@ class MemoryConnection implements MessageConnection {
       return;
     }
     final now = _net.clock.nowMicros();
-    var at = now + _profile.sampleMicros(_net.random);
+    var at = link.deliveryTime(now + _profile.sampleMicros(_net.random), _net.random);
     if (at < _out.lastDeliveryUs) at = _out.lastDeliveryUs; // keep order
     _out.lastDeliveryUs = at;
     Timer(Duration(microseconds: at - now), () => _peer._deliver(frame));

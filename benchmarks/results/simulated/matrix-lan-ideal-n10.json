@@ -119,12 +119,20 @@
     "bufferingStalls": 0,
     "playCalls": 40,
     "networkFrames": 5642,
-    "networkBytes": 2603210,
-    "networkBytesPerDevicePerSecond": 2169,
+    "networkBytes": 2604820,
+    "networkBytesPerDevicePerSecond": 2171,
     "failedSessions": [],
     "killedDevices": [],
+    "failureDetection": {
+      "detector": "phi",
+      "memberFailures": 0,
+      "sessionReconnects": 0,
+      "hostChanges": 0,
+      "linkStalls": 0,
+      "guestFailureDetectedAfterMs": []
+    },
     "failureReasons": {},
     "coordinatorWarnings": 0
   },
-  "wallClockMs": 754
+  "wallClockMs": 918
 }

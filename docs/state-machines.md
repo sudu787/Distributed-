@@ -10,7 +10,7 @@ stateDiagram-v2
   authenticating --> syncing: welcome verified
   authenticating --> failed: reject auth_failed / wrong_room / unsupported_version
   syncing --> joined: ≥3 clock samples accepted
-  joined --> reconnecting: link closed / coordinator silent ≥ failAfter
+  joined --> reconnecting: link closed / failure detector: failed
   syncing --> reconnecting: link closed
   connecting --> reconnecting: connect error
   reconnecting --> connecting: backoff elapsed

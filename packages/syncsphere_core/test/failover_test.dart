@@ -165,6 +165,25 @@ void main() {
     expect(history.last['trueMs'] as int, greaterThanOrEqualTo(62000));
   });
 
+  test('a guest cut off for 15 s does not make itself host (isolation hold-off)', () {
+    final r = SimulationRunner(const Scenario(
+      name: 'isolated-guest',
+      participants: 4,
+      network: NetworkCondition.wifiGood,
+      duration: Duration(seconds: 60),
+      failover: true,
+      actions: [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 20), PartitionAction(3, Duration(seconds: 15))),
+      ],
+    )).run();
+    final fd = r.metrics['failureDetection'] as Map<String, Object?>;
+    expect(fd['hostChanges'], 0, reason: 'the cut-off phone must not start a second coordinator');
+    expect(r.metrics['failover'], isNull);
+    expect(r.metrics['failedSessions'], isEmpty);
+    expect(fd['guestFailureDetectedAfterMs'], [inInclusiveRange(4000, 5000)], reason: 'phi detector on a steady link');
+  });
+
   test('without failover enabled the room reports that it must be recreated', () {
     final r = SimulationRunner(const Scenario(
       name: 'no-failover',

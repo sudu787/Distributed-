@@ -605,7 +605,7 @@ class RoomCoordinator {
   void _onActiveMessage(_PeerLink link, Member m, Message msg, int t2) {
     switch (msg) {
       case HeartbeatMsg():
-        break;
+        _members.heartbeat(m, t2);
       case ClockRequestMsg(:final id, :final t1):
         final t3 = clock.nowMicros();
         _send(link, ClockResponseMsg(id, t1, t2, t3));

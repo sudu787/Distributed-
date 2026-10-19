@@ -93,19 +93,19 @@
     },
     "clockOffsetErrorUs": {
       "n": 480,
-      "median": 602.0,
-      "p95": 1323.0,
+      "median": 612.0,
+      "p95": 1407.0,
       "p99": 2053.0,
       "max": 2168.0,
-      "mean": 633.0
+      "mean": 684.0
     },
     "clockUncertaintyUs": {
       "n": 480,
-      "median": 4158.0,
-      "p95": 5267.0,
+      "median": 4166.0,
+      "p95": 5234.0,
       "p99": 5591.0,
       "max": 5852.0,
-      "mean": 4311.0
+      "mean": 4286.0
     },
     "clockUncertaintyCoverage": 1.0,
     "recoveryAfterPartitionMs": {
@@ -121,13 +121,24 @@
     "rateChanges": 20,
     "bufferingStalls": 0,
     "playCalls": 5,
-    "networkFrames": 3295,
-    "networkBytes": 808827,
-    "networkBytesPerDevicePerSecond": 1348,
+    "networkFrames": 3317,
+    "networkBytes": 817523,
+    "networkBytesPerDevicePerSecond": 1363,
     "failedSessions": [],
     "killedDevices": [],
+    "failureDetection": {
+      "detector": "phi",
+      "memberFailures": 2,
+      "sessionReconnects": 2,
+      "hostChanges": 0,
+      "linkStalls": 0,
+      "guestFailureDetectedAfterMs": [
+        4000,
+        4000
+      ]
+    },
     "failureReasons": {},
-    "coordinatorWarnings": 3
+    "coordinatorWarnings": 4
   },
-  "wallClockMs": 251
+  "wallClockMs": 310
 }
