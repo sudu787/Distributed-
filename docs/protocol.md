@@ -132,7 +132,8 @@ All positions and times are integer microseconds. Every reported timing value is
 - Participants may carry `peer` (`host:port` of the device's peer file server, from `caps.pport` and the address the
   coordinator sees).
 - `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
-- Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`); `cal` is the
+- Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`, `center`,
+  `surroundLeft`, `surroundRight`; rear surround roles play 15 ms later, see [surround.md](surround.md)); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
 - `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its click track id is
   `sha256("syncsphere-calibration-v1|<id>|<listener>")`; `trackById` resolves it to a synthetic track that every device
@@ -165,7 +166,7 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `setRole` | `dev`, `role` | Promote or demote | never |
 | `setRepeat` | `mode` `off\|all\|one` | Playlist repeat | never |
 | `setShuffle` | `val` (≥0.5 = on) | Shuffle order (reshuffled when turned on or when the playlist changes) | never |
-| `setChannelRole` | `mode` `stereo\|left\|right\|mono`, `dev?` | Channel role. A device may always change its own; others need control rights. | never |
+| `setChannelRole` | `mode` `stereo\|left\|right\|mono\|center\|surroundLeft\|surroundRight`, `dev?` | Channel role. A device may always change its own; others need control rights. Surround roles (`center`, `surroundLeft`, `surroundRight`) are refused with `invalid` unless every connected member sent `caps.sur: true`. | never |
 | `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
 | `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
 | `identify` | `dev?` | That phone flashes its channel and vibrates for 3 s (state `ident: {dev, seq, until}`). Own phone always; others need control rights. | never |

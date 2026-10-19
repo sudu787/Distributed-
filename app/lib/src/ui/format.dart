@@ -76,6 +76,9 @@ String channelLabel(ChannelRole c) => switch (c) {
       ChannelRole.left => 'Left channel',
       ChannelRole.right => 'Right channel',
       ChannelRole.mono => 'Mono mix',
+      ChannelRole.center => 'Center',
+      ChannelRole.surroundLeft => 'Surround left',
+      ChannelRole.surroundRight => 'Surround right',
     };
 
 /// Room-wide sync summary from the coordinator's diagnostics (estimate).

@@ -729,6 +729,11 @@ class RoomCoordinator {
         final t = _members.byDevice(target);
         final role = _parseEnum(ChannelRole.values, c.mode);
         if (t == null || role == null) return const ControlOutcome.fail(ControlError.invalid);
+        // Older apps cannot parse the surround roles: only allow them when
+        // every connected phone understands them.
+        if (role.isSurroundRole && _members.connected.any((x) => !x.caps.surround)) {
+          return const ControlOutcome.fail(ControlError.invalid);
+        }
         t.channel = role;
         log.info('member.channel', '${t.displayName} plays ${role.name}');
         _mutate(_state);

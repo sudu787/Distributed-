@@ -402,14 +402,31 @@ class DeviceSettingsSheet extends ConsumerWidget {
           const SizedBox(height: 6),
           SegmentedButton<ChannelRole>(
             showSelectedIcon: false,
+            emptySelectionAllowed: true,
             segments: const [
               ButtonSegment(value: ChannelRole.stereo, label: Text('Stereo')),
               ButtonSegment(value: ChannelRole.left, label: Text('Left')),
               ButtonSegment(value: ChannelRole.right, label: Text('Right')),
               ButtonSegment(value: ChannelRole.mono, label: Text('Mono')),
             ],
-            selected: {p.channel},
-            onSelectionChanged: (v) => run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId)),
+            selected: {if (!p.channel.isSurroundRole) p.channel},
+            onSelectionChanged: (v) {
+              if (v.isNotEmpty) run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId));
+            },
+          ),
+          const SizedBox(height: 6),
+          SegmentedButton<ChannelRole>(
+            showSelectedIcon: false,
+            emptySelectionAllowed: true,
+            segments: const [
+              ButtonSegment(value: ChannelRole.center, label: Text('Center')),
+              ButtonSegment(value: ChannelRole.surroundLeft, label: Text('Surround L')),
+              ButtonSegment(value: ChannelRole.surroundRight, label: Text('Surround R')),
+            ],
+            selected: {if (p.channel.isSurroundRole) p.channel},
+            onSelectionChanged: (v) {
+              if (v.isNotEmpty) run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId));
+            },
           ),
           Padding(
             padding: const EdgeInsets.only(top: 4),

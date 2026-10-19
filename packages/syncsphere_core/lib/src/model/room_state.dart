@@ -304,7 +304,36 @@ class TrackInfo {
 /// What a device plays from a stereo source (experimental distributed
 /// stereo). Phones usually have one loudspeaker, so `left`/`right` route a
 /// single source channel to all of the device's outputs.
-enum ChannelRole { stereo, left, right, mono }
+/// What a phone plays. Phones usually have one loudspeaker, so each phone
+/// is one point of a stereo or surround layout.
+///
+/// [center], [surroundLeft] and [surroundRight] are the surround roles
+/// (ITU-R BS.775 5.1 positions: 0°, ±110°). For stereo music they are
+/// upmixed with a passive matrix (center = 0.707·(L+R), surround =
+/// 0.707·(L−R) at −3 dB and [kSurroundDelayUs] later); 5.1 files play the
+/// matching channel. Only used when every phone supports them
+/// ([DeviceCapabilities.surround]).
+enum ChannelRole {
+  stereo,
+  left,
+  right,
+  mono,
+  center,
+  surroundLeft,
+  surroundRight;
+
+  bool get isSurroundRole => this == center || this == surroundLeft || this == surroundRight;
+  bool get isRear => this == surroundLeft || this == surroundRight;
+}
+
+/// Extra delay of the rear (surround) phones. Matrix decoders delay the
+/// surround channels by 15–20 ms so the precedence (Haas) effect keeps
+/// sounds anchored at the front; it also makes the rear phones tolerant of
+/// millisecond-level sync error.
+const kSurroundDelayUs = 15000;
+
+/// Delay a phone adds because of its role (µs).
+int roleDelayUs(ChannelRole r) => r.isRear ? kSurroundDelayUs : 0;
 
 /// Room-wide repeat behaviour at the end of a track.
 enum PlaylistRepeat { off, all, one }

@@ -111,6 +111,9 @@ class DeviceCapabilities {
   /// Port of the device's peer file server (phone-to-phone sharing).
   final int? peerPort;
 
+  /// Understands the surround channel roles (center, surround left/right).
+  final bool surround;
+
   const DeviceCapabilities({
     required this.rateControl,
     required this.backend,
@@ -120,6 +123,7 @@ class DeviceCapabilities {
     this.microphone = false,
     this.calibrationUs = 0,
     this.peerPort,
+    this.surround = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -131,6 +135,7 @@ class DeviceCapabilities {
         if (microphone) 'mic': true,
         if (calibrationUs != 0) 'cal': calibrationUs,
         if (peerPort != null) 'pport': peerPort,
+        if (surround) 'sur': true,
       };
 
   factory DeviceCapabilities.fromJson(Map<String, Object?> j) {
@@ -144,6 +149,7 @@ class DeviceCapabilities {
       microphone: r.optBoolean('mic') ?? false,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000) ?? 0,
       peerPort: r.optInteger('pport', min: 1, max: 65535),
+      surround: r.optBoolean('sur') ?? false,
     );
   }
 }

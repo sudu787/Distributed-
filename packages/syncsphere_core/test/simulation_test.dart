@@ -158,4 +158,44 @@ void main() {
     expect((steady['median'] as num).toDouble(), lessThan(8));
     expect((steady['max'] as num).toDouble(), lessThan(30));
   });
+
+  test('a rear surround phone plays 15 ms after the front phones (Haas delay), and stays there', () {
+    final r = SimulationRunner(const Scenario(
+      name: 'surround-delay',
+      participants: 3,
+      network: NetworkCondition.wifiGood,
+      duration: Duration(seconds: 50),
+      actions: [
+        ScheduledAction(Duration(seconds: 3), PlayAction()),
+        ScheduledAction(Duration(seconds: 15), ChannelRoleAction(2, ChannelRole.surroundLeft)),
+      ],
+    )).run();
+    expect(r.metrics['activeChannelRoles'], ['stereo', 'stereo', 'surroundLeft']);
+    // Shift of the rear phone relative to a front phone, before vs. after
+    // the role change (ground truth, SIMULATED). Each phone may sit
+    // anywhere inside the drift controller's ±8 ms band, so the 15 ms
+    // target shows up as roughly 7–23 ms, still inside the Haas window.
+    int medianDiff(int fromS, int toS) {
+      final d = <int>[];
+      for (final smp in r.samples) {
+        final t = (smp.trueUs - r.samples.first.trueUs) ~/ 1000000;
+        final front = smp.errors['device-0'], rear = smp.errors['device-2'];
+        if (front == null || rear == null || t < fromS || t >= toS) continue;
+        d.add(front - rear);
+      }
+      d.sort();
+      return d[d.length ~/ 2];
+    }
+
+    final shiftMs = (medianDiff(30, 50) - medianDiff(2, 11)) / 1000;
+    expect(shiftMs, inInclusiveRange(7, 23), reason: 'rear phone moved ~15 ms later on purpose (got $shiftMs ms)');
+  });
+
+  test('surround roles are refused while a phone without surround support is in the room', () {
+    final s = const DeviceCapabilities(rateControl: true, backend: 'x', surround: true);
+    expect(DeviceCapabilities.fromJson(s.toJson()).surround, isTrue);
+    expect(DeviceCapabilities.fromJson(const DeviceCapabilities(rateControl: true, backend: 'x').toJson()).surround, isFalse);
+    expect(roleDelayUs(ChannelRole.surroundRight), kSurroundDelayUs);
+    expect(roleDelayUs(ChannelRole.center), 0);
+  });
 }

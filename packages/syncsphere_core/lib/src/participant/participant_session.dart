@@ -542,6 +542,7 @@ class ParticipantSession implements ClockSource {
         microphone: options.recorder != null,
         calibrationUs: engine.outputCalibrationUs,
         peerPort: options.peerPort,
+        surround: true,
       ),
     ));
   }

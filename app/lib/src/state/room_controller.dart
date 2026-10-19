@@ -453,6 +453,8 @@ String describeControlError(String? error, ControlAction action) => switch (erro
       ControlError.invalid when action == ControlAction.calibrate =>
         'Calibration needs microphone access and at least one connected device.',
       ControlError.invalid when action == ControlAction.addTrack => 'The host could not add that song.',
+      ControlError.invalid when action == ControlAction.setChannelRole =>
+        'Surround needs the latest SyncSphere on every phone in the party.',
       ControlError.staleVersion => 'The room changed meanwhile — try again.',
       ControlError.notConnected => 'Not connected to the room coordinator.',
       ControlError.nothingToPlay => 'Nothing to play.',

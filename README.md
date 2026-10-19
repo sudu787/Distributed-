@@ -49,6 +49,9 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
 - **Channel roles with a speaker map:** each phone plays stereo, left, right or a mono mix (Media3 channel mixing). The
   Speakers tab shows a top-down map of who plays what, and **Stereo pair** sets up left and right in one tap. Tap a phone
   (or **Identify**) to make it flash "LEFT"/"RIGHT" and vibrate, so you know which physical phone is which.
+- **Surround (5.1-style):** assign phones to front left/right, center and surround left/right (**Surround** on the
+  Speakers tab). Stereo songs are upmixed: voices stay in front, room sound goes behind with a 15 ms Haas delay. 5.1
+  files play their real channels. See [docs/surround.md](docs/surround.md) for the research behind it.
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
@@ -180,6 +183,7 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
 - [Roadmap: failover, precision backend, calibration, spatial audio](docs/roadmap.md)
 - [Troubleshooting: discovery and Android audio](docs/troubleshooting.md)
 - [Comparison with similar apps (AmpMe, SoundSeeder, Auracast, …) and a fair test plan](docs/comparison.md)
+- [Surround sound with phones: research and design](docs/surround.md)
 - [Research: next distributed-systems techniques, Spotify/YouTube/DRM findings, open music sources](docs/research-next.md)
 
 ## Known blockers and next steps

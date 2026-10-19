@@ -251,6 +251,32 @@ void main() {
     });
   });
 
+  test('surround roles only when every connected phone supports them', () {
+    fakeAsync((fa) {
+      const sur = DeviceCapabilities(rateControl: true, backend: 'test', surround: true);
+      final f = Fixture(fa, defaultRole: ParticipantRole.controller);
+      final (host, _) = f.join('host-device', caps: sur);
+      f.join('phone-1', caps: sur);
+      final (old, _) = f.join('old-phone'); // an older app: no surround support
+      host.send(const ControlMsg(
+          requestId: 1, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'surroundLeft'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(host.last<ControlAckMsg>()!.error, ControlError.invalid);
+      host.send(const ControlMsg(
+          requestId: 2, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'left'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(host.last<ControlAckMsg>()!.accepted, isTrue, reason: 'stereo roles still work');
+      old.conn.close();
+      fa.elapse(const Duration(seconds: 1));
+      host.send(const ControlMsg(
+          requestId: 3, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'surroundLeft'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(host.last<ControlAckMsg>()!.accepted, isTrue);
+      expect(f.coord.state.participant('phone-1')!.channel, ChannelRole.surroundLeft);
+      expect(RoomState.fromJson(f.coord.state.toJson()).participant('phone-1')!.channel, ChannelRole.surroundLeft);
+    });
+  });
+
   test('readiness barrier then future scheduled start', () {
     fakeAsync((fa) {
       final f = Fixture(fa, defaultRole: ParticipantRole.controller);

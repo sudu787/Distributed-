@@ -32,7 +32,7 @@ import io.flutter.plugin.common.PluginRegistry
  *   acquireNetworkLocks → Map, releaseNetworkLocks
  *   keepScreenOn {on}
  *   probe {uri} → {durationMs, title, artist, album, mimeType}
- *   setChannelRole {role} ("stereo" | "left" | "right" | "mono")
+ *   setChannelRole {role} ("stereo" | "left" | "right" | "mono" | "center" | "surroundLeft" | "surroundRight")
  *   requestPermission {name} ("microphone" | "notifications") → Boolean
  *   recordMic {startAtNanos, durationMs, sampleRate} → {path, sampleRate, firstSampleNanos, timestampSource}
  *   startService {title, text, playing}, updateService {…}, stopService
@@ -168,7 +168,9 @@ class SyncsphereAudioPlugin :
                 }
                 "setChannelRole" -> {
                     val role = call.argument<String>("role") ?: throw IllegalArgumentException("role missing")
-                    if (role !in setOf("stereo", "left", "right", "mono")) throw IllegalArgumentException("unknown role $role")
+                    if (role !in setOf("stereo", "left", "right", "mono", "center", "surroundLeft", "surroundRight")) {
+                        throw IllegalArgumentException("unknown role $role")
+                    }
                     engine().setChannelRole(role)
                     result.success(null)
                 }

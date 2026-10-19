@@ -135,6 +135,9 @@ class PlaybackEngine {
   bool _disposed = false;
   ChannelRole _channel = ChannelRole.stereo;
 
+  /// Role last applied to the backend (applies to newly prepared segments).
+  ChannelRole _backendRole = ChannelRole.stereo;
+
   /// Learned output start latency (µs): play calls are issued this much
   /// before the target audible time.
   int startLatencyUs;
@@ -359,7 +362,7 @@ class PlaybackEngine {
         if (identical(_standby, seg)) _standby = null;
         return;
       }
-      await backend.prepare(segmentId: seg.id, source: src, positionUs: p.positionUs);
+      await _prepareSegment(seg.id, src, p.positionUs, p.trackId);
       if (!identical(_standby, seg)) return; // superseded meanwhile
       if (!_stillRelevant(p.generation)) {
         _standby = null;
@@ -455,7 +458,7 @@ class PlaybackEngine {
         _markAvailable(track.id);
         if (_state?.timeline.generation != tl.generation) return;
         if (!resync) _standby = seg;
-        await backend.prepare(segmentId: seg.id, source: src, positionUs: pos);
+        await _prepareSegment(seg.id, src, pos, tl.trackId!);
         _updatePrepareEstimate(clock.nowMicros() - t0);
         if (_state?.timeline.generation != tl.generation || !_state!.timeline.isPlaying) return;
         seg.status = SegmentStatus.prepared;
@@ -570,7 +573,7 @@ class PlaybackEngine {
     }
     final coordT = est.toRemote(sample.atLocalUs);
     final expected = tl.expectedPositionAt(coordT);
-    final rendered = sample.positionUs - outputCalibrationUs;
+    final rendered = sample.positionUs - _effectiveOffsetUs(tl.trackId);
     final error = rendered - expected;
     _lastErrorUs = error;
 
@@ -629,7 +632,7 @@ class PlaybackEngine {
     _lastReportAtUs = now;
     final coordT = est.toRemote(sample.atLocalUs);
     final expected = tl.expectedPositionAt(coordT);
-    final rendered = sample.positionUs - outputCalibrationUs;
+    final rendered = sample.positionUs - _effectiveOffsetUs(tl.trackId);
     send(SyncReportMsg(
       generation: tl.generation,
       coordTimeUs: coordT,
@@ -681,13 +684,37 @@ class PlaybackEngine {
 
   // ------------------------------------------------------------ misc
 
+  /// Output offset for [trackId]: the calibration minus this phone's role
+  /// delay (rear surround phones play [kSurroundDelayUs] later). The
+  /// calibration clicks themselves are played without the role delay, or
+  /// calibration would measure it and cancel it.
+  int _effectiveOffsetUs(String? trackId) {
+    final cal = _state?.isCalibrationTrack(trackId) ?? false;
+    return outputCalibrationUs - (cal ? 0 : roleDelayUs(_channel));
+  }
+
+  /// Prepares a native segment with the right channel role: calibration
+  /// clicks always play unmixed (a surround matrix would cancel a mono
+  /// click), music plays this phone's role.
+  Future<void> _prepareSegment(int segmentId, TrackSource src, int positionUs, String trackId) async {
+    final role = (_state?.isCalibrationTrack(trackId) ?? false) ? ChannelRole.stereo : _channel;
+    if (role != _backendRole) {
+      await backend.setChannelRole(role);
+      _backendRole = role;
+    }
+    await backend.prepare(segmentId: segmentId, source: src, positionUs: positionUs);
+  }
+
   void _applyVolume(RoomState s) {
     final me = s.participant(deviceId);
     final v = (s.masterVolume * (me?.volume ?? 1.0)).clamp(0.0, 1.0);
     unawaited(backend.setVolume(v).catchError((Object e) => _fail('setVolume failed: $e')));
     final ch = me?.channel ?? ChannelRole.stereo;
     if (ch != _channel) {
+      // Like a calibration change: a role delay of Δ moves play calls by Δ.
+      startLatencyUs = (startLatencyUs + roleDelayUs(_channel) - roleDelayUs(ch)).clamp(-500000, 1000000);
       _channel = ch;
+      _backendRole = ch;
       log.info('engine.channel', 'channel role → ${ch.name}');
       // The role is baked into newly prepared native players, so switch to a
       // fresh segment now (scheduled like a drift resync) rather than waiting

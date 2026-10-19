@@ -22,6 +22,7 @@ import 'package:syncsphere/src/ui/player_screen.dart';
 import 'package:syncsphere/src/ui/queue_view.dart';
 import 'package:syncsphere/src/ui/widgets.dart';
 import 'package:syncsphere/src/ui/room_screen.dart';
+import 'package:syncsphere/src/ui/speaker_layout.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 import 'dart:io';
 
@@ -270,6 +271,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('LEFT'), findsNothing, reason: 'closes by itself');
+  });
+
+  testWidgets('surround setup assigns positions; surround roles appear on the map', (tester) async {
+    _phone(tester);
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const Scaffold(body: SurroundSetupSheet()), _overrides(_roomState(), controller: ctl)));
+    await tester.pump();
+    expect(find.text('Center (in front of you)'), findsOneWidget);
+    // Kitchen becomes the surround-left phone.
+    final kitchenChips = find.widgetWithText(ChoiceChip, 'Kitchen');
+    await tester.tap(kitchenChips.at(3));
+    await tester.pump();
+    await tester.tap(find.text('Use this layout'));
+    await tester.pump();
+    expect(ctl.sent, contains(ControlAction.setChannelRole));
+    expect(roleAngle(ChannelRole.surroundLeft), -110);
+    expect(roleStyle(ChannelRole.center).short, 'C');
   });
 
   testWidgets('queue shows upload progress', (tester) async {

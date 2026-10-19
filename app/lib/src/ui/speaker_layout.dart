@@ -16,13 +16,20 @@ import 'widgets.dart';
       ChannelRole.right => (short: 'R', long: 'Right', color: const Color(0xFFE53935)),
       ChannelRole.mono => (short: 'M', long: 'Mono', color: const Color(0xFF757575)),
       ChannelRole.stereo => (short: 'L+R', long: 'Stereo', color: const Color(0xFF43A047)),
+      ChannelRole.center => (short: 'C', long: 'Center', color: const Color(0xFFFB8C00)),
+      ChannelRole.surroundLeft => (short: 'SL', long: 'Surround left', color: const Color(0xFF8E24AA)),
+      ChannelRole.surroundRight => (short: 'SR', long: 'Surround right', color: const Color(0xFFD81B60)),
     };
 
 /// Where a role sits around the listener (degrees, 0 = straight ahead,
 /// negative = left), or null for roles that play everything.
+/// Angles follow ITU-R BS.775 (5.1): C 0°, L/R ±30°, surrounds ±110°.
 double? roleAngle(ChannelRole r) => switch (r) {
       ChannelRole.left => -30,
       ChannelRole.right => 30,
+      ChannelRole.center => 0,
+      ChannelRole.surroundLeft => -110,
+      ChannelRole.surroundRight => 110,
       _ => null,
     };
 
@@ -78,13 +85,19 @@ class SpeakerLayoutCard extends ConsumerWidget {
           const SizedBox(height: 8),
           if (placed.isNotEmpty)
             SizedBox(
-              height: 170,
+              height: 230,
               child: LayoutBuilder(builder: (context, c) {
-                final w = c.maxWidth, h = 170.0;
-                final center = Offset(w / 2, h - 28);
-                final radius = min(w / 2 - 40, h - 60);
+                final w = c.maxWidth, h = 230.0;
+                final center = Offset(w / 2, h / 2 + 6);
+                final radius = min(w / 2 - 44, h / 2 - 34);
                 return Stack(children: [
-                  Positioned.fill(child: CustomPaint(painter: _ArcPainter(center, radius, Theme.of(context).dividerColor))),
+                  Positioned.fill(child: CustomPaint(painter: _RoomPainter(center, radius, Theme.of(context).dividerColor))),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    child: Text('front', textAlign: TextAlign.center, style: t.labelSmall),
+                  ),
                   Positioned(
                     left: center.dx - 18,
                     top: center.dy - 14,
@@ -99,7 +112,7 @@ class SpeakerLayoutCard extends ConsumerWidget {
                       return Positioned(
                         key: ValueKey('spk-$i'),
                         left: pos.dx - 40,
-                        top: pos.dy - 26,
+                        top: pos.dy - 22,
                         width: 80,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(8),
@@ -145,6 +158,17 @@ class SpeakerLayoutCard extends ConsumerWidget {
                   }
                 },
               ),
+            if (s.canControl && live.length >= 3)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.surround_sound),
+                label: const Text('Surround'),
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  showDragHandle: true,
+                  isScrollControlled: true,
+                  builder: (_) => const SurroundSetupSheet(),
+                ),
+              ),
             if (s.canControl && live.length >= 2)
               FilledButton.tonalIcon(
                 icon: const Icon(Icons.speaker_group_outlined),
@@ -164,11 +188,12 @@ class SpeakerLayoutCard extends ConsumerWidget {
   }
 }
 
-class _ArcPainter extends CustomPainter {
+/// The circle of speaker positions around the listener.
+class _RoomPainter extends CustomPainter {
   final Offset center;
   final double radius;
   final Color color;
-  _ArcPainter(this.center, this.radius, this.color);
+  _RoomPainter(this.center, this.radius, this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -176,11 +201,13 @@ class _ArcPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius), pi + pi / 6, pi * 2 / 3, false, p);
+    canvas.drawCircle(center, radius, p);
+    // Facing direction.
+    canvas.drawLine(center + Offset(0, -radius * 0.35), center + Offset(0, -radius * 0.8), p);
   }
 
   @override
-  bool shouldRepaint(_ArcPainter old) => old.center != center || old.radius != radius || old.color != color;
+  bool shouldRepaint(_RoomPainter old) => old.center != center || old.radius != radius || old.color != color;
 }
 
 /// Pick the left and the right phone in one go; phones previously on
@@ -210,7 +237,7 @@ class _StereoPairSheetState extends ConsumerState<StereoPairSheet> {
     Widget picker(String label, ChannelRole role, String? value, void Function(String) pick) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [ChannelBadge(role), const SizedBox(width: 8), Text(label, style: t.titleSmall)]),
+            Row(children: [ChannelBadge(role), const SizedBox(width: 8), Expanded(child: Text(label, style: t.titleSmall))]),
             const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 4, children: [
               for (final p in live)
@@ -308,7 +335,12 @@ Future<void> showIdentifyOverlay(BuildContext context, WidgetRef ref, ChannelRol
               Text(name, style: const TextStyle(color: Colors.white, fontSize: 22)),
               const SizedBox(height: 4),
               Text(
-                role == ChannelRole.stereo || role == ChannelRole.mono ? 'This phone plays the full song' : 'This phone plays the ${st.long.toLowerCase()} channel',
+                switch (role) {
+                  ChannelRole.stereo || ChannelRole.mono => 'This phone plays the full song',
+                  ChannelRole.center || ChannelRole.surroundLeft || ChannelRole.surroundRight =>
+                    'This phone is the ${st.long.toLowerCase()} speaker',
+                  _ => 'This phone plays the ${st.long.toLowerCase()} channel',
+                },
                 style: const TextStyle(color: Colors.white70),
               ),
             ]),
@@ -318,4 +350,96 @@ Future<void> showIdentifyOverlay(BuildContext context, WidgetRef ref, ChannelRol
     ),
   );
   open = false;
+}
+
+/// Assign phones to 5.1 positions (front left/right, center, surround
+/// left/right). Unassigned phones keep playing the full song.
+class SurroundSetupSheet extends ConsumerStatefulWidget {
+  const SurroundSetupSheet({super.key});
+
+  @override
+  ConsumerState<SurroundSetupSheet> createState() => _SurroundSetupSheetState();
+}
+
+class _SurroundSetupSheetState extends ConsumerState<SurroundSetupSheet> {
+  static const positions = [
+    (ChannelRole.left, 'Front left'),
+    (ChannelRole.right, 'Front right'),
+    (ChannelRole.center, 'Center (in front of you)'),
+    (ChannelRole.surroundLeft, 'Surround left (beside/behind you)'),
+    (ChannelRole.surroundRight, 'Surround right (beside/behind you)'),
+  ];
+  Map<String, ChannelRole>? _pick;
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final room = ref.watch(roomControllerProvider).room;
+    final me = ref.watch(identityProvider).deviceId;
+    if (room == null) return const SizedBox.shrink();
+    final live = room.participants.where((p) => p.connection != ConnectionStatus.disconnected).toList();
+    _pick ??= {for (final p in live) if (roleAngle(p.channel) != null) p.deviceId: p.channel};
+    final t = Theme.of(context).textTheme;
+    final ctl = ref.read(roomControllerProvider.notifier);
+    String name(ParticipantSummary p) => p.deviceId == me ? '${p.displayName} (you)' : p.displayName;
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Surround', style: t.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            'Place phones around where you sit: two in front (left and right), one in the middle in front, and two '
+            'beside or slightly behind you. Stereo songs are spread out automatically (voices in front, room sound '
+            'behind); 5.1 files play their real channels. Tap a name twice to unassign it.',
+            style: t.bodySmall,
+          ),
+          for (final (role, label) in positions) ...[
+            const SizedBox(height: 14),
+            Row(children: [ChannelBadge(role), const SizedBox(width: 8), Expanded(child: Text(label, style: t.titleSmall))]),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final p in live)
+                ChoiceChip(
+                  label: Text(name(p)),
+                  selected: _pick![p.deviceId] == role,
+                  onSelected: (_) => setState(() {
+                    if (_pick![p.deviceId] == role) {
+                      _pick!.remove(p.deviceId);
+                    } else {
+                      _pick![p.deviceId] = role;
+                    }
+                  }),
+                ),
+            ]),
+          ],
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: _busy
+                ? null
+                : () async {
+                    setState(() => _busy = true);
+                    String? err;
+                    for (final p in live) {
+                      final want = _pick![p.deviceId] ?? (roleAngle(p.channel) != null ? ChannelRole.stereo : p.channel);
+                      if (want != p.channel) {
+                        err ??= await ctl.setChannelRole(want, deviceId: p.deviceId == me ? null : p.deviceId);
+                      }
+                    }
+                    if (!context.mounted) return;
+                    haptic(ref, err == null ? Haptic.action : Haptic.alert);
+                    Navigator.pop(context);
+                    showMessage(
+                      context,
+                      err ?? 'Surround is set. Now stand at your seat and use "Calibrate to this spot" for the best result.',
+                      error: err != null,
+                    );
+                  },
+            child: const Text('Use this layout'),
+          ),
+        ]),
+      ),
+    );
+  }
 }
