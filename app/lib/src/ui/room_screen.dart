@@ -11,6 +11,7 @@ import '../state/room_controller.dart';
 import 'diagnostics_screen.dart';
 import 'format.dart';
 import 'haptics.dart';
+import 'now_playing_bar.dart';
 import 'player_screen.dart';
 import 'queue_view.dart';
 import 'speaker_layout.dart';
@@ -128,25 +129,48 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         ),
         body: room == null
             ? const Center(child: CircularProgressIndicator())
-            : switch (_tab) {
-                0 => const NowPlayingView(),
-                1 => const QueueView(),
-                _ => const SpeakersView(),
-              },
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (i) => setState(() => _tab = i),
-          destinations: const [
-            NavigationDestination(
-                icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
-            NavigationDestination(
-                icon: Icon(Icons.queue_music_outlined), selectedIcon: Icon(Icons.queue_music), label: 'Queue'),
-            NavigationDestination(
-                icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
-          ],
-        ),
+            : AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: KeyedSubtree(
+                  key: ValueKey(_tab),
+                  child: switch (_tab) {
+                    0 => NowPlayingView(onOpenQueue: () => _select(1)),
+                    1 => const QueueView(),
+                    _ => const SpeakersView(),
+                  },
+                ),
+              ),
+        bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+          // What is playing, with controls, wherever you are in the room.
+          if (room != null && _tab != 0) NowPlayingBar(onOpen: () => _select(0)),
+          NavigationBar(
+            selectedIndex: _tab,
+            onDestinationSelected: _select,
+            destinations: [
+              const NavigationDestination(
+                  icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
+              NavigationDestination(
+                icon: Badge.count(
+                  count: room?.playlist.length ?? 0,
+                  isLabelVisible: (room?.playlist.length ?? 0) > 0,
+                  child: const Icon(Icons.queue_music_outlined),
+                ),
+                selectedIcon: const Icon(Icons.queue_music),
+                label: 'Queue',
+              ),
+              const NavigationDestination(
+                  icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
+            ],
+          ),
+        ]),
       ),
     );
+  }
+
+  void _select(int tab) {
+    if (tab == _tab) return;
+    haptic(ref, Haptic.tap);
+    setState(() => _tab = tab);
   }
 
   /// Back button in a party: never drop out of the party by accident.

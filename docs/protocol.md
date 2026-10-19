@@ -90,7 +90,7 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `clk.res` | S→C | `{id, t1, t2, t3}` | `t2` is stamped before parsing, `t3` just before sending |
 | `state` | S→C | `{state}` | Full authoritative snapshot (§4) |
 | `ready` | C→S | `{gen, track, ok, err?, lat, rtt, unc}` | Result of preparing pending segment `gen`. `lat` = start-latency compensation (µs), `rtt` = clock RTT p95 (µs), `unc` = clock uncertainty (µs). `err` ∈ `missing_track`, `hash_mismatch`, `download_failed`, `decode_error`, `prepare_error`, `too_large`. |
-| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?, mode?, off?}` | Control request (§5). `mode` ≤16 chars, `off` signed µs within ±1 000 000. |
+| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?, mode?, off?, info?, to?}` | Control request (§5). `mode` ≤16 chars, `off` signed µs within ±1 000 000, `to` a playlist index. |
 | `ctl.ack` | S→C | `{rid, ok, err?, ver}` | Result. `ver` = state version after applying it. |
 | `rep` | C→S | `{gen, at, pos, exp, err, rate, buf, off, unc, rtt, mode, ps}` | Sync report: coordinator-domain measurement time, rendered and expected position, error = pos − exp (µs), current rate, buffered µs, clock offset and uncertainty, RTT p95, correction mode (`idle|waiting|inSync|rateCorrecting|resyncing`), player state |
 | `evt` | C→S | `{kind, gen, detail?, data}` | `started` (data: `startErrorUs`, `playCallLateUs`, `latencyCompUs`), `lateJoin` (`lateUs`), `resync` (`posUs`), `stall`, `rejoined` (`recoveryUs`, `errorUs`), `error` |
@@ -132,6 +132,8 @@ All positions and times are integer microseconds. Every reported timing value is
 - Participants may carry `peer` (`host:port` of the device's peer file server, from `caps.pport` and the address the
   coordinator sees).
 - `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
+- `nxt` (optional) is the track that plays after the current one, in play order (it follows shuffle and repeat). It is
+  absent when nothing is loaded or at the end of the playlist.
 - Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`, `center`,
   `surroundLeft`, `surroundRight`; rear surround roles play 15 ms later, see [surround.md](surround.md)); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
@@ -175,6 +177,8 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `calibrate` | `mode?` (`surround`) | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. With `mode: surround`, every connected phone with `caps.mic` records too (§5.2); needs at least two. | — |
 | `identify` | `dev?` | That phone flashes its channel and vibrates for 3 s (state `ident: {dev, seq, until}`). Own phone always; others need control rights. | never |
 | `addTrack` | `info` (track object, §4) | Appends a song. Needs control rights, and the coordinator must already have the file (uploaded with `PUT /uploads/<id>`, §8, or in its library); otherwise `invalid`. Idempotent. | never |
+| `removeTrack` | `track` | Removes the song. Removing the song that is playing (or about to start) moves on to the next song in play order, paused if it was paused; with nothing left it stops (idle). If auto-advance was preparing the removed song, the current song keeps playing and the following one is prepared instead. Refused with `busy` for the song a running calibration will restore. | never |
+| `moveTrack` | `track`, `to` | Moves the song to playlist index `to` (clamped). Moving a song directly after the current one while shuffling also makes it next in the shuffle order ("play next"). | never |
 
 While a calibration runs, `play`, `pause`, `seek`, `setTrack`, `next`, `previous` and `calibrate` are refused with
 `busy`.

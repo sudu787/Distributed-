@@ -18,6 +18,7 @@ import 'package:syncsphere/src/services/audius_client.dart';
 import 'package:syncsphere/src/ui/add_music.dart';
 import 'package:syncsphere/src/ui/diagnostics_screen.dart';
 import 'package:syncsphere/src/ui/home_screen.dart';
+import 'package:syncsphere/src/ui/now_playing_bar.dart';
 import 'package:syncsphere/src/ui/player_screen.dart';
 import 'package:syncsphere/src/ui/queue_view.dart';
 import 'package:syncsphere/src/ui/widgets.dart';
@@ -74,10 +75,14 @@ class _FakeRoomController extends RoomController {
       String? targetDevice,
       ParticipantRole? role,
       String? mode,
-      int? offsetUs}) async {
+      int? offsetUs,
+      int? toIndex}) async {
     sent.add(action);
+    if (action == ControlAction.moveTrack) moves.add((trackId!, toIndex!));
     return null;
   }
+
+  final List<(String, int)> moves = [];
 
   @override
   int? expectedPositionUs() => 65000000;
@@ -119,6 +124,9 @@ class _FakeAudius extends AudiusClient {
 
 Widget _wrap(Widget child, List<Override> overrides) =>
     ProviderScope(key: UniqueKey(), overrides: overrides, child: MaterialApp(home: child));
+
+/// A tab in the room's bottom navigation bar.
+Finder _tab(String label) => find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
 
 /// Phone-shaped, tall viewport so lazily built list items are on screen.
 void _phone(WidgetTester tester) {
@@ -250,7 +258,7 @@ void main() {
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(base, controller: ctl)));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.textContaining('This phone plays the LEFT channel'), findsOneWidget);
-    await tester.tap(find.text('Speakers'));
+    await tester.tap(_tab('Speakers'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Speaker layout'), findsOneWidget);
     expect(find.text('L'), findsWidgets);
@@ -360,6 +368,60 @@ void main() {
     expect(ctl.sent.where((x) => x == ControlAction.deviceVolume).length, 3);
   });
 
+  testWidgets('queue editing: drag to reorder, swipe to remove with undo, play next', (tester) async {
+    _phone(tester);
+    final base = _roomState();
+    final room = base.room!;
+    final extra = [
+      TrackInfo(id: 'b' * 64, title: 'Second Song', durationUs: 180000000, sizeBytes: 1, availableCount: 2),
+      TrackInfo(id: 'c' * 64, title: 'Third Song', durationUs: 240000000, sizeBytes: 1, availableCount: 2),
+    ];
+    final state = base.copyWith(
+      room: RoomState(
+        roomId: room.roomId,
+        roomName: room.roomName,
+        coordinatorId: room.coordinatorId,
+        version: room.version + 1,
+        timeline: room.timeline,
+        playlist: [_track, ...extra],
+        participants: room.participants,
+        upNext: 'b' * 64,
+      ),
+    );
+    final ctl = _FakeRoomController(state);
+    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(state, controller: ctl)));
+    await tester.pump();
+    expect(find.text('Now playing'), findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    expect(find.textContaining('3 songs · 10 min'), findsOneWidget);
+
+    // Drag "Third Song" to the top.
+    final handle = find.byIcon(Icons.drag_handle_rounded).at(2);
+    final g = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump(const Duration(milliseconds: 100));
+    for (var i = 0; i < 8; i++) {
+      await g.moveBy(const Offset(0, -25));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(ctl.moves, [('c' * 64, 0)]);
+
+    // Swipe "Second Song" away: removed at once, with Undo.
+    await tester.drag(find.text('Second Song'), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(ctl.sent, contains(ControlAction.removeTrack));
+    expect(find.text('Second Song'), findsNothing);
+    expect(find.text('Undo'), findsOneWidget);
+
+    // ⋮ → Play next.
+    await tester.tap(find.byTooltip('More').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Play next'));
+    await tester.pumpAndSettle();
+    expect(ctl.moves.last, ('c' * 64, 1), reason: 'right after the playing song');
+  });
+
   testWidgets('queue shows upload progress', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()),
@@ -372,19 +434,32 @@ void main() {
 
   testWidgets('room: three tabs with player, queue and speakers', (tester) async {
     _phone(tester);
-    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
+    final ctl = _FakeRoomController(_roomState());
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
     await tester.pump();
     expect(find.text('Living room'), findsOneWidget);
     expect(find.textContaining('2 phones · In sync'), findsOneWidget);
     expect(find.text('Blue Hour'), findsOneWidget); // Playing tab
 
-    await tester.tap(find.text('Queue'));
+    expect(find.byType(NowPlayingBar), findsNothing, reason: 'the Playing tab is the full player');
+    expect(find.text('Up next'), findsOneWidget);
+
+    await tester.tap(_tab('Queue'));
     await tester.pump();
-    expect(find.text('Blue Hour'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300)); // tab cross-fade
+    // The queue row and the now-playing bar above the tabs.
+    expect(find.text('Blue Hour'), findsNWidgets(2));
+    expect(find.byType(NowPlayingBar), findsOneWidget);
+    expect(find.text('Now playing'), findsOneWidget);
     expect(find.text('1/2'), findsOneWidget);
 
-    await tester.tap(find.text('Speakers'));
+    await tester.tap(_tab('Speakers'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(NowPlayingBar), findsOneWidget, reason: 'what is playing stays visible on every tab');
+    await tester.tap(find.descendant(of: find.byType(NowPlayingBar), matching: find.byTooltip('Pause')));
+    await tester.pump();
+    expect(ctl.sent, contains(ControlAction.pause));
     expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Kitchen')), findsOneWidget);
     expect(find.textContaining('downloading song'), findsOneWidget);
     expect(find.text('Calibrate to this spot'), findsOneWidget);
@@ -407,7 +482,7 @@ void main() {
     final ctl = _FakeRoomController(_roomState());
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
     await tester.pump();
-    await tester.tap(find.text('Speakers'));
+    await tester.tap(_tab('Speakers'));
     await tester.pump();
     await tester.tap(find.widgetWithText(ListTile, 'Kitchen'));
     await tester.pumpAndSettle();
@@ -512,7 +587,7 @@ void main() {
     _phone(tester);
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
     await tester.pump();
-    await tester.tap(find.text('Queue'));
+    await tester.tap(_tab('Queue'));
     await tester.pump();
     await tester.tap(find.text('Add songs'));
     await tester.pumpAndSettle();

@@ -885,6 +885,7 @@ class ParticipantSession implements ClockSource {
     String? mode,
     int? offsetUs,
     TrackInfo? info,
+    int? toIndex,
     Duration timeout = const Duration(seconds: 5),
   }) {
     final version = _state?.version ?? 0;
@@ -907,6 +908,7 @@ class ParticipantSession implements ClockSource {
       mode: mode,
       offsetUs: offsetUs,
       info: info,
+      toIndex: toIndex,
     ));
     return c.future.timeout(timeout, onTimeout: () {
       _pendingControls.remove(rid);

@@ -14,7 +14,9 @@ import 'widgets.dart';
 
 /// Playing tab: what is playing and the shared controls.
 class NowPlayingView extends ConsumerStatefulWidget {
-  const NowPlayingView({super.key});
+  /// Opens the Queue tab (from "Up next").
+  final VoidCallback? onOpenQueue;
+  const NowPlayingView({super.key, this.onOpenQueue});
 
   @override
   ConsumerState<NowPlayingView> createState() => _NowPlayingViewState();
@@ -77,13 +79,36 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
         Center(
-          child: LayoutBuilder(
-            builder: (context, c) => TrackArt(track?.id, size: c.maxWidth.clamp(120.0, 300.0) * 0.8, url: track?.artUrl),
-          ),
+          child: LayoutBuilder(builder: (context, c) {
+            final size = c.maxWidth.clamp(120.0, 320.0) * 0.82;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(size * 0.14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: playing ? 0.28 : 0.14),
+                    blurRadius: playing ? 28 : 14,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: AnimatedScale(
+                scale: playing || track == null ? 1.0 : 0.94,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOut,
+                child: TrackArt(track?.id, size: size, url: track?.artUrl),
+              ),
+            );
+          }),
         ),
         if (room != null && room.calibration == null) const _CalibrationTip(),
         const SizedBox(height: 20),
-        Text(track?.title ?? 'Nothing playing', style: t.headlineSmall, textAlign: TextAlign.center),
+        Text(track?.title ?? 'Nothing playing',
+            style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis),
         Text(
             track == null
                 ? 'Pick a song in the Queue tab'
@@ -154,7 +179,11 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
           IconButton.filled(
             iconSize: 56,
             tooltip: playing ? 'Pause' : 'Play',
-            icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+              child: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, key: ValueKey(playing)),
+            ),
             onPressed: canControl ? () => _ctl(playing ? ControlAction.pause : ControlAction.play) : null,
           ),
           const SizedBox(width: 12),
@@ -184,6 +213,7 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
               style: t.bodySmall,
             ),
           ),
+        if (room != null && track != null) _UpNext(room: room, canControl: canControl, onOpenQueue: widget.onOpenQueue),
         const SizedBox(height: 16),
         _VolumeRow(
           label: 'Everyone',
@@ -366,6 +396,58 @@ class _CalibrationTip extends ConsumerWidget {
             ),
           ]),
         ]),
+      ),
+    );
+  }
+}
+
+/// The song after this one, with a shortcut to the queue.
+class _UpNext extends ConsumerWidget {
+  final RoomState room;
+  final bool canControl;
+  final VoidCallback? onOpenQueue;
+  const _UpNext({required this.room, required this.canControl, required this.onOpenQueue});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final next = room.trackById(room.upNext);
+    final current = room.pending?.trackId ?? room.timeline.trackId;
+    final repeatOne = next != null && next.id == current;
+    return Card(
+      margin: const EdgeInsets.only(top: 20),
+      color: cs.surfaceContainerLow,
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        leading: next == null
+            ? CircleAvatar(backgroundColor: cs.surfaceContainerHighest, child: const Icon(Icons.stop_rounded))
+            : TrackArt(next.id, size: 44, url: next.artUrl),
+        title: Text(
+          next == null ? 'Last song in the queue' : (repeatOne ? 'Repeats this song' : next.title),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          next == null || repeatOne ? 'Up next' : 'Up next · ${next.artist ?? 'Unknown artist'}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: t.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        onTap: canControl && next != null && !repeatOne
+            ? () async {
+                haptic(ref, Haptic.action);
+                final err = await ref.read(roomControllerProvider.notifier).playNow(next.id);
+                if (err != null && context.mounted) showMessage(context, err, error: true);
+              }
+            : null,
+        trailing: onOpenQueue == null
+            ? null
+            : TextButton.icon(
+                icon: const Icon(Icons.queue_music_rounded, size: 18),
+                label: const Text('Queue'),
+                onPressed: onOpenQueue,
+              ),
       ),
     );
   }

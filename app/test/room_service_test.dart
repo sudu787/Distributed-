@@ -175,6 +175,17 @@ void main() {
     expect(allPlaying(), isTrue);
     expect(File('${tmp.path}/cache-other/tracks/${song.id}.audio').existsSync(), isTrue);
 
+    // The guest edits the queue: move its song to the top, remove the host's
+    // song, then undo (re-add from the host's copy, no upload).
+    expect((await guest.session!.control(ControlAction.moveTrack, trackId: song.id, toIndex: 0)).accepted, isTrue);
+    expect(coord.state.playlist.first.id, song.id);
+    final removed = coord.state.trackById(first.id)!;
+    expect((await guest.session!.control(ControlAction.removeTrack, trackId: first.id)).accepted, isTrue);
+    expect(coord.state.trackById(first.id), isNull);
+    expect(coord.state.timeline.trackId, song.id, reason: 'the playing song is untouched');
+    expect((await guest.session!.control(ControlAction.addTrack, info: removed)).accepted, isTrue);
+    expect([for (final t in coord.state.playlist) t.id], [song.id, first.id]);
+
     await other.leave();
     await guest.leave();
     await host.leave();

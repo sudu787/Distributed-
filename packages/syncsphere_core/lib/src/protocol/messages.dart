@@ -490,6 +490,13 @@ enum ControlAction {
   /// `dev` (default: sender): that phone flashes, shows its channel and
   /// vibrates for a few seconds ("which phone is the left one?").
   identify,
+
+  /// `track`: removes the song from the playlist. Removing the song that is
+  /// playing moves on to the next one (or stops at the end).
+  removeTrack,
+
+  /// `track`, `to`: moves the song to playlist index `to` (clamped).
+  moveTrack,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -517,6 +524,9 @@ class ControlMsg extends Message {
   /// Track metadata for addTrack.
   final TrackInfo? info;
 
+  /// Target playlist index for moveTrack.
+  final int? toIndex;
+
   const ControlMsg({
     required this.requestId,
     required this.action,
@@ -529,6 +539,7 @@ class ControlMsg extends Message {
     this.mode,
     this.offsetUs,
     this.info,
+    this.toIndex,
   });
 
   @override
@@ -544,6 +555,7 @@ class ControlMsg extends Message {
         if (mode != null) 'mode': mode,
         if (offsetUs != null) 'off': offsetUs,
         if (info != null) 'info': info!.toJson(),
+        if (toIndex != null) 'to': toIndex,
       };
 
   static ControlMsg read(Reader r) => ControlMsg(
@@ -558,6 +570,7 @@ class ControlMsg extends Message {
         mode: r.optString('mode', maxLength: 16),
         offsetUs: r.optInteger('off', min: -kMaxCalibrationUs, max: kMaxCalibrationUs),
         info: _optTrack(r.optMap('info')),
+        toIndex: r.optInteger('to', min: 0, max: 100000),
       );
 
   static TrackInfo? _optTrack(Map<String, Object?>? j) => j == null ? null : TrackInfo.fromJson(j);

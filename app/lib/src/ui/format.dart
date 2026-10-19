@@ -18,6 +18,13 @@ String fmtClock(int? us) {
   return '$m:${s.toString().padLeft(2, '0')}';
 }
 
+/// Total length for lists: "42 min", "1 h 05 min".
+String fmtLength(int us) {
+  final min = (us / 60000000).round();
+  if (min < 60) return '$min min';
+  return '${min ~/ 60} h ${(min % 60).toString().padLeft(2, '0')} min';
+}
+
 String fmtEstimate(num? valueUs, num? uncertaintyUs) {
   if (valueUs == null) return '—';
   final u = uncertaintyUs == null ? '' : ' ± ${fmtMs(uncertaintyUs)}';

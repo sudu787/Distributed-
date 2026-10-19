@@ -804,6 +804,68 @@ class RoomCoordinator {
       case ControlAction.calibrate:
         return _startCalibration(m, surround: c.mode == 'surround');
 
+      case ControlAction.removeTrack:
+        final id = c.trackId;
+        if (id == null || _state.trackById(id) == null || _state.isCalibrationTrack(id)) {
+          return const ControlOutcome.fail(ControlError.unknownTrack);
+        }
+        // The calibration restores the song it interrupted afterwards.
+        if (_state.calibration != null && _preCalibration?.$1 == id) {
+          return const ControlOutcome.fail(ControlError.busy);
+        }
+        final title = _state.trackById(id)!.title;
+        final pend = _state.pending;
+        if (pend != null && pend.trackId == id && tl.isPlaying && tl.trackId != null && tl.trackId != id) {
+          // The removed song was about to start (auto-advance or a switch):
+          // keep the current one playing; auto-advance picks the new next.
+          setPlaylist(_state.playlist.where((t) => t.id != id).toList());
+          _shuffleOrder = [for (final x in _shuffleOrder) if (x != id) x];
+          _barrier = null;
+          _autoAdvancedGeneration = null;
+          _mutate(_state.copyWith(clearPending: true), timeline: true);
+          log.info('playlist.remove', '${m.displayName} removed "$title"');
+          return ok;
+        }
+        final cur = pend?.trackId ?? tl.trackId;
+        final playing = tl.isPlaying || (pend?.autoPlay ?? false);
+        String? after;
+        if (cur == id) {
+          after = _neighbor(id, 1, wrap: _state.repeat != PlaylistRepeat.off);
+          if (after == id) after = null;
+        }
+        setPlaylist(_state.playlist.where((t) => t.id != id).toList());
+        _shuffleOrder = [for (final x in _shuffleOrder) if (x != id) x];
+        if (cur == id && _state.calibration == null) {
+          if (after != null && playing) {
+            _requestSegment(after, 0);
+          } else if (after != null) {
+            _setPaused(after, 0);
+          } else {
+            _stop();
+          }
+        }
+        log.info('playlist.remove', '${m.displayName} removed "$title"');
+        return ok;
+
+      case ControlAction.moveTrack:
+        final id = c.trackId;
+        final from = _state.indexOfTrack(id);
+        if (id == null || from < 0 || c.toIndex == null) return const ControlOutcome.fail(ControlError.unknownTrack);
+        final list = [..._state.playlist];
+        final t = list.removeAt(from);
+        final to = c.toIndex!.clamp(0, list.length);
+        list.insert(to, t);
+        if (to != from) setPlaylist(list);
+        // "Play next" while shuffling: also make it next in the shuffle order.
+        final cur = _state.pending?.trackId ?? tl.trackId;
+        if (_state.shuffle && cur != null && to > 0 && list[to - 1].id == cur) {
+          final order = _order()..remove(id);
+          order.insert(order.indexOf(cur) + 1, id);
+          _shuffleOrder = order;
+          _mutate(_state);
+        }
+        return ok;
+
       case ControlAction.play:
         if (tl.isPlaying || (_state.pending?.autoPlay ?? false)) return ok; // idempotent
         if (tl.status == PlaybackStatus.paused && tl.trackId != null) {
@@ -1143,6 +1205,22 @@ class RoomCoordinator {
         {'gen': gen, 'waiting': waiting.length});
     _mutate(_state.copyWith(pending: pending), timeline: true);
     _checkBarrier();
+  }
+
+  /// Nothing loaded (the playing song was removed and nothing follows).
+  void _stop() {
+    _barrier = null;
+    _mutate(
+        _state.copyWith(
+          timeline: PlaybackTimeline(
+              generation: _nextGeneration(),
+              trackId: null,
+              status: PlaybackStatus.idle,
+              anchorPositionUs: 0,
+              anchorCoordUs: clock.nowMicros()),
+          clearPending: true,
+        ),
+        timeline: true);
   }
 
   void _setPaused(String trackId, int positionUs) {
@@ -1510,7 +1588,12 @@ class RoomCoordinator {
                 .where((m) => m.availability[t.id] == TrackAvailability.available)
                 .length)
     ];
-    _state = _state.copyWith(participants: summaries, playlist: playlist);
+    final next = current == null || _state.isCalibrationTrack(current)
+        ? null
+        : (_state.repeat == PlaylistRepeat.one
+            ? current
+            : _neighbor(current, 1, wrap: _state.repeat == PlaylistRepeat.all));
+    _state = _state.copyWith(participants: summaries, playlist: playlist, upNext: next, clearUpNext: next == null);
     if (!_stateCtl.isClosed) _stateCtl.add(_state);
     final msg = StateMsg(_state);
     for (final l in _links) {

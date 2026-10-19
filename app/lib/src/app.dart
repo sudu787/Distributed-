@@ -16,11 +16,8 @@ class SyncSphereApp extends StatelessWidget {
     return MaterialApp(
       title: 'SyncSphere',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: seed), useMaterial3: true),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
-        useMaterial3: true,
-      ),
+      theme: _theme(ColorScheme.fromSeed(seedColor: seed)),
+      darkTheme: _theme(ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark)),
       home: const _Root(),
       // Deep links (`syncsphere://app/join?...`, e.g. from a QR code scanned
       // with the camera app) arrive as the route `/join?...`.
@@ -41,6 +38,37 @@ class SyncSphereApp extends StatelessWidget {
     );
   }
 }
+
+/// One look for light and dark: rounded cards and sheets, floating
+/// snackbars, a calmer tab bar.
+ThemeData _theme(ColorScheme cs) => ThemeData(
+      colorScheme: cs,
+      useMaterial3: true,
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: cs.surfaceContainerLow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        showDragHandle: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      ),
+      dialogTheme: DialogThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        height: 68,
+        backgroundColor: cs.surfaceContainer,
+        indicatorColor: cs.secondaryContainer,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      ),
+      listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.symmetric(horizontal: 16)),
+      chipTheme: ChipThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+      sliderTheme: const SliderThemeData(showValueIndicator: ShowValueIndicator.never),
+      appBarTheme: AppBarTheme(backgroundColor: cs.surface, scrolledUnderElevation: 2, centerTitle: false),
+    );
 
 /// Joins the room in a deep link (unless already in one) and returns to
 /// the root screen, which then shows the room.

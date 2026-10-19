@@ -136,7 +136,10 @@ the calibration, learned latency and library. Builds before that used a random k
 4. Guests: **Join a party → Scan QR code**. Nearby parties are also listed on the home screen.
 5. The party has three tabs:
    - **Playing:** play/pause, seek, skip, shuffle, repeat, volume for everyone and for this phone.
-   - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**.
+   - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**, drag songs into a
+     new order, swipe one away (with **Undo**), or use ⋮ for **Play now / Play next / Move to the top**.
+   - A **now-playing bar** above the tabs shows the song, its progress and "Next: …" on the Queue and Speakers tabs,
+     with previous / play-pause / next; tap it to open the player.
    - **Speakers:** every phone and its sync state. **Calibrate to this spot** lines the sound up where you stand.
      Tap a phone to set its volume, **timing** (fine-tune by ear: + plays earlier, − later) and channel.
 6. Something sounds off? On the Playing tab tap **This phone sounds early or late?**. For bug reports, open

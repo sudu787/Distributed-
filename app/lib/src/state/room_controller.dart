@@ -289,7 +289,8 @@ class RoomController extends Notifier<RoomViewState> {
       String? targetDevice,
       ParticipantRole? role,
       String? mode,
-      int? offsetUs}) async {
+      int? offsetUs,
+      int? toIndex}) async {
     final s = _svc.session;
     if (s == null) return 'Not in a room';
     final ack = await s.control(action,
@@ -299,7 +300,8 @@ class RoomController extends Notifier<RoomViewState> {
         targetDevice: targetDevice,
         role: role,
         mode: mode,
-        offsetUs: offsetUs);
+        offsetUs: offsetUs,
+        toIndex: toIndex);
     if (ack.accepted) return null;
     return describeControlError(ack.error, action);
   }
@@ -327,6 +329,35 @@ class RoomController extends Notifier<RoomViewState> {
   }
 
   Future<String?> setRepeat(PlaylistRepeat mode) => control(ControlAction.setRepeat, mode: mode.name);
+
+  /// Plays [trackId] now (on every phone).
+  Future<String?> playNow(String trackId) => control(ControlAction.setTrack, trackId: trackId);
+
+  /// Removes a song from the queue (the playing song moves on to the next).
+  Future<String?> removeTrack(String trackId) => control(ControlAction.removeTrack, trackId: trackId);
+
+  /// Moves a song to queue position [to].
+  Future<String?> moveTrack(String trackId, int to) => control(ControlAction.moveTrack, trackId: trackId, toIndex: to);
+
+  /// Puts a song right after the one playing.
+  Future<String?> playNext(String trackId) {
+    final room = state.room;
+    if (room == null) return Future.value('Not in a room');
+    final cur = room.indexOfTrack(room.pending?.trackId ?? room.timeline.trackId);
+    final from = room.indexOfTrack(trackId);
+    final to = cur < 0 ? 0 : (from >= 0 && from < cur ? cur : cur + 1);
+    return moveTrack(trackId, to);
+  }
+
+  /// Puts a removed song back at position [index] (undo). The host still has
+  /// the file, so nothing is uploaded again.
+  Future<String?> restoreTrack(TrackInfo track, int index) async {
+    final s = _svc.session;
+    if (s == null) return 'Not in a room';
+    final ack = await s.control(ControlAction.addTrack, info: track);
+    if (!ack.accepted) return describeControlError(ack.error, ControlAction.addTrack);
+    return moveTrack(track.id, index);
+  }
 
   Future<String?> setShuffle(bool on) => control(ControlAction.setShuffle, value: on ? 1 : 0);
 
@@ -493,6 +524,8 @@ String describeControlError(String? error, ControlAction action) => switch (erro
       ControlError.unauthorized when action == ControlAction.addTrack =>
         'Only the host and phones allowed to control the music can add songs.',
       ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
+      ControlError.busy when action == ControlAction.removeTrack =>
+        'That song comes back after the calibration. Try again in a few seconds.',
       ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
       ControlError.invalid when action == ControlAction.calibrate =>
         'Calibration needs microphone access and at least one connected device.',

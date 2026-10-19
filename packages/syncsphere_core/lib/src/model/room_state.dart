@@ -554,6 +554,10 @@ class RoomState {
   /// Latest surround calibration result (see [SpeakerLayout]).
   final SpeakerLayout? layout;
 
+  /// The song that plays after the current one (play order, so it follows
+  /// shuffle and repeat), or null at the end / when nothing is loaded.
+  final String? upNext;
+
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -572,6 +576,7 @@ class RoomState {
     this.preferredCoordinator,
     this.identify,
     this.layout,
+    this.upNext,
   });
 
   TrackInfo? trackById(String? id) {
@@ -616,6 +621,8 @@ class RoomState {
     String? preferredCoordinator,
     IdentifyRequest? identify,
     SpeakerLayout? layout,
+    String? upNext,
+    bool clearUpNext = false,
   }) =>
       RoomState(
         roomId: roomId,
@@ -635,6 +642,7 @@ class RoomState {
         preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
         identify: identify ?? this.identify,
         layout: layout ?? this.layout,
+        upNext: clearUpNext ? null : (upNext ?? this.upNext),
       );
 
   Map<String, Object?> toJson() => {
@@ -655,6 +663,7 @@ class RoomState {
         if (preferredCoordinator != null) 'pref': preferredCoordinator,
         if (identify != null) 'ident': identify!.toJson(),
         if (layout != null) 'layout': layout!.toJson(),
+        if (upNext != null) 'nxt': upNext,
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -685,6 +694,7 @@ class RoomState {
       preferredCoordinator: r.optString('pref', maxLength: 64),
       identify: r.optMap('ident') == null ? null : IdentifyRequest.fromJson(r.optMap('ident')!),
       layout: r.optMap('layout') == null ? null : SpeakerLayout.fromJson(r.optMap('layout')!),
+      upNext: r.optString('nxt', maxLength: 64),
     );
   }
 }
