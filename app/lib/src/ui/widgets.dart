@@ -105,13 +105,17 @@ void showMessage(BuildContext context, String message, {bool error = false}) {
 class TrackArt extends ConsumerWidget {
   final String? trackId;
   final double size;
-  const TrackArt(this.trackId, {super.key, this.size = 48});
+
+  /// Catalog cover (e.g. Audius), used when the file has no picture.
+  final String? url;
+  const TrackArt(this.trackId, {super.key, this.size = 48, this.url});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final id = trackId;
     final art = id == null ? null : ref.watch(artworkProvider(id)).value;
     final radius = BorderRadius.circular(size * 0.14);
+    final remote = url;
     return ClipRRect(
       borderRadius: radius,
       child: SizedBox.square(
@@ -120,7 +124,17 @@ class TrackArt extends ConsumerWidget {
           duration: const Duration(milliseconds: 300),
           child: art != null
               ? Image.file(art, key: ValueKey(art.path), fit: BoxFit.cover, gaplessPlayback: true)
-              : _ArtPlaceholder(id, size: size, key: ValueKey('ph-$id')),
+              : remote != null
+                  ? Image.network(
+                      remote,
+                      key: ValueKey(remote),
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stack) => _ArtPlaceholder(id, size: size),
+                      loadingBuilder: (context, child, progress) =>
+                          progress == null ? child : _ArtPlaceholder(id, size: size),
+                    )
+                  : _ArtPlaceholder(id, size: size, key: ValueKey('ph-$id')),
         ),
       ),
     );

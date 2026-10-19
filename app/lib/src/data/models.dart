@@ -13,6 +13,12 @@ class LibraryTrack {
   final String? mimeType;
   final DateTime addedAt;
 
+  /// Where the song came from, for songs added from an open catalog or a
+  /// link: other phones download it from there (see TrackInfo.sourceUrl).
+  final String? sourceUrl;
+  final String? artUrl;
+  final String? credit;
+
   const LibraryTrack({
     required this.id,
     required this.path,
@@ -23,6 +29,9 @@ class LibraryTrack {
     this.durationUs,
     this.mimeType,
     required this.addedAt,
+    this.sourceUrl,
+    this.artUrl,
+    this.credit,
   });
 
   TrackInfo toTrackInfo() => TrackInfo(
@@ -33,6 +42,9 @@ class LibraryTrack {
         durationUs: durationUs,
         sizeBytes: sizeBytes,
         mimeType: mimeType,
+        sourceUrl: sourceUrl,
+        artUrl: artUrl,
+        credit: credit,
       );
 
   Map<String, Object?> toRow() => {
@@ -45,6 +57,9 @@ class LibraryTrack {
         'duration_us': durationUs,
         'mime': mimeType,
         'added_at': addedAt.millisecondsSinceEpoch,
+        'source_url': sourceUrl,
+        'art_url': artUrl,
+        'credit': credit,
       };
 
   factory LibraryTrack.fromRow(Map<String, Object?> r) => LibraryTrack(
@@ -57,6 +72,9 @@ class LibraryTrack {
         durationUs: r['duration_us'] as int?,
         mimeType: r['mime'] as String?,
         addedAt: DateTime.fromMillisecondsSinceEpoch(r['added_at']! as int),
+        sourceUrl: r['source_url'] as String?,
+        artUrl: r['art_url'] as String?,
+        credit: r['credit'] as String?,
       );
 }
 

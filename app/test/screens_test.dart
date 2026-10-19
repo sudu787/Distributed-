@@ -14,6 +14,8 @@ import 'package:syncsphere/src/services/network_info.dart';
 import 'package:syncsphere/src/services/room_service.dart';
 import 'package:syncsphere/src/state/providers.dart';
 import 'package:syncsphere/src/state/room_controller.dart';
+import 'package:syncsphere/src/services/audius_client.dart';
+import 'package:syncsphere/src/ui/add_music.dart';
 import 'package:syncsphere/src/ui/diagnostics_screen.dart';
 import 'package:syncsphere/src/ui/home_screen.dart';
 import 'package:syncsphere/src/ui/player_screen.dart';
@@ -105,6 +107,14 @@ List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller,
   ];
 }
 
+class _FakeAudius extends AudiusClient {
+  @override
+  Future<List<AudiusTrack>> search(String query, {int limit = 25}) async => const [
+        AudiusTrack(id: 'D7KyD', title: 'Night Drive', artist: 'Nova', duration: Duration(seconds: 215)),
+        AudiusTrack(id: 'X1', title: 'Sunrise', artist: 'Mira'),
+      ];
+}
+
 Widget _wrap(Widget child, List<Override> overrides) =>
     ProviderScope(key: UniqueKey(), overrides: overrides, child: MaterialApp(home: child));
 
@@ -187,6 +197,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Add songs'), findsNothing);
     expect(find.textContaining('can pick or add songs'), findsOneWidget);
+  });
+
+  testWidgets('add songs: Audius search and links are offered; Audius results are listed', (tester) async {
+    _phone(tester);
+    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(_roomState())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add songs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Search Audius'), findsOneWidget);
+    expect(find.text('From a link'), findsOneWidget);
+
+    await tester.pumpWidget(_wrap(
+        const AudiusSearchScreen(), [..._overrides(const RoomViewState()), audiusClientProvider.overrideWithValue(_FakeAudius())]));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'night');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(find.text('Night Drive'), findsOneWidget);
+    expect(find.text('Nova · 3:35'), findsOneWidget);
+    expect(find.text('Sunrise'), findsOneWidget);
+    expect(find.textContaining('artists are credited'), findsOneWidget);
   });
 
   testWidgets('queue shows upload progress', (tester) async {

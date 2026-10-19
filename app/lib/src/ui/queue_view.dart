@@ -8,6 +8,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../data/models.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
+import 'add_music.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'widgets.dart';
@@ -52,7 +53,7 @@ class QueueView extends ConsumerWidget {
           ListTile(
             selected: t.id == current,
             leading: Stack(alignment: Alignment.center, children: [
-              TrackArt(t.id, size: 44),
+              TrackArt(t.id, size: 44, url: t.artUrl),
               if (t.id == current)
                 Container(
                   width: 44,
@@ -62,7 +63,7 @@ class QueueView extends ConsumerWidget {
                 ),
             ]),
             title: Text(t.title, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
+            subtitle: Text([t.artist ?? 'Unknown artist', fmtClock(t.durationUs), if (t.credit != null) t.credit!].join(' · ')),
             trailing: t.availableCount >= connected
                 ? null
                 : Tooltip(
@@ -108,15 +109,45 @@ class QueueView extends ConsumerWidget {
             title: const Text('From My music'),
             onTap: () => Navigator.pop(c, 'library'),
           ),
+          ListTile(
+            leading: const Icon(Icons.travel_explore),
+            title: const Text('Search Audius'),
+            subtitle: const Text('Free music from independent artists'),
+            onTap: () => Navigator.pop(c, 'audius'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link),
+            title: const Text('From a link'),
+            subtitle: const Text('Your own music server, a podcast or any audio file link'),
+            onTap: () => Navigator.pop(c, 'link'),
+          ),
         ]),
       ),
     );
     if (!context.mounted || choice == null) return;
-    if (choice == 'phone') {
-      await _addFromPhone(context, ref);
-    } else {
-      await _addTracks(context, ref);
+    switch (choice) {
+      case 'phone':
+        await _addFromPhone(context, ref);
+      case 'library':
+        await _addTracks(context, ref);
+      case 'audius':
+        final added = await showAudiusSearch(context);
+        if (context.mounted) await _queue(context, ref, added);
+      case 'link':
+        final t = await addFromLink(context, ref);
+        if (t != null && context.mounted) await _queue(context, ref, [t]);
     }
+  }
+
+  /// Queues songs just added to My music (skipping ones already queued).
+  Future<void> _queue(BuildContext context, WidgetRef ref, List<LibraryTrack> added) async {
+    if (added.isEmpty) return;
+    final inRoom = ref.read(roomControllerProvider).room?.playlist.map((t) => t.id).toSet() ?? {};
+    final fresh = [for (final t in added) if (!inRoom.contains(t.id)) t];
+    final err = await ref.read(roomControllerProvider.notifier).addTracks(fresh);
+    if (!context.mounted) return;
+    haptic(ref, err == null ? Haptic.action : Haptic.alert);
+    showMessage(context, err ?? 'Added ${fresh.length} song${fresh.length == 1 ? '' : 's'} to the queue.', error: err != null);
   }
 
   /// Imports new files during a party and queues them right away.

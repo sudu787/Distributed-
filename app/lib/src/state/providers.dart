@@ -7,6 +7,8 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../data/app_store.dart';
 import '../data/models.dart';
 import '../services/artwork_service.dart';
+import '../services/audius_client.dart';
+import '../services/remote_source.dart';
 import '../services/library_service.dart';
 import '../services/network_info.dart';
 import '../services/room_service.dart';
@@ -16,6 +18,18 @@ final appStoreProvider = Provider<AppStore>((ref) => throw UnimplementedError('o
 final libraryServiceProvider =
     Provider<LibraryService>((ref) => throw UnimplementedError('override libraryServiceProvider'));
 final roomServiceProvider = Provider<RoomService>((ref) => throw UnimplementedError('override roomServiceProvider'));
+/// Open music sources: the Audius catalog and plain links.
+final audiusClientProvider = Provider<AudiusClient>((ref) {
+  final c = AudiusClient();
+  ref.onDispose(c.close);
+  return c;
+});
+final remoteSourceProvider = Provider<RemoteSource>((ref) {
+  final r = RemoteSource(library: ref.watch(libraryServiceProvider));
+  ref.onDispose(r.close);
+  return r;
+});
+
 /// Album art; overridden in `main()` (disabled in tests).
 final artworkServiceProvider = Provider<ArtworkService>((ref) => ArtworkService.disabled());
 

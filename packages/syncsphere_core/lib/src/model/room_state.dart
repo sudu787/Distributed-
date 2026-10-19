@@ -189,6 +189,18 @@ class TrackInfo {
   /// Number of connected participants that reported the track available.
   final int availableCount;
 
+  /// Where the song can be downloaded directly (http/https), e.g. an open
+  /// catalog such as Audius or the user's own music server. When set, every
+  /// device fetches it from there first (the catalog streams to each
+  /// listener) and falls back to the host. The SHA-256 [id] still decides.
+  final String? sourceUrl;
+
+  /// Cover image URL from the catalog (used when the file has no picture).
+  final String? artUrl;
+
+  /// Attribution shown with the song, e.g. "via Audius".
+  final String? credit;
+
   const TrackInfo({
     required this.id,
     required this.title,
@@ -199,6 +211,9 @@ class TrackInfo {
     this.mimeType,
     this.hostServes = true,
     this.availableCount = 0,
+    this.sourceUrl,
+    this.artUrl,
+    this.credit,
   });
 
   TrackInfo copyWith({int? availableCount, bool? hostServes, int? durationUs}) =>
@@ -212,6 +227,9 @@ class TrackInfo {
         mimeType: mimeType,
         hostServes: hostServes ?? this.hostServes,
         availableCount: availableCount ?? this.availableCount,
+        sourceUrl: sourceUrl,
+        artUrl: artUrl,
+        credit: credit,
       );
 
   Map<String, Object?> toJson() => {
@@ -224,6 +242,9 @@ class TrackInfo {
         if (mimeType != null) 'mime': mimeType,
         'serves': hostServes,
         'avail': availableCount,
+        if (sourceUrl != null) 'src': sourceUrl,
+        if (artUrl != null) 'art': artUrl,
+        if (credit != null) 'credit': credit,
       };
 
   factory TrackInfo.fromJson(Map<String, Object?> j) {
@@ -242,7 +263,23 @@ class TrackInfo {
       mimeType: r.optString('mime', maxLength: 100),
       hostServes: r.optBoolean('serves') ?? false,
       availableCount: r.optInteger('avail', min: 0) ?? 0,
+      sourceUrl: _optWebUrl(r, 'src'),
+      artUrl: _optWebUrl(r, 'art'),
+      credit: r.optString('credit', maxLength: 64),
     );
+  }
+
+  static String? _optWebUrl(Reader r, String key) {
+    final v = r.optString(key, maxLength: 1024);
+    if (v == null) return null;
+    if (!isWebUrl(v)) throw r.error(key, 'must be an http(s) URL');
+    return v;
+  }
+
+  /// True for absolute http/https URLs with a host.
+  static bool isWebUrl(String v) {
+    final u = Uri.tryParse(v);
+    return u != null && (u.scheme == 'http' || u.scheme == 'https') && u.host.isNotEmpty;
   }
 
   static final _hex64 = RegExp(r'^[0-9a-f]{64}$');

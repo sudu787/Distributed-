@@ -18,7 +18,7 @@ Facts about third-party services come from their public documentation and polici
 | WebView to get around DRM | **No.** Widevine decrypts inside the CDM, so the page and the app never see the audio | Circumventing it would breach anti-circumvention law and the service terms | — |
 | **Open catalogs and personal servers:** Audius API (free, streaming allowed with artist credit), Jamendo (Creative Commons), Internet Archive, Navidrome/Subsonic, Jellyfin, podcast RSS | **Yes**: plain HTTP files | Yes, within each catalog's terms | **The same as local files.** Every phone fetches the same bytes, verified by SHA-256, and plays them on the shared timeline |
 
-**Decision:** SyncSphere adds *open music sources*: Audius search and "add from a link". When a song has a source URL, every phone downloads it from the source itself, so the catalog streams to each listener. The host and peers are only a fallback. Spotify and YouTube integration is not planned. Spotify Jam already offers a shared queue on one speaker.
+**Decision (implemented):** SyncSphere adds *open music sources*: Audius search and "add from a link". When a song has a source URL, every phone downloads it from the source itself, so the catalog streams to each listener. The host and peers are only a fallback. Spotify and YouTube integration is not planned. Spotify Jam already offers a shared queue on one speaker.
 
 ## 2. Distributed-systems techniques
 

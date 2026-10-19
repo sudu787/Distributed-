@@ -123,6 +123,10 @@ All positions and times are integer microseconds. Every reported timing value is
 }
 ```
 
+- Tracks may carry optional `src` (http/https source URL, ≤ 1024 chars), `art` (cover URL) and `credit` (≤ 64 chars,
+  e.g. "via Audius"). With `src`, every device downloads the file from the source first (no auth header, up to 5
+  redirects, same size cap) and falls back to `GET /tracks/<id>` from the coordinator. The SHA-256 `id` is checked
+  either way, so a changed source falls back to the host's copy.
 - `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
 - Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).

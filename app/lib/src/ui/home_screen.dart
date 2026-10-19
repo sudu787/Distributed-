@@ -10,6 +10,7 @@ import '../data/models.dart';
 import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
+import 'add_music.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'scan_screen.dart';
@@ -641,7 +642,7 @@ class _LibrarySection extends ConsumerWidget {
           trailing: TextButton.icon(
             icon: const Icon(Icons.add),
             label: const Text('Add'),
-            onPressed: () => _import(context, ref),
+            onPressed: () => _addMenu(context, ref),
           ),
         ),
         lib.when(
@@ -655,9 +656,10 @@ class _LibrarySection extends ConsumerWidget {
                   for (final t in tracks)
                     ListTile(
                       dense: true,
-                      leading: TrackArt(t.id, size: 40),
+                      leading: TrackArt(t.id, size: 40, url: t.artUrl),
                       title: Text(t.title, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
+                      subtitle: Text([t.artist ?? 'Unknown artist', fmtClock(t.durationUs), if (t.credit != null) t.credit!]
+                          .join(' · ')),
                       trailing: IconButton(
                         tooltip: 'Remove',
                         icon: const Icon(Icons.delete_outline),
@@ -671,6 +673,47 @@ class _LibrarySection extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  Future<void> _addMenu(BuildContext context, WidgetRef ref) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.phone_android),
+            title: const Text('From this phone…'),
+            onTap: () => Navigator.pop(c, 'phone'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.travel_explore),
+            title: const Text('Search Audius'),
+            subtitle: const Text('Free music from independent artists'),
+            onTap: () => Navigator.pop(c, 'audius'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link),
+            title: const Text('From a link'),
+            subtitle: const Text('Your own music server, a podcast or any audio file link'),
+            onTap: () => Navigator.pop(c, 'link'),
+          ),
+        ]),
+      ),
+    );
+    if (!context.mounted) return;
+    switch (choice) {
+      case 'phone':
+        await _import(context, ref);
+      case 'audius':
+        final added = await showAudiusSearch(context);
+        if (added.isNotEmpty && context.mounted) {
+          showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
+        }
+      case 'link':
+        final t = await addFromLink(context, ref);
+        if (t != null && context.mounted) showMessage(context, 'Added "${t.title}" to My music.');
+    }
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {

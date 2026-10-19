@@ -88,6 +88,19 @@ void main() {
       expect(h.first.host, 'h2');
       await store.removeRoomHistory('R5');
       expect((await store.roomHistory()).map((e) => e.roomId), ['R2', 'R6', 'R4', 'R3']);
+      // v3: songs keep where they came from.
+      await store.upsertTrack(LibraryTrack(
+          id: 'b' * 64,
+          path: '/y.mp3',
+          title: 'Y',
+          sizeBytes: 3,
+          addedAt: DateTime(2026),
+          sourceUrl: 'https://api.audius.co/v1/tracks/abc/stream?app_name=SyncSphere',
+          artUrl: 'https://img.example/480.jpg',
+          credit: 'via Audius'));
+      final y = (await store.libraryTracks()).firstWhere((t) => t.id == 'b' * 64);
+      expect(y.sourceUrl, contains('audius'));
+      expect(y.toTrackInfo().credit, 'via Audius');
       await store.saveSetting('haptics', '0');
       expect(await store.setting('haptics'), '0');
       await store.close();

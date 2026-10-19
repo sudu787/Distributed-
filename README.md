@@ -50,6 +50,10 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
+- **Open music sources:** **Search Audius** (free music from independent artists, credited) or **From a link** (your
+  own Navidrome or Jellyfin server, a podcast, any direct audio link). Every phone downloads the song from the source
+  itself, so sync stays sample-exact; the host is the fallback. Spotify and YouTube can't be used this way, because of
+  DRM and their terms; see [research-next.md](docs/research-next.md).
 - **Recent parties:** the last 5 parties are listed on the home screen. A party that is still running shows **Online**
   and rejoins with one tap (also after another phone took over as host).
 - **Album art** from each song's embedded picture (colourful placeholder otherwise), and **vibration feedback** on

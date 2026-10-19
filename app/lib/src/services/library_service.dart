@@ -35,7 +35,11 @@ class LibraryService {
 
   /// Copies [source] into the library, hashes it and records metadata.
   /// Importing an identical file twice yields the same track.
-  Future<LibraryTrack> import(File source, {String? displayName}) async {
+  ///
+  /// [title], [artist], [sourceUrl], [artUrl] and [credit] come from a
+  /// catalog (Audius) or link; they override the file's tags.
+  Future<LibraryTrack> import(File source,
+      {String? displayName, String? title, String? artist, String? sourceUrl, String? artUrl, String? credit}) async {
     await libraryDir.create(recursive: true);
     final ext = p.extension(source.path).toLowerCase();
     final tmp = File(p.join(libraryDir.path, '.import-${newId(6)}$ext'));
@@ -62,13 +66,16 @@ class LibraryService {
       final track = LibraryTrack(
         id: hash,
         path: dest.path,
-        title: _nonEmpty(meta['title']) ?? name,
-        artist: _nonEmpty(meta['artist']),
+        title: _nonEmpty(title) ?? _nonEmpty(meta['title']) ?? name,
+        artist: _nonEmpty(artist) ?? _nonEmpty(meta['artist']),
         album: _nonEmpty(meta['album']),
         sizeBytes: size,
         durationUs: durMs is num ? durMs.toInt() * 1000 : null,
         mimeType: _nonEmpty(meta['mimeType']),
         addedAt: DateTime.now(),
+        sourceUrl: sourceUrl,
+        artUrl: artUrl,
+        credit: credit,
       );
       await store.upsertTrack(track);
       log.info('library.import', 'imported "${track.title}"', {'sha256': hash.substring(0, 12), 'bytes': size});

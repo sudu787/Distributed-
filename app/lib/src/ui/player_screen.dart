@@ -77,12 +77,15 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
       children: [
         Center(
           child: LayoutBuilder(
-            builder: (context, c) => TrackArt(track?.id, size: c.maxWidth.clamp(120.0, 300.0) * 0.8),
+            builder: (context, c) => TrackArt(track?.id, size: c.maxWidth.clamp(120.0, 300.0) * 0.8, url: track?.artUrl),
           ),
         ),
         const SizedBox(height: 20),
         Text(track?.title ?? 'Nothing playing', style: t.headlineSmall, textAlign: TextAlign.center),
-        Text(track?.artist ?? (track == null ? 'Pick a song in the Queue tab' : 'Unknown artist'),
+        Text(
+            track == null
+                ? 'Pick a song in the Queue tab'
+                : [track.artist ?? 'Unknown artist', if (track.credit != null) track.credit!].join(' · '),
             style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant), textAlign: TextAlign.center),
         const SizedBox(height: 8),
         Center(child: _StatusLine(s: s, positionUs: pos)),
