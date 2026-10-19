@@ -168,6 +168,7 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `setChannelRole` | `mode` `stereo\|left\|right\|mono`, `dev?` | Channel role. A device may always change its own; others need control rights. | never |
 | `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
 | `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
+| `identify` | `dev?` | That phone flashes its channel and vibrates for 3 s (state `ident: {dev, seq, until}`). Own phone always; others need control rights. | never |
 | `addTrack` | `info` (track object, §4) | Appends a song. Needs control rights, and the coordinator must already have the file (uploaded with `PUT /uploads/<id>`, §8, or in its library); otherwise `invalid`. Idempotent. | never |
 
 While a calibration runs, `play`, `pause`, `seek`, `setTrack`, `next`, `previous` and `calibrate` are refused with

@@ -319,6 +319,10 @@ class RoomController extends Notifier<RoomViewState> {
   Future<String?> setShuffle(bool on) => control(ControlAction.setShuffle, value: on ? 1 : 0);
 
   /// Channel role of [deviceId] (default: this device).
+  /// Makes [deviceId]'s phone flash its channel and vibrate for 3 s.
+  Future<String?> identify(String deviceId) => control(ControlAction.identify,
+      targetDevice: deviceId == ref.read(identityProvider).deviceId ? null : deviceId);
+
   Future<String?> setChannelRole(ChannelRole role, {String? deviceId}) =>
       control(ControlAction.setChannelRole, mode: role.name, targetDevice: deviceId);
 

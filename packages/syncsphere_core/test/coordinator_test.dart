@@ -229,6 +229,28 @@ void main() {
     });
   });
 
+  test('identify: any phone may flash itself; flashing others needs control rights', () {
+    fakeAsync((fa) {
+      final f = Fixture(fa);
+      final (host, _) = f.join('host-device');
+      final (p, _) = f.join('phone-1');
+      p.send(const ControlMsg(requestId: 1, action: ControlAction.identify, baseVersion: 0));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(p.last<ControlAckMsg>()!.accepted, isTrue);
+      expect(f.coord.state.identify!.deviceId, 'phone-1');
+      expect(f.coord.state.identify!.seq, 1);
+      p.send(const ControlMsg(requestId: 2, action: ControlAction.identify, baseVersion: 0, targetDevice: 'host-device'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(p.last<ControlAckMsg>()!.error, ControlError.unauthorized);
+      host.send(const ControlMsg(requestId: 1, action: ControlAction.identify, baseVersion: 0, targetDevice: 'phone-1'));
+      fa.elapse(const Duration(milliseconds: 10));
+      expect(f.coord.state.identify!.seq, 2, reason: 'asking again re-triggers');
+      final back = RoomState.fromJson(f.coord.state.toJson());
+      expect(back.identify!.deviceId, 'phone-1');
+      expect(back.identify!.untilUs, f.coord.state.identify!.untilUs);
+    });
+  });
+
   test('readiness barrier then future scheduled start', () {
     fakeAsync((fa) {
       final f = Fixture(fa, defaultRole: ParticipantRole.controller);

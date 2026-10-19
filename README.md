@@ -46,7 +46,9 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   phone's microphone, and shifts each device so the sound lines up *where you are*, including Bluetooth and speaker
   delays software cannot see. Simulated (4 phones at 0.3–7 m, one on Bluetooth): spread at the listener 192 ms →
   4.6 ms median (p95 22 ms, mostly the first seconds while devices re-converge). Not yet run on phones.
-- **Experimental channel roles:** each phone can play stereo, left, right or a mono mix (Media3 channel mixing).
+- **Channel roles with a speaker map:** each phone plays stereo, left, right or a mono mix (Media3 channel mixing). The
+  Speakers tab shows a top-down map of who plays what, and **Stereo pair** sets up left and right in one tap. Tap a phone
+  (or **Identify**) to make it flash "LEFT"/"RIGHT" and vibrate, so you know which physical phone is which.
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.

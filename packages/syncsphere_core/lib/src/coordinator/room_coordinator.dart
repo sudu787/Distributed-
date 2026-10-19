@@ -733,6 +733,21 @@ class RoomCoordinator {
         log.info('member.channel', '${t.displayName} plays ${role.name}');
         _mutate(_state);
         return ok;
+      case ControlAction.identify:
+        final target = c.targetDevice ?? m.deviceId;
+        if (target != m.deviceId && !m.role.canControl) {
+          return const ControlOutcome.fail(ControlError.unauthorized);
+        }
+        final t = _members.byDevice(target);
+        if (t == null || !t.isConnected) return const ControlOutcome.fail(ControlError.invalid);
+        _mutate(_state.copyWith(
+          identify: IdentifyRequest(
+            deviceId: target,
+            seq: (_state.identify?.seq ?? 0) + 1,
+            untilUs: clock.nowMicros() + 3000000,
+          ),
+        ));
+        return ok;
       case ControlAction.setCalibration:
         final target = c.targetDevice ?? m.deviceId;
         if (target != m.deviceId && !m.role.canControl) {

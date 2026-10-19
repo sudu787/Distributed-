@@ -73,8 +73,8 @@ String distributionLabel(DistributionMode m) => switch (m) {
 
 String channelLabel(ChannelRole c) => switch (c) {
       ChannelRole.stereo => 'Stereo',
-      ChannelRole.left => 'Left channel (experimental)',
-      ChannelRole.right => 'Right channel (experimental)',
+      ChannelRole.left => 'Left channel',
+      ChannelRole.right => 'Right channel',
       ChannelRole.mono => 'Mono mix',
     };
 

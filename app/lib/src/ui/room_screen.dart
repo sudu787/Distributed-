@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import 'format.dart';
 import 'haptics.dart';
 import 'player_screen.dart';
 import 'queue_view.dart';
+import 'speaker_layout.dart';
 import 'widgets.dart';
 
 /// The room: three tabs (Playing, Queue, Speakers). Technical details live
@@ -41,6 +44,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       } else if (next.$2 != prev.$2) {
         haptic(ref, Haptic.action);
       }
+    });
+    // "Which phone is this?": flash and vibrate when this phone is identified.
+    ref.listen(roomControllerProvider.select((v) => v.room?.identify), (prev, next) {
+      if (next == null || next.seq == prev?.seq) return;
+      final myId = ref.read(identityProvider).deviceId;
+      if (next.deviceId != myId) return;
+      final me = ref.read(roomControllerProvider).room?.participant(myId);
+      unawaited(showIdentifyOverlay(context, ref, me?.channel ?? ChannelRole.stereo, me?.displayName ?? 'This phone'));
     });
     return PopScope(
       canPop: false,
@@ -244,6 +255,7 @@ class SpeakersView extends ConsumerWidget {
             hostName: room.participant(room.coordinatorId)?.displayName ?? 'Another phone',
             ownerName: room.participant(room.preferredCoordinator!)?.displayName,
           ),
+        const SpeakerLayoutCard(),
         const _ListeningSpot(),
         const SectionHeader('Phones'),
         for (final p in room.participants) _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
@@ -323,7 +335,6 @@ class _DeviceTile extends ConsumerWidget {
         ConnectionStatus.suspect => 'not responding',
         ConnectionStatus.disconnected => 'disconnected',
       },
-      if (p.channel != ChannelRole.stereo) channelLabel(p.channel).replaceAll(' (experimental)', ''),
       if ((p.calibrationUs ?? 0) != 0) offsetLabel(p.calibrationUs).toLowerCase(),
     ];
     final canEdit = s.isLive && (isMe || s.canControl);
@@ -335,7 +346,10 @@ class _DeviceTile extends ConsumerWidget {
       ]),
       title: Text('${p.displayName}${isMe ? ' (this phone)' : ''}'),
       subtitle: Text(parts.join(' · ')),
-      trailing: canEdit ? const Icon(Icons.tune) : null,
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        ChannelBadge(p.channel),
+        if (canEdit) ...[const SizedBox(width: 8), const Icon(Icons.tune)],
+      ]),
       onTap: canEdit
           ? () => showModalBottomSheet<void>(
                 context: context,
@@ -399,7 +413,15 @@ class DeviceSettingsSheet extends ConsumerWidget {
           ),
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('Left/Right is experimental: put two phones apart for a stereo effect.', style: t.bodySmall),
+            child: Text('For a stereo effect put the left and right phones a few metres apart, facing you.', style: t.bodySmall),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.flashlight_on_outlined),
+              label: const Text('Identify this phone'),
+              onPressed: () => run(ctl.identify(deviceId)),
+            ),
           ),
           if (s.role == ParticipantRole.host && p.role != ParticipantRole.host) ...[
             const SizedBox(height: 16),

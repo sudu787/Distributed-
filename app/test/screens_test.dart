@@ -220,6 +220,58 @@ void main() {
     expect(find.textContaining('artists are credited'), findsOneWidget);
   });
 
+  testWidgets('speakers: layout shows which phone is left and right; stereo pair and identify', (tester) async {
+    _phone(tester);
+    final base = _roomState();
+    final room = base.room!;
+    RoomState withChannels(ChannelRole mine, ChannelRole other, {IdentifyRequest? identify}) => RoomState(
+          roomId: room.roomId,
+          roomName: room.roomName,
+          coordinatorId: room.coordinatorId,
+          version: room.version + 1,
+          timeline: room.timeline,
+          playlist: room.playlist,
+          identify: identify,
+          participants: [
+            for (final p in room.participants)
+              ParticipantSummary(
+                deviceId: p.deviceId,
+                displayName: p.displayName,
+                role: p.role,
+                connection: p.connection,
+                currentTrack: p.currentTrack,
+                channel: p.deviceId == 'dev-me' ? mine : other,
+              ),
+          ],
+        );
+    final ctl = _FakeRoomController(base.copyWith(room: withChannels(ChannelRole.left, ChannelRole.right)));
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(base, controller: ctl)));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('This phone plays the LEFT channel'), findsOneWidget);
+    await tester.tap(find.text('Speakers'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Speaker layout'), findsOneWidget);
+    expect(find.text('L'), findsWidgets);
+    expect(find.text('R'), findsWidgets);
+    expect(find.text('Swap L/R'), findsOneWidget);
+    await tester.tap(find.text('Kitchen').first);
+    await tester.pump();
+    expect(ctl.sent, contains(ControlAction.identify));
+
+    // The coordinator asks this phone to identify itself: full-screen LEFT.
+    ctl.state = ctl.state.copyWith(
+        room: withChannels(ChannelRole.left, ChannelRole.right,
+            identify: const IdentifyRequest(deviceId: 'dev-me', seq: 1, untilUs: 1 << 40)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('LEFT'), findsOneWidget);
+    expect(find.text('This phone plays the left channel'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('LEFT'), findsNothing, reason: 'closes by itself');
+  });
+
   testWidgets('queue shows upload progress', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()),
@@ -245,7 +297,7 @@ void main() {
 
     await tester.tap(find.text('Speakers'));
     await tester.pump();
-    expect(find.textContaining('Kitchen'), findsOneWidget);
+    expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Kitchen')), findsOneWidget);
     expect(find.textContaining('downloading song'), findsOneWidget);
     expect(find.text('Calibrate to this spot'), findsOneWidget);
     expect(find.textContaining('cannot record audio'), findsOneWidget);
@@ -269,7 +321,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Speakers'));
     await tester.pump();
-    await tester.tap(find.text('Kitchen'));
+    await tester.tap(find.widgetWithText(ListTile, 'Kitchen'));
     await tester.pumpAndSettle();
     expect(find.text('No adjustment'), findsOneWidget);
     await tester.tap(find.text('Left'));

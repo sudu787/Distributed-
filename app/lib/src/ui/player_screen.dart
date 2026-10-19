@@ -9,6 +9,7 @@ import '../state/room_controller.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'room_screen.dart' show DeviceSettingsSheet, startSpotCalibration;
+import 'speaker_layout.dart';
 import 'widgets.dart';
 
 /// Playing tab: what is playing and the shared controls.
@@ -90,6 +91,22 @@ class _NowPlayingViewState extends ConsumerState<NowPlayingView> {
             style: t.bodyLarge?.copyWith(color: cs.onSurfaceVariant), textAlign: TextAlign.center),
         const SizedBox(height: 8),
         Center(child: _StatusLine(s: s, positionUs: pos)),
+        if (me != null)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: ActionChip(
+                avatar: ChannelBadge(me.channel),
+                label: Text(switch (me.channel) {
+                  ChannelRole.left => 'This phone plays the LEFT channel',
+                  ChannelRole.right => 'This phone plays the RIGHT channel',
+                  ChannelRole.mono => 'This phone plays a mono mix',
+                  ChannelRole.stereo => 'This phone plays full stereo',
+                }),
+                onPressed: () => ctl.identify(myId),
+              ),
+            ),
+          ),
         const SizedBox(height: 4),
         Slider(
           value: (_dragPos ?? pos.toDouble()).clamp(0, (dur ?? 1).toDouble()),

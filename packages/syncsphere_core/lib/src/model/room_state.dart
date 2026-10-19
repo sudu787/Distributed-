@@ -419,6 +419,23 @@ class ParticipantSummary {
   }
 }
 
+/// "Which phone is this?": the coordinator asks [deviceId] to flash its
+/// screen, show its channel and vibrate until [untilUs] (coordinator time).
+/// [seq] increases with every request, so asking twice re-triggers it.
+class IdentifyRequest {
+  final String deviceId;
+  final int seq;
+  final int untilUs;
+  const IdentifyRequest({required this.deviceId, required this.seq, required this.untilUs});
+
+  Map<String, Object?> toJson() => {'dev': deviceId, 'seq': seq, 'until': untilUs};
+
+  factory IdentifyRequest.fromJson(Map<String, Object?> j) {
+    final r = Reader(j, 'identify');
+    return IdentifyRequest(deviceId: r.string('dev', maxLength: 64), seq: r.integer('seq', min: 0), untilUs: r.integer('until'));
+  }
+}
+
 class RoomState {
   final String roomId;
   final String roomName;
@@ -446,6 +463,9 @@ class RoomState {
   /// `participant/failover.dart`). Null: no preference.
   final String? preferredCoordinator;
 
+  /// Latest "identify this phone" request (see [IdentifyRequest]).
+  final IdentifyRequest? identify;
+
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -462,6 +482,7 @@ class RoomState {
     this.shuffle = false,
     this.calibration,
     this.preferredCoordinator,
+    this.identify,
   });
 
   TrackInfo? trackById(String? id) {
@@ -504,6 +525,7 @@ class RoomState {
     CalibrationPlan? calibration,
     bool clearCalibration = false,
     String? preferredCoordinator,
+    IdentifyRequest? identify,
   }) =>
       RoomState(
         roomId: roomId,
@@ -521,6 +543,7 @@ class RoomState {
         shuffle: shuffle ?? this.shuffle,
         calibration: clearCalibration ? null : (calibration ?? this.calibration),
         preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
+        identify: identify ?? this.identify,
       );
 
   Map<String, Object?> toJson() => {
@@ -539,6 +562,7 @@ class RoomState {
         if (shuffle) 'shuf': true,
         if (calibration != null) 'cal': calibration!.toJson(),
         if (preferredCoordinator != null) 'pref': preferredCoordinator,
+        if (identify != null) 'ident': identify!.toJson(),
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -567,6 +591,7 @@ class RoomState {
       shuffle: r.optBoolean('shuf') ?? false,
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
       preferredCoordinator: r.optString('pref', maxLength: 64),
+      identify: r.optMap('ident') == null ? null : IdentifyRequest.fromJson(r.optMap('ident')!),
     );
   }
 }

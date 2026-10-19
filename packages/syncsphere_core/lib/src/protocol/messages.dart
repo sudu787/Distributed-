@@ -480,6 +480,10 @@ enum ControlAction {
   /// on the coordinator (uploaded with `PUT /uploads/<id>`, or in its
   /// library).
   addTrack,
+
+  /// `dev` (default: sender): that phone flashes, shows its channel and
+  /// vibrates for a few seconds ("which phone is the left one?").
+  identify,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
