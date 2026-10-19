@@ -384,9 +384,14 @@ class ParticipantSession implements ClockSource {
     if (cand.deviceId == options.deviceId) {
       final p = options.failoverPolicy;
       final silent = clock.nowMicros() - _lastHeardUs;
-      if (_candidateIndex > 0 && silent < (p.silenceBeforeFailover + p.isolationHoldOff).inMicroseconds) {
-        // Nobody ahead of us in the succession order answered: most likely
-        // this phone is the one cut off. Go round again, coordinator first.
+      if (_candidateIndex > 0 &&
+          _lostBySilence &&
+          silent < (p.silenceBeforeFailover + p.isolationHoldOff).inMicroseconds) {
+        // The coordinator went silent (no closed connection) and nobody
+        // ahead of us in the succession order answered: most likely this
+        // phone is the one cut off. Go round again, coordinator first. (A
+        // closed connection means the coordinator process ended; then the
+        // phones ahead are the ones that may be gone, so we go ahead.)
         if (!_holdLogged) {
           _holdLogged = true;
           log.warn('failover.hold', 'no successor ahead of this device answers; not taking over yet (this phone may be cut off)');

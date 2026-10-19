@@ -243,8 +243,9 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 
 ### Failover (succession)
 
-*Isolation hold-off:* a phone that is next to promote itself but reached none of the successors ahead of it waits 20 s
-longer and retries from the coordinator, because it is most likely the one cut off.
+*Isolation hold-off:* after a *silent* loss (no closed connection), a phone that is next to promote itself but reached
+none of the successors ahead of it waits 20 s longer and retries from the coordinator, because it is most likely the one
+cut off.
 
 1. **Candidates.** `successionOrder(state)` lists the participants with `canHost` and an `ep` whose `conn` is not
    `disconnected`, excluding `coord`: the `pref` device (original host) first when eligible, then list (admission)

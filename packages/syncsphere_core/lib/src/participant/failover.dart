@@ -68,8 +68,9 @@ class FailoverPolicy {
   /// the fast path ([failoverAfter]).
   final Duration silenceBeforeFailover;
 
-  /// Before promoting *itself*, a device that is not first in the
-  /// succession order and could not reach any successor ahead of it waits
+  /// Before promoting *itself* after the coordinator went *silent*, a device
+  /// that is not first in the succession order and could not reach any
+  /// successor ahead of it waits
   /// this much longer (on top of [silenceBeforeFailover]) and goes round
   /// again, coordinator first. If nobody ahead answers, the likeliest
   /// explanation is that *this* phone is cut off (a Wi-Fi blip), not that
