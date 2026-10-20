@@ -101,8 +101,8 @@ object DeviceMedia {
 
     /**
      * Audio URIs carried by a share intent (ACTION_SEND / ACTION_SEND_MULTIPLE
-     * with an audio/* type or a generic type), as strings. Pure, so it can
-     * be unit-tested without Android framework classes.
+     * with an audio type or a generic type), as strings. Pure, so it can be
+     * unit-tested without Android framework classes.
      */
     fun sharedUris(action: String?, type: String?, single: String?, multiple: List<String>?): List<String> {
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return emptyList()
