@@ -36,14 +36,6 @@ class CalibrationPlan {
   final int clickHz;
   final int clickMs;
 
-  /// Surround calibration: every device listed here (the listener plus all
-  /// other phones with a microphone) records the clicks, so the coordinator
-  /// can measure the distances between phones (see calibration/layout.dart).
-  /// Empty: an ordinary "calibrate to this spot".
-  final List<String> recorders;
-
-  bool get isSurround => recorders.length > 1;
-
   const CalibrationPlan({
     required this.id,
     required this.listener,
@@ -53,7 +45,6 @@ class CalibrationPlan {
     this.rounds = 3,
     this.clickHz = 2000,
     this.clickMs = 4,
-    this.recorders = const [],
   });
 
   /// Deterministic, well-formed track id for the calibration segment.
@@ -85,7 +76,6 @@ class CalibrationPlan {
         'rounds': rounds,
         'hz': clickHz,
         'ms': clickMs,
-        if (recorders.isNotEmpty) 'rec': recorders,
       };
 
   factory CalibrationPlan.fromJson(Map<String, Object?> j) {
@@ -99,7 +89,6 @@ class CalibrationPlan {
       rounds: r.integer('rounds', min: 1, max: 10),
       clickHz: r.integer('hz', min: 200, max: 8000),
       clickMs: r.integer('ms', min: 1, max: 50),
-      recorders: r.has('rec') ? r.stringList('rec', maxLength: 64, maxItemLength: 64) : const [],
     );
   }
 }

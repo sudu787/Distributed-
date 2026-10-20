@@ -3,7 +3,6 @@ package dev.syncsphere.syncsphere_audio
 import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -33,19 +32,15 @@ import io.flutter.plugin.common.PluginRegistry
  *   acquireNetworkLocks → Map, releaseNetworkLocks
  *   keepScreenOn {on}
  *   probe {uri} → {durationMs, title, artist, album, mimeType}
- *   setChannelRole {role} ("stereo" | "left" | "right" | "mono" | "center" | "surroundLeft" | "surroundRight")
- *   requestPermission {name} ("microphone" | "notifications" | "audio") → Boolean
+ *   setChannelRole {role} ("stereo" | "left" | "right" | "mono")
+ *   requestPermission {name} ("microphone" | "notifications") → Boolean
  *   recordMic {startAtNanos, durationMs, sampleRate} → {path, sampleRate, firstSampleNanos, timestampSource}
  *   startService {title, text, playing}, updateService {…}, stopService
  *   exactCopy {uri, out} → {path, sampleRate, channels, durationUs, decoder} (decode to PCM WAV)
  *   extractArtwork {uri, out} → Boolean (embedded cover → JPEG at out)
  *   moveToBack → Boolean (app to background, keeps running)
- *   queryAudio → [{uri, title, artist, album, albumId, durationMs, size, mime, name}] (needs "audio" permission)
- *   copyContent {uri, out} → Long (bytes copied from a content:// URI)
- *   takeSharedAudio → [{uri, name, size, mime}] (audio shared to the app; cleared once taken)
  * Event channel `dev.syncsphere/audio_events`: {kind, segment, atNanos, message};
- * notification buttons arrive as {kind: "command", message: play|pause|next|previous}; audio shared
- * while the app runs as {kind: "shared"}.
+ * notification buttons arrive as {kind: "command", message: play|pause|next|previous}.
  */
 class SyncsphereAudioPlugin :
     FlutterPlugin,
@@ -55,7 +50,6 @@ class SyncsphereAudioPlugin :
     PluginRegistry.RequestPermissionsResultListener {
     companion object {
         private const val PERMISSION_REQUEST = 4781
-        private const val CONSUMED = "dev.syncsphere.shareConsumed"
     }
 
     private lateinit var channel: MethodChannel
@@ -68,13 +62,6 @@ class SyncsphereAudioPlugin :
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var pendingPermission: Result? = null
-    private val sharedUris = LinkedHashSet<String>()
-    private val newIntentListener = PluginRegistry.NewIntentListener { intent ->
-        if (takeShare(intent)) {
-            main.post { sink?.success(mapOf("kind" to "shared", "segment" to -1, "atNanos" to System.nanoTime(), "message" to null)) }
-        }
-        false
-    }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -171,33 +158,6 @@ class SyncsphereAudioPlugin :
                     }.start()
                 }
                 "moveToBack" -> result.success(activity?.moveTaskToBack(true) ?: false)
-                "queryAudio" -> Thread {
-                    try {
-                        val list = DeviceMedia.queryAudio(context)
-                        main.post { result.success(list) }
-                    } catch (e: SecurityException) {
-                        main.post { result.error("permission_denied", "music access not granted", null) }
-                    } catch (e: Exception) {
-                        main.post { result.error("query_failed", e.message, null) }
-                    }
-                }.start()
-                "copyContent" -> {
-                    val uri = call.argument<String>("uri") ?: throw IllegalArgumentException("uri missing")
-                    val out = call.argument<String>("out") ?: throw IllegalArgumentException("out missing")
-                    Thread {
-                        try {
-                            val n = DeviceMedia.copyContent(context, uri, java.io.File(out))
-                            main.post { result.success(n) }
-                        } catch (e: Exception) {
-                            main.post { result.error("copy_failed", e.message ?: e.javaClass.simpleName, null) }
-                        }
-                    }.start()
-                }
-                "takeSharedAudio" -> {
-                    val uris = sharedUris.toList()
-                    sharedUris.clear()
-                    result.success(uris.map { DeviceMedia.describe(context, it) })
-                }
                 "keepScreenOn" -> {
                     val on = call.argument<Boolean>("on") ?: false
                     activity?.window?.let { w ->
@@ -208,9 +168,7 @@ class SyncsphereAudioPlugin :
                 }
                 "setChannelRole" -> {
                     val role = call.argument<String>("role") ?: throw IllegalArgumentException("role missing")
-                    if (role !in setOf("stereo", "left", "right", "mono", "center", "surroundLeft", "surroundRight")) {
-                        throw IllegalArgumentException("unknown role $role")
-                    }
+                    if (role !in setOf("stereo", "left", "right", "mono")) throw IllegalArgumentException("unknown role $role")
                     engine().setChannelRole(role)
                     result.success(null)
                 }
@@ -279,7 +237,6 @@ class SyncsphereAudioPlugin :
         val permission = when (name) {
             "microphone" -> Manifest.permission.RECORD_AUDIO
             "notifications" -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
-            "audio" -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
             else -> throw IllegalArgumentException("unknown permission $name")
         }
         if (permission == null ||
@@ -327,22 +284,9 @@ class SyncsphereAudioPlugin :
         activity = binding.activity
         activityBinding = binding
         binding.addRequestPermissionsResultListener(this)
-        binding.addOnNewIntentListener(newIntentListener)
-        takeShare(binding.activity.intent)
-    }
-
-    /** Remembers audio shared by [intent] (once per intent, also across recreation). */
-    private fun takeShare(intent: Intent?): Boolean {
-        if (intent == null || intent.getBooleanExtra(CONSUMED, false)) return false
-        val uris = DeviceMedia.sharedUris(intent)
-        if (uris.isEmpty()) return false
-        intent.putExtra(CONSUMED, true)
-        sharedUris.addAll(uris)
-        return true
     }
 
     private fun detach() {
-        activityBinding?.removeOnNewIntentListener(newIntentListener)
         activityBinding?.removeRequestPermissionsResultListener(this)
         activityBinding = null
         activity = null

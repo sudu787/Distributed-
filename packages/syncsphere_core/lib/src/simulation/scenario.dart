@@ -20,7 +20,6 @@ import 'package:fake_async/fake_async.dart';
 
 import '../audio/audio_backend.dart';
 import '../calibration/calibration_analysis.dart';
-import '../calibration/layout.dart';
 import '../calibration/calibration_runtime.dart';
 import '../calibration/click_track.dart';
 import '../config/sync_config.dart';
@@ -72,25 +71,10 @@ class NetworkCondition {
     LinkProfile(base: Duration(milliseconds: 6), jitterMean: Duration(milliseconds: 9), lossRate: 0.01, spikeRate: 0.05, spike: Duration(milliseconds: 150)),
   );
 
-  /// Typical Wi-Fi plus a 2–5 s stall about every 40 s per phone (roaming,
-  /// deep power save). Used to compare failure detectors.
-  static const wifiFlaky = NetworkCondition(
-    'wifi-flaky',
-    LinkProfile(
-        base: Duration(milliseconds: 3),
-        jitterMean: Duration(milliseconds: 5),
-        lossRate: 0.005,
-        spikeRate: 0.02,
-        spike: Duration(milliseconds: 60),
-        stallMeanGap: Duration(seconds: 40)),
-    LinkProfile(base: Duration(milliseconds: 4), jitterMean: Duration(milliseconds: 8), lossRate: 0.005, spikeRate: 0.04, spike: Duration(milliseconds: 100)),
-  );
-
-  /// The benchmark matrix (wifi-flaky is only used by the detector scenarios).
   static const all = [lanIdeal, wifiGood, wifiTypical, wifiCongested, hotspot];
 
   static NetworkCondition byName(String n) =>
-      [...all, wifiFlaky].firstWhere((c) => c.name == n, orElse: () => throw ArgumentError('unknown network $n'));
+      all.firstWhere((c) => c.name == n, orElse: () => throw ArgumentError('unknown network $n'));
 }
 
 sealed class SimAction {
@@ -134,11 +118,9 @@ class PartitionAction extends SimAction {
 
 /// The listener device requests an acoustic calibration to its position.
 class CalibrateAction extends SimAction {
-  /// Surround calibration: every phone records (needs Scenario.positionsM).
-  final bool surround;
-  const CalibrateAction({this.surround = false});
+  const CalibrateAction();
   @override
-  String get label => surround ? 'calibrate-surround' : 'calibrate';
+  String get label => 'calibrate';
 }
 
 /// A participant switches its own channel role (distributed stereo).
@@ -206,19 +188,6 @@ class Scenario {
   /// Distance (m) from each device to the listener, cycled like [profiles].
   final List<double> distancesM;
 
-  /// 2-D room positions (m) of every device. When set, every device has a
-  /// (simulated) microphone that hears every other device with the right
-  /// propagation delay, and listener distances derive from these positions.
-  final List<(double, double)>? positionsM;
-
-  /// For surround-calibration metrics: which devices the user would tap as
-  /// "in front" and "on the left".
-  final int? frontIndex;
-  final int? leftIndex;
-
-  /// Devices whose owner did not allow room measurement from other phones.
-  final Set<int> declineRemoteRecording;
-
   const Scenario({
     required this.name,
     required this.participants,
@@ -237,27 +206,7 @@ class Scenario {
     this.handback = const HandbackPolicy(),
     this.listenerIndex,
     this.distancesM = const [1.0],
-    this.positionsM,
-    this.frontIndex,
-    this.leftIndex,
-    this.declineRemoteRecording = const {},
   });
-
-  /// Distance (m) between devices [a] and [b] (speaker to own mic for a == b).
-  double distanceBetween(int a, int b) {
-    final p = positionsM;
-    if (p == null) return a == b ? kSelfDistanceM : distancesM[b % distancesM.length];
-    if (a == b) return kSelfDistanceM;
-    final (ax, ay) = p[a];
-    final (bx, by) = p[b];
-    return sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
-  }
-
-  /// Distance from each device to the listener.
-  double listenerDistance(int i) {
-    if (positionsM == null || listenerIndex == null) return distancesM[i % distancesM.length];
-    return i == listenerIndex ? 0.3 : distanceBetween(listenerIndex!, i);
-  }
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -272,11 +221,7 @@ class Scenario {
         if (failover) 'failover': true,
         if (failover) 'handbackStableForS': handback.stableFor.inSeconds,
         if (listenerIndex != null) 'listener': listenerIndex,
-        if (listenerIndex != null && positionsM == null) 'distancesM': distancesM,
-        if (positionsM != null)
-          'positionsM': [
-            for (final (x, y) in positionsM!) [x, y]
-          ],
+        if (listenerIndex != null) 'distancesM': distancesM,
       };
 }
 
@@ -404,18 +349,6 @@ class SimulationRunner {
       {'trueMs': 0, 'device': 'device-0', 'epoch': 1}
     ];
     final simEvents = <Map<String, Object?>>[];
-    // Failure-detector bookkeeping: coordinator-side member failures (true
-    // time, device) and partition starts (true time, device).
-    final memberFailures = <(int, String)>[];
-    final partitionStarts = <(int, String)>[];
-    final logSubs = <StreamSubscription<SyncEvent>>[];
-    EventLog watchCoordinatorLog(EventLog l) {
-      logSubs.add(l.stream.listen((e) {
-        if (e.category == 'member.failed') memberFailures.add((trueNow(), e.data['device'] as String? ?? '?'));
-      }));
-      return l;
-    }
-
     void logEvent(String what, [Map<String, Object?> data = const {}]) {
       simEvents.add({'trueMs': (trueNow() - epoch) ~/ 1000, 'event': what, ...data});
     }
@@ -449,7 +382,7 @@ class SimulationRunner {
                     handback: sc.handback,
                   ),
                   clock: clk,
-                  log: watchCoordinatorLog(EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer)),
+                  log: EventLog(clock: clk, source: 'coordinator@$id', printer: coordLog.printer),
                   restoredState: req.state,
                 );
                 final previous = coordinator;
@@ -482,23 +415,17 @@ class SimulationRunner {
           joinKey: 'SIMKEY01',
           outputCalibrationUs: sc.outputCalibrationUs[i % sc.outputCalibrationUs.length],
           failover: failover,
-          recorder: sc.listenerIndex == i || sc.positionsM != null
+          recorder: sc.listenerIndex == i
               ? SimMicrophone(
                   trueNowUs: trueNow,
                   listenerClock: clk,
                   devices: () => [
-                    for (final d in devices)
-                      (
-                        d.id,
-                        d.backend,
-                        sc.positionsM != null ? sc.distanceBetween(i, d.index) : sc.listenerDistance(d.index)
-                      )
+                    for (final d in devices) (d.id, d.backend, sc.distancesM[d.index % sc.distancesM.length])
                   ],
                   plan: () => coordinator.state.calibration,
                   random: Random(sc.seed * 7 + i),
                 )
               : null,
-          allowRemoteCalibration: sc.declineRemoteRecording.contains(i) ? () => false : null,
           calibrationTracks: const _SimCalibrationTracks(),
         ),
         connector: net.connector(id, address, link),
@@ -541,7 +468,6 @@ class SimulationRunner {
 
     // Record every playing timeline and the true time it was published.
     watchTimelines(coordinator, hostClock);
-    watchCoordinatorLog(coordLog);
     final dead = <String>{};
 
     for (final d in devices) {
@@ -666,11 +592,10 @@ class SimulationRunner {
           control(ControlAction.seek, pos: position.inMicroseconds);
         case NextTrackAction():
           control(ControlAction.next);
-        case CalibrateAction(:final surround):
+        case CalibrateAction():
           final li = sc.listenerIndex;
           if (li == null) throw StateError('CalibrateAction needs Scenario.listenerIndex');
-          unawaited(
-              devices[li].session.control(ControlAction.calibrate, mode: surround ? 'surround' : null).then((ack) {
+          unawaited(devices[li].session.control(ControlAction.calibrate).then((ack) {
             logEvent(ack.accepted ? 'calibration-started' : 'calibration-rejected', {'error': ack.error});
           }));
         case ChannelRoleAction(:final participant, :final role):
@@ -679,7 +604,6 @@ class SimulationRunner {
           }));
         case PartitionAction(:final participant, :final duration):
           final d = devices[participant];
-          partitionStarts.add((trueNow(), d.id));
           d.link.partition();
           Timer(duration, () {
             d.link.heal();
@@ -717,9 +641,6 @@ class SimulationRunner {
     for (final sub in tlSubs) {
       unawaited(sub.cancel());
     }
-    for (final sub in logSubs) {
-      unawaited(sub.cancel());
-    }
     clockSampler.cancel();
     latencyWatcher.cancel();
     recoveryWatcher.cancel();
@@ -755,7 +676,9 @@ class SimulationRunner {
     // listener's position (343 m/s).
     final listenerSpread = SampleStats();
     if (sc.listenerIndex != null) {
-      final propUs = {for (var i = 0; i < sc.participants; i++) 'device-$i': sc.listenerDistance(i) / 343.0 * 1e6};
+      final propUs = {
+        for (var i = 0; i < sc.participants; i++) 'device-$i': sc.distancesM[i % sc.distancesM.length] / 343.0 * 1e6
+      };
       for (final smp in samples) {
         if (smp.errors.length < 2) continue;
         if (timelines[smp.generation] == null) continue;
@@ -866,23 +789,8 @@ class SimulationRunner {
       'networkBytesPerDevicePerSecond': sc.participants == 0
           ? 0
           : (net.bytesSent / sc.participants / max(1, sc.duration.inSeconds)).round(),
-      if (sc.positionsM != null) 'surroundCalibration': _surroundMetrics(sc, coordinator.state.layout),
       'failedSessions': failedSessions,
       'killedDevices': dead.toList(),
-      'failureDetection': {
-        'detector': sc.config.membership.detector.name,
-        // Coordinator closed a member's link for silence (false positives
-        // when no device actually died).
-        'memberFailures': memberFailures.length,
-        'sessionReconnects': devices.fold<int>(0, (n, d) => n + d.session.reconnectCount),
-        'hostChanges': coordinatorHistory.length - 1,
-        'linkStalls': devices.fold<int>(0, (n, d) => n + d.link.stalls.where((w) => w.$1 < trueNow()).length),
-        // Time from a guest being cut off until the coordinator declared it failed.
-        'guestFailureDetectedAfterMs': [
-          for (final (at, dev) in partitionStarts)
-            ...memberFailures.where((f) => f.$2 == dev && f.$1 >= at).take(1).map((f) => (f.$1 - at) ~/ 1000),
-        ],
-      },
       if (promotedDevice != null) 'failover': {
         'promoted': promotedDevice,
         'promotedAfterKillMs': (promotedAtUs! - killedAtUs!) ~/ 1000,
@@ -1039,42 +947,3 @@ class _FnClock implements MonotonicClock {
   int nowMicros() => f();
 }
 
-
-/// How well a surround calibration recovered the (simulated) room: pairwise
-/// distance errors, angle errors after orienting with the true front/left
-/// phones, and the roles that would be suggested.
-Map<String, Object?> _surroundMetrics(Scenario sc, SpeakerLayout? layout) {
-  if (layout == null) return {'measured': false};
-  final pos = {for (final e in layout.positions.entries) e.key: Point(e.value.$1, e.value.$2)};
-  int idx(String id) => int.parse(id.substring('device-'.length));
-  final distErr = SampleStats();
-  final ids = pos.keys.toList();
-  for (var a = 0; a < ids.length; a++) {
-    for (var b = a + 1; b < ids.length; b++) {
-      final est = pos[ids[a]]!.distanceTo(pos[ids[b]]!);
-      distErr.add((est - sc.distanceBetween(idx(ids[a]), idx(ids[b]))).abs() * 100);
-    }
-  }
-  final out = <String, Object?>{
-    'measured': true,
-    'phones': ids.length,
-    'fitResidualCm': (layout.residualM * 100).round(),
-    'distanceErrorCm': distErr.summary(),
-  };
-  final f = sc.frontIndex, l = sc.leftIndex, li = sc.listenerIndex;
-  if (f != null && l != null && li != null && pos.containsKey('device-$f') && pos.containsKey('device-$l')) {
-    final placed = orientLayout(pos, listener: 'device-$li', front: ['device-$f'], left: 'device-$l');
-    final (lx, ly) = sc.positionsM![li];
-    final azErr = SampleStats();
-    for (final e in placed.entries) {
-      final (x, y) = sc.positionsM![idx(e.key)];
-      final trueAz = atan2(x - lx, y - ly) * 180 / pi;
-      var d = (e.value.azimuthDeg - trueAz).abs();
-      if (d > 180) d = 360 - d;
-      azErr.add(d);
-    }
-    out['azimuthErrorDeg'] = azErr.summary();
-    out['roles'] = {for (final e in assignSurroundRoles(placed).entries) e.key: e.value.name};
-  }
-  return out;
-}

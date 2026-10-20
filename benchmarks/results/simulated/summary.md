@@ -1,7 +1,7 @@
 # SyncSphere simulated benchmark results
 
 > **SIMULATED — virtual time, modelled clocks/network/audio devices. NOT hardware measurements.**  
-> suite `full`, seed `42`, generated 2026-10-19T13:51:31.866588Z  
+> suite `full`, seed `42`, generated 2026-10-15T18:18:32.328147Z  
 > Spread = max − min acoustic (ground-truth) position error across devices at the same instant, sampled every 50 ms. "Steady" excludes 3 s after each timeline change.
 
 | scenario | n | network | spread p50 | spread p95 | spread p99 | spread max | start skew p50 | start skew max | last-min p95 | cmd→audible p50 | clock err p95 (µs) | unc. coverage | recovery max | resyncs | failed |
@@ -29,10 +29,6 @@
 | partition-recovery-n5 | 5 | wifi-typical | 8.8 | 10.1 | 20.1 | 28.6 | 31.4 | 31.4 | 8.8 | 640.0 | 1323.0 | 1.0 | 50.0 | 0 | 0 |
 | coordinator-failure-n3 | 3 | wifi-good | 6.9 | 6.9 | 6.9 | 6.9 | 8.6 | 8.6 | 8.6 | 600.0 | 826.0 | 1.0 | – | 0 | 2 |
 | coordinator-failover-n5 | 5 | wifi-typical | 4.5 | 10.1 | 20.7 | 28.6 | 19.2 | 31.4 | 7.1 | 560.0 | 1649.0 | 1.0 | – | 0 | 0 |
-| detector-fixed-wifi-good-n4 | 4 | wifi-good | 5.7 | 7.6 | 8.3 | 16.3 | 14.5 | 14.5 | 9.6 | 600.0 | 343.0 | 1.0 | 50.0 | 0 | 0 |
-| detector-fixed-wifi-flaky-n4 | 4 | wifi-flaky | 4.0 | 8.0 | 8.1 | 13.8 | 14.8 | 14.8 | 5.6 | 720.0 | 1310.0 | 1.0 | 50.0 | 0 | 0 |
-| detector-phi-wifi-good-n4 | 4 | wifi-good | 5.7 | 7.6 | 8.3 | 16.3 | 14.5 | 14.5 | 9.9 | 600.0 | 326.0 | 1.0 | 50.0 | 0 | 0 |
-| detector-phi-wifi-flaky-n4 | 4 | wifi-flaky | 3.5 | 8.0 | 8.1 | 13.8 | 14.8 | 14.8 | 6.0 | 720.0 | 1328.0 | 1.0 | 50.0 | 0 | 0 |
 | failover-failback-n3 | 3 | wifi-typical | 5.9 | 8.5 | 8.6 | 8.7 | 13.8 | 19.5 | 8.6 | 520.0 | 1812.0 | 1.0 | – | 0 | 0 |
 | heterogeneous-devices-n5 | 5 | wifi-typical | 16.6 | 21.8 | 28.6 | 45.2 | 23.6 | 47.4 | 10.3 | 700.0 | 1261.0 | 0.9992 | – | 0 | 0 |
 | bluetooth-uncalibrated-n2 | 2 | wifi-good | 185.9 | 187.1 | 187.2 | 187.2 | 4.9 | 4.9 | 186.8 | 600.0 | 597.0 | 1.0 | – | 1 | 0 |
@@ -48,22 +44,7 @@
 | scenario | final epoch | final coordinator | last promoted | promoted after kill (ms) | spread p95 / max in 15 s after promotion (ms) | handed back to | spread p95 / max in 15 s after handback (ms) |
 |---|---|---|---|---|---|---|---|
 | coordinator-failover-n5 | 3 | device-2 | device-2 | 2014 | 4.1 / 4.1 | – | – |
-| detector-fixed-wifi-good-n4 | 2 | device-1 | device-1 | 2009 | 15.1 / 16.3 | – | – |
-| detector-fixed-wifi-flaky-n4 | 2 | device-1 | device-1 | 2023 | 8.3 / 9.1 | – | – |
-| detector-phi-wifi-good-n4 | 2 | device-1 | device-1 | 2005 | 15.1 / 16.3 | – | – |
-| detector-phi-wifi-flaky-n4 | 2 | device-1 | device-1 | 2020 | 4.7 / 4.9 | – | – |
 | failover-failback-n3 | 3 | device-0 | device-1 | 2045 | 2.7 / 2.7 | device-0 | 6.0 / 6.0 |
-
-## Failure detectors: fixed timeouts vs φ accrual (SIMULATED)
-
-10 min of playback (no device fails), then a guest is cut off for 10 s and the host is killed. "False" counts are before any real failure.
-
-| scenario | link stalls | member links closed | session reconnects | host changes | guest cut off → declared failed (ms) | host killed → successor (ms) |
-|---|---|---|---|---|---|---|
-| detector-fixed-wifi-good-n4 | 0 | 1 | 4 | 1 | 8200 | 2009 |
-| detector-fixed-wifi-flaky-n4 | 42 | 1 | 4 | 1 | 8200 | 2023 |
-| detector-phi-wifi-good-n4 | 0 | 1 | 4 | 1 | 4200 | 2005 |
-| detector-phi-wifi-flaky-n4 | 48 | 2 | 5 | 1 | 5200 | 2020 |
 
 ## Listening-spot calibration (SIMULATED)
 

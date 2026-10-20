@@ -19,9 +19,6 @@
 | Rogue coordinator (spoofed beacon) | Lures clients into connecting | Mutual authentication: the coordinator must prove the key (`serverProof`, plus MAC'd frames). Clients pin the room id from discovery. | A rogue server receives the client's proof and can attempt offline guessing (same as the sniffer case) |
 | Downloader without membership | Requests `/tracks/<id>` | Per-session HMAC token bound to the path and an expiry in coordinator time. Only playlist tracks the host serves are reachable. The URL contains no filesystem path. | A member can download every served playlist track, which is the feature |
 | Member uploading songs | Sends files with `PUT /uploads/<id>` | Only members with control rights, method-bound HMAC token, one upload per session, 512 MiB cap, stored only if the SHA-256 matches the id (no substitution of another track), uploads written to a temporary file and moved into the track cache | A controller can fill the host's cache up to its LRU limit; the content is not inspected (any bytes with a matching hash are accepted) |
-| Malicious source URL in a track (`src`) | Makes every device fetch a URL | Only the authenticated coordinator publishes the state, and only members with control rights can add songs. URLs must be http/https (no `file:`/`content:`). Downloads are size-capped and stored only if the SHA-256 matches the id, so nothing unexpected is played | A controller can make devices issue GET requests to a URL of its choice (including LAN addresses). Responses are discarded unless they hash to the track id |
-| Member serving bad song chunks (phone-to-phone sharing) | Answers chunk requests with wrong bytes, or a forged chunk list | Chunk lists must match the coordinator's `croot`, each chunk must match its hash, and the assembled file must match the track id. A source is dropped after 2 bad chunks | Wasted bandwidth (a few chunks) |
-| Non-member fetching chunks from a phone | Connects to a peer server | Requests need a token signed with the room-wide peer key (derived from the join key) | Any *member* can read any member's songs. That is the feature, and the same trust as host downloads |
 | Resource exhaustion | Floods connections, huge frames, many downloads | Max 32 pending handshakes, 5 s handshake timeout, 256 KiB frame limit (checked after receipt; WebSocket compression disabled), malformed-message budget, participant cap (16), transfer concurrency (2 per session, 8 total), 512 MiB file cap, bounded caches and logs | A determined LAN attacker can still saturate Wi-Fi airtime; no software defense exists for that |
 | Malformed or hostile input | Invalid JSON, wrong types, out-of-range values, malicious config | Strict `Reader` validation with typed errors. Config values are clamped (a malicious `maxRateDelta` cannot exceed 25 %). Fuzz-style tests check that malformed input never throws anything except `ProtocolException`. | Bugs in the JSON/WebSocket stack of the Dart VM |
 
@@ -55,15 +52,6 @@ explicitly **not confidentiality**. The UI says to share the key only with peopl
 - **Microphone (acoustic calibration):** recording happens only on the listener's phone, only for the calibration
   segment (15–30 s), after an explicit confirmation and the Android permission prompt. The recording is analyzed on
   the phone and deleted; only per-click timing numbers (`cal.res`) are sent to the coordinator.
-- **Music on the phone:** read-only "Music and audio" access (READ_MEDIA_AUDIO; READ_EXTERNAL_STORAGE up to Android
-  12), requested only when "Music on this phone" is opened. Only the songs the user picks are copied into the app's
-  library. Audio shared to the app (SEND intents) is read once through the temporary URI grant and copied; the
-  app never keeps a content URI open.
-- **Microphone (surround measurement):** a measurement started on one phone records on *other* phones only if each
-  owner turned on "Help measure the room" (off by default; turning it on asks for the Android permission). Otherwise
-  the phone declines without recording and tells its owner who asked. The same limits apply: one click sequence,
-  analyzed on the phone, only click times and levels (`cal.res`) are sent. A member with control rights can start
-  measurements repeatedly; each one is visible (the music pauses, Android shows the microphone indicator).
 
 - Device ids are random per installation, not hardware identifiers.
 - No data leaves the local network and nothing is sent to any server. There is no analytics.

@@ -33,15 +33,11 @@ class DeviceCalibration {
   final int? correctionUs;
   final int expectedClicks;
 
-  /// Median click peak level in the recording (dBFS), null if not heard.
-  final double? levelDb;
-
   const DeviceCalibration({
     required this.deviceId,
     required this.arrivalsBySlot,
     required this.correctionUs,
     required this.expectedClicks,
-    this.levelDb,
   });
 
   bool get detected => correctionUs != null;
@@ -81,7 +77,6 @@ CalibrationOutcome analyzeCalibration({
   final halfWindow = (halfWindowUs * rate / 1e6).round();
 
   final perDevice = List.generate(plan.order.length, (_) => <int, int>{});
-  final levels = List.generate(plan.order.length, (_) => <double>[]);
   for (var slot = 0; slot < plan.slotCount; slot++) {
     final coordT = anchorCoordUs + plan.slotPositionUs(slot) - anchorPositionUs;
     final localT = coordToLocal(coordT);
@@ -91,12 +86,6 @@ CalibrationOutcome analyzeCalibration({
     final onset = _detectOnset(rec.samples, env, lo, hi, rate, minSnr);
     if (onset == null) continue;
     perDevice[plan.deviceIndexOfSlot(slot)][slot] = ((onset - expected) * 1e6 / rate).round();
-    var peak = 1;
-    final end = math.min(rec.samples.length, onset + (plan.clickMs * 2 * rate / 1000).ceil() + 1);
-    for (var i = onset; i < end; i++) {
-      peak = math.max(peak, rec.samples[i].abs());
-    }
-    levels[plan.deviceIndexOfSlot(slot)].add(20 * math.log(peak / 32768) / math.ln10);
   }
 
   final needed = (plan.rounds + 1) ~/ 2;
@@ -112,7 +101,6 @@ CalibrationOutcome analyzeCalibration({
         arrivalsBySlot: perDevice[k],
         correctionUs: medians[k] == null ? null : medians[k]! - reference,
         expectedClicks: plan.rounds,
-        levelDb: levels[k].isEmpty ? null : (levels[k]..sort())[levels[k].length ~/ 2],
       ),
   ]);
 }

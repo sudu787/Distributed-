@@ -276,38 +276,15 @@ class DriftConfig {
   }
 }
 
-/// Which failure detector judges link liveness (see failure_detector.dart).
-enum FailureDetectorKind { fixed, phi }
-
 /// Membership, heartbeats and failure detection.
 class MembershipConfig {
   final Duration heartbeatInterval;
 
-  /// Detector used by the coordinator (for members) and by participants
-  /// (for the coordinator).
-  final FailureDetectorKind detector;
-
-  /// Fixed detector: no traffic for this long marks a peer as suspect.
+  /// No traffic for this long marks a peer as suspect.
   final Duration suspectAfter;
 
-  /// Fixed detector: no traffic for this long marks a peer as failed and
-  /// closes the link.
+  /// No traffic for this long marks a peer as failed and closes the link.
   final Duration failAfter;
-
-  /// φ accrual detector: suspicion levels for "suspect" and "failed".
-  final double suspectPhi;
-  final double failPhi;
-
-  /// φ accrual detector: bounds on the silence before suspect / failed,
-  /// whatever the learned distribution says.
-  final Duration minSuspectAfter;
-  final Duration minFailAfter;
-  final Duration maxFailAfter;
-
-  /// φ accrual detector: extra delay tolerated on top of the mean heartbeat
-  /// interval, and the floor for the learned standard deviation.
-  final Duration acceptablePause;
-  final Duration minStdDev;
 
   /// A disconnected participant keeps its slot (role, volume) this long.
   final Duration reconnectGrace;
@@ -325,19 +302,8 @@ class MembershipConfig {
 
   const MembershipConfig({
     this.heartbeatInterval = const Duration(seconds: 1),
-    // Fixed 3 s / 8 s timeouts: what real phones were tested with. φ accrual
-    // is available but reacted to phone Wi-Fi power-save stalls with extra
-    // reconnects (and resyncs) in a real-phone test.
-    this.detector = FailureDetectorKind.fixed,
     this.suspectAfter = const Duration(seconds: 3),
     this.failAfter = const Duration(seconds: 8),
-    this.suspectPhi = 8,
-    this.failPhi = 12,
-    this.minSuspectAfter = const Duration(seconds: 2),
-    this.minFailAfter = const Duration(seconds: 4),
-    this.maxFailAfter = const Duration(seconds: 16),
-    this.acceptablePause = const Duration(milliseconds: 500),
-    this.minStdDev = const Duration(milliseconds: 200),
     this.reconnectGrace = const Duration(seconds: 90),
     this.maxParticipants = 16,
     this.handshakeTimeout = const Duration(seconds: 5),
@@ -347,16 +313,8 @@ class MembershipConfig {
 
   Map<String, Object?> toJson() => {
         'heartbeatIntervalMs': heartbeatInterval.inMilliseconds,
-        'detector': detector.name,
         'suspectAfterMs': suspectAfter.inMilliseconds,
         'failAfterMs': failAfter.inMilliseconds,
-        'suspectPhi': suspectPhi,
-        'failPhi': failPhi,
-        'minSuspectAfterMs': minSuspectAfter.inMilliseconds,
-        'minFailAfterMs': minFailAfter.inMilliseconds,
-        'maxFailAfterMs': maxFailAfter.inMilliseconds,
-        'acceptablePauseMs': acceptablePause.inMilliseconds,
-        'minStdDevMs': minStdDev.inMilliseconds,
         'reconnectGraceMs': reconnectGrace.inMilliseconds,
         'maxParticipants': maxParticipants,
         'handshakeTimeoutMs': handshakeTimeout.inMilliseconds,
@@ -369,16 +327,8 @@ class MembershipConfig {
     return MembershipConfig(
       heartbeatInterval:
           _ms(j['heartbeatIntervalMs'], d.heartbeatInterval, 100, 60000),
-      detector: FailureDetectorKind.values.firstWhere((k) => k.name == j['detector'], orElse: () => d.detector),
       suspectAfter: _ms(j['suspectAfterMs'], d.suspectAfter, 200, 600000),
       failAfter: _ms(j['failAfterMs'], d.failAfter, 300, 600000),
-      suspectPhi: _dbl(j['suspectPhi'], d.suspectPhi, 1, 50),
-      failPhi: _dbl(j['failPhi'], d.failPhi, 1, 50),
-      minSuspectAfter: _ms(j['minSuspectAfterMs'], d.minSuspectAfter, 200, 600000),
-      minFailAfter: _ms(j['minFailAfterMs'], d.minFailAfter, 300, 600000),
-      maxFailAfter: _ms(j['maxFailAfterMs'], d.maxFailAfter, 300, 600000),
-      acceptablePause: _ms(j['acceptablePauseMs'], d.acceptablePause, 0, 60000),
-      minStdDev: _ms(j['minStdDevMs'], d.minStdDev, 10, 60000),
       reconnectGrace: _ms(j['reconnectGraceMs'], d.reconnectGrace, 0, 3600000),
       maxParticipants: _int(j['maxParticipants'], d.maxParticipants, 1, 256),
       handshakeTimeout:

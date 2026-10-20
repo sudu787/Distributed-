@@ -5,7 +5,6 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import 'state/room_controller.dart';
 import 'ui/home_screen.dart';
 import 'ui/room_screen.dart';
-import 'ui/share_receiver.dart';
 import 'ui/widgets.dart';
 
 class SyncSphereApp extends StatelessWidget {
@@ -17,8 +16,11 @@ class SyncSphereApp extends StatelessWidget {
     return MaterialApp(
       title: 'SyncSphere',
       debugShowCheckedModeBanner: false,
-      theme: _theme(ColorScheme.fromSeed(seedColor: seed)),
-      darkTheme: _theme(ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark)),
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: seed), useMaterial3: true),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+        useMaterial3: true,
+      ),
       home: const _Root(),
       // Deep links (`syncsphere://app/join?...`, e.g. from a QR code scanned
       // with the camera app) arrive as the route `/join?...`.
@@ -39,37 +41,6 @@ class SyncSphereApp extends StatelessWidget {
     );
   }
 }
-
-/// One look for light and dark: rounded cards and sheets, floating
-/// snackbars, a calmer tab bar.
-ThemeData _theme(ColorScheme cs) => ThemeData(
-      colorScheme: cs,
-      useMaterial3: true,
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: cs.surfaceContainerLow,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        showDragHandle: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      ),
-      dialogTheme: DialogThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24))),
-      snackBarTheme: SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        height: 68,
-        backgroundColor: cs.surfaceContainer,
-        indicatorColor: cs.secondaryContainer,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      ),
-      listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.symmetric(horizontal: 16)),
-      chipTheme: ChipThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-      sliderTheme: const SliderThemeData(showValueIndicator: ShowValueIndicator.never),
-      appBarTheme: AppBarTheme(backgroundColor: cs.surface, scrolledUnderElevation: 2, centerTitle: false),
-    );
 
 /// Joins the room in a deep link (unless already in one) and returns to
 /// the root screen, which then shows the room.
@@ -121,11 +92,9 @@ class _Root extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(roomControllerProvider.select((s) => s.status));
     final inRoom = status == RoomStatus.active || status == RoomStatus.leaving;
-    return ShareReceiver(
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 250),
-        child: inRoom ? const RoomScreen(key: ValueKey('room')) : const HomeScreen(key: ValueKey('home')),
-      ),
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      child: inRoom ? const RoomScreen(key: ValueKey('room')) : const HomeScreen(key: ValueKey('home')),
     );
   }
 }

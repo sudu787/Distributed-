@@ -90,12 +90,12 @@ S → C  welcome    (MAC'd)      | reject (tag "-")
 | `clk.res` | S→C | `{id, t1, t2, t3}` | `t2` is stamped before parsing, `t3` just before sending |
 | `state` | S→C | `{state}` | Full authoritative snapshot (§4) |
 | `ready` | C→S | `{gen, track, ok, err?, lat, rtt, unc}` | Result of preparing pending segment `gen`. `lat` = start-latency compensation (µs), `rtt` = clock RTT p95 (µs), `unc` = clock uncertainty (µs). `err` ∈ `missing_track`, `hash_mismatch`, `download_failed`, `decode_error`, `prepare_error`, `too_large`. |
-| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?, mode?, off?, info?, to?}` | Control request (§5). `mode` ≤16 chars, `off` signed µs within ±1 000 000, `to` a playlist index. |
+| `ctl` | C→S | `{rid, act, base, posUs?, track?, val?, dev?, role?, mode?, off?}` | Control request (§5). `mode` ≤16 chars, `off` signed µs within ±1 000 000. |
 | `ctl.ack` | S→C | `{rid, ok, err?, ver}` | Result. `ver` = state version after applying it. |
 | `rep` | C→S | `{gen, at, pos, exp, err, rate, buf, off, unc, rtt, mode, ps}` | Sync report: coordinator-domain measurement time, rendered and expected position, error = pos − exp (µs), current rate, buffered µs, clock offset and uncertainty, RTT p95, correction mode (`idle|waiting|inSync|rateCorrecting|resyncing`), player state |
 | `evt` | C→S | `{kind, gen, detail?, data}` | `started` (data: `startErrorUs`, `playCallLateUs`, `latencyCompUs`), `lateJoin` (`lateUs`), `resync` (`posUs`), `stall`, `rejoined` (`recoveryUs`, `errorUs`), `error` |
 | `avail` | C→S | `{tracks:[{id, a}]}` | Track availability: `unknown|available|fetching|missing|mismatch`. Partial updates allowed. |
-| `cal.res` | C→S | `{id, arr: {dev: {slot: µs}}, missing?: [dev], lvl?: {dev: dBFS}, err?}` | Acoustic calibration result from the plan's listener, or from any recorder of a surround measurement (§5.2): per device, each detected click's arrival minus its scheduled time (common recorder offset included), and the median click peak level. Slots are string keys; ≤256 devices, ≤100 slots each. `err: "declined"`: the phone's owner has not allowed room measurement from other phones. |
+| `cal.res` | C→S | `{id, arr: {dev: {slot: µs}}, missing?: [dev], err?}` | Acoustic calibration result from the plan's listener (§5.1): per device, each detected click's arrival minus its scheduled time (common recorder offset included). Slots are string keys; ≤256 devices, ≤100 slots each. |
 | `diag` | S→C | `{parts:[{id, err?, unc?, off?, rtt?, mode, age?, rate, ps, be}], maxPair?}` | Aggregated diagnostics, about 1 Hz. Not versioned state. |
 | `bye` | both | `{reason}` | Graceful leave (C→S removes the member) or room closed (S→C, fatal for the client) |
 | `err` | S→C | `{code, reason}` | Non-fatal error report |
@@ -123,25 +123,10 @@ All positions and times are integer microseconds. Every reported timing value is
 }
 ```
 
-- Tracks may carry optional `src` (http/https source URL, ≤ 1024 chars), `art` (cover URL) and `credit` (≤ 64 chars,
-  e.g. "via Audius"). With `src`, every device downloads the file from the source first (no auth header, up to 5
-  redirects, same size cap) and falls back to `GET /tracks/<id>` from the coordinator. The SHA-256 `id` is checked
-  either way, so a changed source falls back to the host's copy.
-- Tracks may carry `croot`: SHA-256 over the track's 512 KiB chunk hashes, computed by the coordinator from its own
-  copy (never taken from a member). It enables phone-to-phone sharing (§8).
-- Participants may carry `peer` (`host:port` of the device's peer file server, from `caps.pport` and the address the
-  coordinator sees).
 - `rep` (`off|all|one`, default `off`) and `shuf` (default `false`) control `next`/`previous` and auto-advance.
-- `nxt` (optional) is the track that plays after the current one, in play order (it follows shuffle and repeat). It is
-  absent when nothing is loaded or at the end of the playlist.
-- Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`, `center`,
-  `surroundLeft`, `surroundRight`; rear surround roles play 15 ms later, see [surround.md](surround.md)); `cal` is the
+- Per participant: `ch` is the channel role (`stereo` default and omitted, `left`, `right`, `mono`); `cal` is the
   output calibration offset (µs) the device applies (rendered position = reported position − `cal`).
-- `layout` (room level, optional): the last surround measurement (§5.2), `{id, listener, pos: {dev: [x, y]}, lvl?:
-  {dev: dBFS}, res}`. Positions are metres in an arbitrary rotation and mirror image; `res` is the RMS misfit of the
-  distances (m).
-- `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its plan may list `rec` (recording
-  devices) for a surround measurement. Its click track id is
+- `cal` (room level) is present only while an acoustic calibration runs (§5.1). Its click track id is
   `sha256("syncsphere-calibration-v1|<id>|<listener>")`; `trackById` resolves it to a synthetic track that every device
   generates locally.
 
@@ -172,13 +157,10 @@ Only `host` and `controller` may send playback actions. A `listener` may change 
 | `setRole` | `dev`, `role` | Promote or demote | never |
 | `setRepeat` | `mode` `off\|all\|one` | Playlist repeat | never |
 | `setShuffle` | `val` (≥0.5 = on) | Shuffle order (reshuffled when turned on or when the playlist changes) | never |
-| `setChannelRole` | `mode` `stereo\|left\|right\|mono\|center\|surroundLeft\|surroundRight`, `dev?` | Channel role. A device may always change its own; others need control rights. Surround roles (`center`, `surroundLeft`, `surroundRight`) are refused with `invalid` unless every connected member sent `caps.sur: true`. | never |
+| `setChannelRole` | `mode` `stereo\|left\|right\|mono`, `dev?` | Channel role. A device may always change its own; others need control rights. | never |
 | `setCalibration` | `off`, `dev?` | Output calibration offset. Own device always; others need control rights. | never |
-| `calibrate` | `mode?` (`surround`) | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. With `mode: surround`, every connected phone with `caps.mic` records too (§5.2); needs at least two. | — |
-| `identify` | `dev?` | That phone flashes its channel and vibrates for 3 s (state `ident: {dev, seq, until}`). Own phone always; others need control rights. | never |
+| `calibrate` | — | Acoustic calibration measured by the sender's microphone (§5.1). Needs `caps.mic`. | — |
 | `addTrack` | `info` (track object, §4) | Appends a song. Needs control rights, and the coordinator must already have the file (uploaded with `PUT /uploads/<id>`, §8, or in its library); otherwise `invalid`. Idempotent. | never |
-| `removeTrack` | `track` | Removes the song. Removing the song that is playing (or about to start) moves on to the next song in play order, paused if it was paused; with nothing left it stops (idle). If auto-advance was preparing the removed song, the current song keeps playing and the following one is prepared instead. Refused with `busy` for the song a running calibration will restore. | never |
-| `moveTrack` | `track`, `to` | Moves the song to playlist index `to` (clamped). Moving a song directly after the current one while shuffling also makes it next in the shuffle order ("play next"). | never |
 
 While a calibration runs, `play`, `pause`, `seek`, `setTrack`, `next`, `previous` and `calibrate` are refused with
 `busy`.
@@ -209,24 +191,6 @@ and volume churn do not make playback commands stale. Ack error codes: `unauthor
 The corrections align sound **at the listener's position**, including propagation delay (about 2.9 ms per metre) and
 Bluetooth or speaker latency that software estimates cannot see. Other positions in the room are not aligned by this.
 
-### 5.2 Surround measurement (every phone listens)
-
-1. `calibrate` with `mode: surround`. The plan carries `rec`: the listener plus every other connected phone with
-   `caps.mic`. The click sequence is the same as §5.1.
-2. Each recorder that its owner allows (app setting "Help measure the room", off by default) records the whole sequence
-   and sends `cal.res` with its arrivals and levels. A phone that is not allowed answers at once with `err: "declined"`
-   and records nothing. Recordings never leave the phones.
-3. The listener's result applies timing corrections exactly as in §5.1. The coordinator then waits for every recorder's
-   answer (at most 6 s more) and computes:
-   - pairwise distances by two-way ranging: `d_xy = c/2 · [(A_x(y) − A_x(x)) − (A_y(y) − A_y(x))] + d_self`, where
-     `A_x(y)` is the arrival of y's click in x's recording, c = 343 m/s and `d_self` = 0.08 m (speaker to own
-     microphone). Every term is a difference within one recording, so clock offsets and output latency cancel. Median
-     over the rounds;
-   - the largest set of phones with all pairs measured, then 2-D positions by classical multidimensional scaling.
-4. With at least 3 phones including the listener, it publishes `layout`. The listener's app asks the user for the
-   phone(s) in front and a phone on the left, which fixes rotation and mirror image, and then suggests roles from the
-   angles and volume trims from the levels. It applies them with ordinary `setChannelRole` and `deviceVolume` requests.
-
 ## 6. Synchronization configuration (`welcome.config`)
 
 Distributed by the coordinator so the whole room uses one policy. Hostile or out-of-range values are clamped on parse.
@@ -243,38 +207,24 @@ Distributed by the coordinator so the whole room uses one policy. Hostile or out
 | | `rateEnterThresholdUs` / `rateExitThresholdUs` | 8000 / 3000 |
 | | `seekThresholdUs`, `seekThresholdNoRateUs`, `seekConfirmations`, `seekCooldownMs` | 250000, 45000, 2, 5000 |
 | | `correctionHorizonMs`, `maxRateDelta`, `minRateStep` | 4000, 0.015, 0.0005 |
-| membership | `heartbeatIntervalMs`, `detector` (`phi`\|`fixed`), `suspectPhi`, `failPhi`, `minSuspectAfterMs`, `minFailAfterMs`, `maxFailAfterMs`, `acceptablePauseMs`, `minStdDevMs`, `suspectAfterMs`, `failAfterMs` (fixed detector), `reconnectGraceMs` | 1000, fixed, 8, 12, 2000, 4000, 16000, 500, 200, 3000, 8000, 90000 |
+| membership | `heartbeatIntervalMs`, `suspectAfterMs`, `failAfterMs`, `reconnectGraceMs` | 1000, 3000, 8000, 90000 |
 | | `maxParticipants`, `handshakeTimeoutMs`, `maxAuthFailures`, `authWindowMs` | 16, 5000, 5, 60000 |
 
 ## 7. Liveness, failure and reconnection
 
-- Both sides send `hb` every second. Any frame proves liveness.
-- **Failure detection** (both directions) uses the fixed timeouts by default (*suspect* after 3 s, *failed* after 8 s of
-  silence). The optional φ accrual detector (`detector: phi`; [research-next.md](research-next.md)) works as follows:
-  - it learns the heartbeat inter-arrival distribution (last 300) and computes φ = −log₁₀ P(a heartbeat this late);
-  - *suspect* at φ ≥ 8, *failed* at φ ≥ 12;
-  - never suspect before 2 s, never failed before 4 s or before 1.25 × the longest gap the link survived in the window;
-  - always failed at 16 s.
-
-  φ was the default briefly, but on real phones it caused extra reconnects, so the default went back to `fixed`.
-- **Coordinator → participant:** *suspect* is shown in the UI. *Failed* closes the link and marks the member
+- Both sides send `hb` every second. Any frame resets the silence timer.
+- **Coordinator → participant:** silent for 3 s → `suspect` (shown in the UI); 8 s → link closed and the member marked
   `disconnected`. The member's slot (role, volume) is kept for the 90 s reconnect grace, then removed. Readiness
   barriers stop waiting for disconnected members.
-- **Participant → coordinator:**
-  - *Suspect* shows "coordinator not responding".
-  - *Failed* closes and reconnects with exponential backoff (0.5 s × 2ⁿ, capped at 8 s, ±20 % jitter, at most 30
-    attempts). After that the session fails with `unreachable: … the room may need to be recreated`.
-  - When the link died by silence, failover additionally waits until nothing was heard for 8 s.
+- **Participant → coordinator:** silent for 3 s → "coordinator not responding"; 8 s → close and reconnect with
+  exponential backoff (0.5 s × 2ⁿ, capped at 8 s, ±20 % jitter, at most 30 attempts). After that the session fails with
+  `unreachable: … the room may need to be recreated`.
 - While disconnected, a participant keeps playing the last timeline and refuses local control requests
   (`not_connected`). On reconnect it re-authenticates, receives the current state in `welcome`, runs a new clock burst,
   and joins the timeline. It emits `evt{rejoined}` once its measured error is back inside the correction band.
 - A newer authenticated link for the same device supersedes the older one; frames from the old link are dropped.
 
 ### Failover (succession)
-
-*Isolation hold-off:* after a *silent* loss (no closed connection), a phone that is next to promote itself but reached
-none of the successors ahead of it waits 20 s longer and retries from the coordinator, because it is most likely the one
-cut off.
 
 1. **Candidates.** `successionOrder(state)` lists the participants with `canHost` and an `ep` whose `conn` is not
    `disconnected`, excluding `coord`: the `pref` device (original host) first when eligible, then list (admission)
@@ -370,32 +320,6 @@ the id; from then on it serves the song under `/tracks/<id>` like any other.
 
 After a failover, the new coordinator also serves songs it had downloaded (including uploaded ones), so they stay
 playable.
-
-### Phone-to-phone sharing (chunks)
-
-Every device runs a *peer file server* (port in `caps.pport`, published as the participant's `peer`). Peer servers
-and the coordinator answer:
-
-| Request | Answer |
-|---|---|
-| `GET /tracks/<id>/chunks` | `{"size": N, "hashes": ["<sha256 of chunk 0>", …]}` (512 KiB chunks; the last may be shorter) |
-| `GET /tracks/<id>/have` | `{"n": chunks, "bits": "<base64 bitmap>"}`, all ones for a complete copy |
-| `GET /tracks/<id>` + `Range` | The bytes, from a complete copy or from chunks a partial copy already has (otherwise 416) |
-
-Peer requests carry `X-SyncSphere-Auth: <deviceId>.<expiryCoordMs>.<b64url(HMAC(peerKey, "GET|<path>|<expiry>")[0:16])>`,
-where `peerKey = HMAC(roomKey, "peer|<roomId>")` is known to every member. The coordinator accepts session tokens and
-peer tokens. Uploads only ever accept session tokens.
-
-A downloader:
-1. fetches a chunk list from the coordinator or any peer and checks it against `croot`;
-2. polls the peers' `/have` every 2 s;
-3. fetches missing chunks rarest-first (4 in parallel, at most 2 per source, peers before the coordinator);
-4. checks each chunk's hash, and stops using a source after 2 bad chunks;
-5. checks the assembled file against the track id.
-
-Partial copies are kept as `<id>.swarm` + `<id>.have` + `<id>.chunks` in the cache (resumable) and are served to
-others while downloading. Without progress for 30 s, or without a `croot`, the device downloads the whole file from
-the coordinator as before. Tracks with a `src` URL use the source first (§4).
 
 ## 9. Discovery beacon (UDP 47801)
 

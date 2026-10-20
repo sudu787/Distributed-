@@ -108,12 +108,6 @@ class DeviceCapabilities {
   /// Acoustic calibration offset the device currently applies (µs).
   final int calibrationUs;
 
-  /// Port of the device's peer file server (phone-to-phone sharing).
-  final int? peerPort;
-
-  /// Understands the surround channel roles (center, surround left/right).
-  final bool surround;
-
   const DeviceCapabilities({
     required this.rateControl,
     required this.backend,
@@ -122,8 +116,6 @@ class DeviceCapabilities {
     this.failoverPort,
     this.microphone = false,
     this.calibrationUs = 0,
-    this.peerPort,
-    this.surround = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -134,8 +126,6 @@ class DeviceCapabilities {
         if (failoverPort != null) 'fport': failoverPort,
         if (microphone) 'mic': true,
         if (calibrationUs != 0) 'cal': calibrationUs,
-        if (peerPort != null) 'pport': peerPort,
-        if (surround) 'sur': true,
       };
 
   factory DeviceCapabilities.fromJson(Map<String, Object?> j) {
@@ -148,8 +138,6 @@ class DeviceCapabilities {
       failoverPort: r.optInteger('fport', min: 1, max: 65535),
       microphone: r.optBoolean('mic') ?? false,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000) ?? 0,
-      peerPort: r.optInteger('pport', min: 1, max: 65535),
-      surround: r.optBoolean('sur') ?? false,
     );
   }
 }
@@ -486,17 +474,6 @@ enum ControlAction {
   /// on the coordinator (uploaded with `PUT /uploads/<id>`, or in its
   /// library).
   addTrack,
-
-  /// `dev` (default: sender): that phone flashes, shows its channel and
-  /// vibrates for a few seconds ("which phone is the left one?").
-  identify,
-
-  /// `track`: removes the song from the playlist. Removing the song that is
-  /// playing moves on to the next one (or stops at the end).
-  removeTrack,
-
-  /// `track`, `to`: moves the song to playlist index `to` (clamped).
-  moveTrack,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -524,9 +501,6 @@ class ControlMsg extends Message {
   /// Track metadata for addTrack.
   final TrackInfo? info;
 
-  /// Target playlist index for moveTrack.
-  final int? toIndex;
-
   const ControlMsg({
     required this.requestId,
     required this.action,
@@ -539,7 +513,6 @@ class ControlMsg extends Message {
     this.mode,
     this.offsetUs,
     this.info,
-    this.toIndex,
   });
 
   @override
@@ -555,7 +528,6 @@ class ControlMsg extends Message {
         if (mode != null) 'mode': mode,
         if (offsetUs != null) 'off': offsetUs,
         if (info != null) 'info': info!.toJson(),
-        if (toIndex != null) 'to': toIndex,
       };
 
   static ControlMsg read(Reader r) => ControlMsg(
@@ -570,7 +542,6 @@ class ControlMsg extends Message {
         mode: r.optString('mode', maxLength: 16),
         offsetUs: r.optInteger('off', min: -kMaxCalibrationUs, max: kMaxCalibrationUs),
         info: _optTrack(r.optMap('info')),
-        toIndex: r.optInteger('to', min: 0, max: 100000),
       );
 
   static TrackInfo? _optTrack(Map<String, Object?>? j) => j == null ? null : TrackInfo.fromJson(j);
@@ -873,15 +844,11 @@ class CalibrationResultMsg extends Message {
   /// Non-null when the listener could not measure at all.
   final String? error;
 
-  /// Click level per device at this recorder (dBFS), for level matching.
-  final Map<String, double> levels;
-
   const CalibrationResultMsg({
     required this.calibrationId,
     this.arrivals = const {},
     this.undetected = const [],
     this.error,
-    this.levels = const {},
   });
 
   @override
@@ -892,7 +859,6 @@ class CalibrationResultMsg extends Message {
         },
         if (undetected.isNotEmpty) 'missing': undetected,
         if (error != null) 'err': error,
-        if (levels.isNotEmpty) 'lvl': levels,
       };
 
   static CalibrationResultMsg read(Reader r) {
@@ -916,22 +882,7 @@ class CalibrationResultMsg extends Message {
       arrivals: arr,
       undetected: r.has('missing') ? r.stringList('missing', maxLength: 256, maxItemLength: 64) : const [],
       error: r.optString('err', maxLength: 256),
-      levels: _levels(r),
     );
-  }
-
-  static Map<String, double> _levels(Reader r) {
-    final raw = r.optMap('lvl');
-    if (raw == null) return const {};
-    if (raw.length > 256) throw r.error('lvl', 'too many devices');
-    final out = <String, double>{};
-    raw.forEach((dev, v) {
-      if (dev.length > 64 || v is! num || !v.isFinite || v < -200 || v > 20) {
-        throw r.error('lvl', 'invalid level for $dev');
-      }
-      out[dev] = v.toDouble();
-    });
-    return out;
   }
 }
 

@@ -46,29 +46,10 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   phone's microphone, and shifts each device so the sound lines up *where you are*, including Bluetooth and speaker
   delays software cannot see. Simulated (4 phones at 0.3–7 m, one on Bluetooth): spread at the listener 192 ms →
   4.6 ms median (p95 22 ms, mostly the first seconds while devices re-converge). Not yet run on phones.
-- **Channel roles with a speaker map:** each phone plays stereo, left, right or a mono mix (Media3 channel mixing). The
-  Speakers tab shows a top-down map of who plays what, and **Stereo pair** sets up left and right in one tap. Tap a phone
-  (or **Identify**) to make it flash "LEFT"/"RIGHT" and vibrate, so you know which physical phone is which.
-- **Surround (5.1-style):** assign phones to front left/right, center and surround left/right (**Surround** on the
-  Speakers tab). Stereo songs are upmixed: voices stay in front, room sound goes behind with a 15 ms Haas delay. 5.1
-  files play their real channels. **Measure** has every phone listen to the others' clicks to find where they are
-  (only phones whose owner turned on "Help measure the room"); you tap the front and a left phone, and roles and
-  volumes are set for you. **Test sound** plays beeps on the left channel only, then the right only, to check who
-  plays what. See [docs/surround.md](docs/surround.md) for the research behind it.
+- **Experimental channel roles:** each phone can play stereo, left, right or a mono mix (Media3 channel mixing).
 - **Repeat (off/all/one) and shuffle**, coordinated by the room.
 - **Guests can add songs:** everyone the host allows to control the music (**Guests can control** at start, or per
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
-- **Phone-to-phone sharing:** songs travel between guests in verified 512 KiB chunks (rarest first, BitTorrent-style).
-  With many phones the host's Wi-Fi is no longer the bottleneck, and songs survive the host leaving.
-- **Music on this phone + Share:** browse the phone's songs, albums and artists (search, select many, add), or
-  **Share → SyncSphere** from a file manager, downloader or messenger; in a party, shared songs can go straight into
-  the queue. **Pick files…** still covers Drive, Dropbox and USB sticks.
-- **Open music sources:** **Search Audius** (free music from independent artists, credited), **Openverse**
-  (Creative Commons music, licence kept as the credit), **Internet Archive** (free concerts and albums; open an item,
-  add songs or **Add all**), **Podcasts** (iTunes search + the show's RSS feed), or **From a link** (your own
-  Navidrome or Jellyfin server, any direct audio link). Every phone downloads the song from the source
-  itself, so sync stays sample-exact; the host is the fallback. Spotify and YouTube can't be used this way, because of
-  DRM and their terms; see [research-next.md](docs/research-next.md).
 - **Recent parties:** the last 5 parties are listed on the home screen. A party that is still running shows **Online**
   and rejoins with one tap (also after another phone took over as host).
 - **Album art** from each song's embedded picture (colourful placeholder otherwise), and **vibration feedback** on
@@ -104,8 +85,6 @@ Simulated highlights: steady-state inter-device spread p95 of 5–20 ms across t
 - To build the APK: Android SDK with platform 36, and JDK 17+ (CI uses Temurin 21). Gradle and AGP come from the
   Flutter template (AGP 9.1, Gradle 9.3.1).
 - Phones: Android 7.0+ (API 24), all on the same Wi-Fi or one phone's hotspot.
-- Windows PCs: Windows 10 or 11 (x64). Building needs Visual Studio 2022 with "Desktop development with C++"; CI
-  builds it for you.
 
 ## Build and run
 
@@ -130,30 +109,6 @@ flutter install                    # or: adb install build/app/outputs/flutter-a
 `app-debug.apk` and `app-release.apk` and uploads them as the `syncsphere-apks` artifact on the workflow run page.
 Download that artifact and install it with `adb install` or a file manager.
 
-### Windows app (beta)
-
-The same app runs on Windows 10/11, so a laptop can join a party or host it. Every push builds it in CI: download the
-`syncsphere-windows` artifact from the workflow run, unzip it anywhere and run `syncsphere.exe`. The app is not
-code-signed yet, so Windows SmartScreen asks once ("More info" → "Run anyway"), and Windows Firewall asks to allow
-private networks (needed for the party).
-
-- **Audio:** WASAPI shared mode with Media Foundation decoding (`packages/syncsphere_audio/windows`). Songs start at
-  an exact performance-counter instant, and the play position comes from the audio device clock, so the same sync
-  engine as on Android drives it (drift correction through a variable-rate resampler).
-- **Not on Windows yet:** microphone calibration (calibrate a PC from a phone instead), "Music on this phone" and
-  Share, background notification controls, QR scanning (use "Paste invite link" or the typed code).
-- **Status:** built and compile-checked in CI; not yet tested on real Windows hardware. Please report how it sounds
-  next to the phones.
-
-```bash
-cd app && flutter build windows --release   # on Windows with Visual Studio 2022
-```
-
-**Updates keep your calibration.** Since October 2026 every build is signed with the same development key
-(`app/android/app/syncsphere-dev.keystore`, intentionally public), so a new APK installs over the old one and keeps
-the calibration, learned latency and library. Builds before that used a random key per CI run: uninstall such a build
-**once**, install the new one, and calibrate once more ("Calibrate to this spot").
-
 ### Using the app
 
 1. Install the app on 2+ phones on the same Wi-Fi or one phone's hotspot.
@@ -162,10 +117,7 @@ the calibration, learned latency and library. Builds before that used a random k
 4. Guests: **Join a party → Scan QR code**. Nearby parties are also listed on the home screen.
 5. The party has three tabs:
    - **Playing:** play/pause, seek, skip, shuffle, repeat, volume for everyone and for this phone.
-   - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**, drag songs into a
-     new order, swipe one away (with **Undo**), or use ⋮ for **Play now / Play next / Move to the top**.
-   - A **now-playing bar** above the tabs shows the song, its progress and "Next: …" on the Queue and Speakers tabs,
-     with previous / play-pause / next; tap it to open the player.
+   - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**.
    - **Speakers:** every phone and its sync state. **Calibrate to this spot** lines the sound up where you stand.
      Tap a phone to set its volume, **timing** (fine-tune by ear: + plays earlier, − later) and channel.
 6. Something sounds off? On the Playing tab tap **This phone sounds early or late?**. For bug reports, open
@@ -215,8 +167,6 @@ All traffic stays on the LAN. No cleartext traffic leaves the device for the int
 - [Roadmap: failover, precision backend, calibration, spatial audio](docs/roadmap.md)
 - [Troubleshooting: discovery and Android audio](docs/troubleshooting.md)
 - [Comparison with similar apps (AmpMe, SoundSeeder, Auracast, …) and a fair test plan](docs/comparison.md)
-- [Surround sound with phones: research and design](docs/surround.md)
-- [Research: next distributed-systems techniques, Spotify/YouTube/DRM findings, open music sources](docs/research-next.md)
 
 ## Known blockers and next steps
 

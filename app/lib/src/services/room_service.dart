@@ -96,17 +96,7 @@ class RoomService {
   BeaconBroadcaster? _beacon;
   TrackFileServer? _files;
   TrackDownloader? _downloader;
-  SwarmDownloader? _swarm;
   final Map<String, File> _served = {};
-
-  /// Chunk hashes of songs this phone serves (phone-to-phone sharing).
-  final ChunkIndex _chunks = ChunkIndex();
-  final Set<String> _rootsRequested = {};
-  StreamSubscription<RoomState>? _rootSub;
-
-  /// This phone's peer file server: other guests fetch song chunks from it.
-  HttpServer? _peerServer;
-  TrackFileServer? _peerFiles;
   DeviceIdentity? _identity;
   final List<StreamSubscription<Object?>> _subs = [];
   RoomDiscovery? _watch;
@@ -115,15 +105,6 @@ class RoomService {
   /// True once this device took over as coordinator after the original
   /// host disappeared.
   bool promotedByFailover = false;
-
-  /// Whether a surround measurement started on another phone may record
-  /// with this phone's microphone (the owner's "Help measure the room"
-  /// setting; off by default).
-  bool allowRoomMeasurement = false;
-
-  /// Device ids of phones whose room measurement this phone declined.
-  final StreamController<String> _declined = StreamController.broadcast();
-  Stream<String> get measurementDeclined => _declined.stream;
 
   RoomService({
     required this.store,
@@ -293,42 +274,7 @@ class RoomService {
   }
 
   /// Wiring shared by a hosted, a failed-over and a handed-back coordinator.
-  /// Publishes chunk roots only for the songs about to play (pending,
-  /// current and next), computed on a background isolate, instead of hashing
-  /// the whole library when the party starts.
-  void _watchChunkRoots(RoomCoordinator coord) {
-    unawaited(_rootSub?.cancel());
-    _rootsRequested.clear();
-    void check(RoomState st) {
-      final ids = <String>{
-        if (st.pending != null) st.pending!.trackId,
-        if (st.timeline.trackId != null) st.timeline.trackId!,
-      };
-      final cur = st.pending?.trackId ?? st.timeline.trackId;
-      final i = cur == null ? -1 : st.playlist.indexWhere((t) => t.id == cur);
-      if (i >= 0 && i + 1 < st.playlist.length) ids.add(st.playlist[i + 1].id);
-      if (cur == null && st.playlist.isNotEmpty) ids.add(st.playlist.first.id);
-      final todo = <String, File>{
-        for (final id in ids)
-          if (!_rootsRequested.contains(id) && st.trackById(id)?.chunkRoot == null && _served[id] != null) id: _served[id]!,
-      };
-      if (todo.isEmpty) return;
-      _rootsRequested.addAll(todo.keys);
-      unawaited(_publishChunkRoots(coord, todo));
-    }
-
-    check(coord.state);
-    _rootSub = coord.stateStream.listen(check);
-  }
-
-  void _stopChunkRoots() {
-    unawaited(_rootSub?.cancel());
-    _rootSub = null;
-    _rootsRequested.clear();
-  }
-
   void _attachCoordinator(RoomCoordinator coord) {
-    _watchChunkRoots(coord);
     coord.onSteppedDown = (endpoint, epoch, reason) => _onSteppedDown(coord, endpoint, epoch, reason);
     _stopWatch();
     if (!watchForNewerCoordinator) return;
@@ -371,7 +317,6 @@ class RoomService {
     log.warn('room.stepdown',
         reason == 'handover' ? 'host role handed to $endpoint (epoch $epoch)' : 'a newer coordinator runs at $endpoint; following it');
     _stopWatch();
-    _stopChunkRoots();
     coordinator = null;
     promotedByFailover = false;
     _beacon?.stop();
@@ -406,20 +351,6 @@ class RoomService {
 
   TrackCache get _cache => TrackCache(Directory('${cacheDir.path}/tracks'));
 
-  /// Computes and publishes chunk roots so guests can share songs with each
-  /// other. Runs in the background; a song without a root is simply
-  /// downloaded whole from the host.
-  Future<void> _publishChunkRoots(RoomCoordinator coord, Map<String, File> files) async {
-    for (final e in files.entries) {
-      try {
-        final root = await _chunks.rootFor(e.key, e.value);
-        if (identical(coordinator, coord)) coord.setChunkRoot(e.key, root);
-      } catch (err) {
-        log.warn('swarm.index', 'could not index ${e.key.substring(0, 8)} for sharing: $err');
-      }
-    }
-  }
-
   /// Serves the room's songs and accepts songs uploaded by guests who may
   /// control the music. Uploads go into the track cache, where this phone's
   /// own player finds them too.
@@ -433,15 +364,11 @@ class RoomService {
       log: log,
       canUpload: coord.canControlSession,
       uploadDir: Directory('${cacheDir.path}/uploads'),
-      peerKey: () => coord.options.roomKey?.peerKey(),
-      chunksFor: _chunks.hashesFor,
-      partialFor: (id) => PartialTrack.peek(cache.dir, id),
       acceptUpload: (id, file) async {
         await cache.dir.create(recursive: true);
         final dest = cache.fileFor(id);
         if (!await dest.exists()) await file.copy(dest.path);
         _served[id] = dest;
-        unawaited(_publishChunkRoots(coord, {id: dest}));
       },
     );
   }
@@ -480,15 +407,11 @@ class RoomService {
     _identity = identity;
     final library = await store.libraryTracks();
     _downloader = TrackDownloader(log: log);
-    _swarm = SwarmDownloader(log: log);
-    final libraryFiles = {for (final t in library) t.id: File(t.path)};
-    await _startPeerServer(libraryFiles);
     final backend = await backendFactory(log);
     TrackResolver resolver = LibraryTrackResolver(
       library: {for (final t in library) t.id: File(t.path)},
       cache: _cache,
       downloader: _downloader!,
-      swarm: _swarm,
       log: log,
     );
     final convert = converterFor?.call(backend);
@@ -510,9 +433,6 @@ class RoomService {
         // redirect, and receive the role back (handback); see failover.dart.
         failover: _AppFailover(this, identity),
         recorder: recorderFor?.call(backend),
-        allowRemoteCalibration: () => allowRoomMeasurement,
-        onRemoteCalibrationDeclined: (plan) => _declined.add(plan.listener),
-        peerPort: _peerServer?.port,
         calibrationTracks: FileCalibrationTrackFactory(Directory('${cacheDir.path}/calibration')),
       ),
       connector: webSocketConnector(host, port),
@@ -540,50 +460,6 @@ class RoomService {
       ..add(s.stateStream.listen(_updateNowPlaying))
       ..add(hooks.commands.listen(_onExternalCommand));
   }
-
-  /// Starts this phone's peer file server: complete songs (My music, the
-  /// download cache) and songs still being assembled, for other guests.
-  /// Requests must carry a token signed with the room's peer key.
-  Future<void> _startPeerServer(Map<String, File> libraryFiles) async {
-    await _stopPeerServer();
-    final cache = _cache;
-    final files = TrackFileServer(
-      fileForTrack: (id) {
-        final lib = libraryFiles[id];
-        if (lib != null && lib.existsSync()) return lib;
-        final cached = cache.fileFor(id);
-        return cached.existsSync() ? cached : null;
-      },
-      keysForSession: (_) => null,
-      nowMs: () {
-        final e = session?.estimate;
-        final now = clock.nowMicros();
-        return (e == null ? now : e.toRemote(now)) ~/ 1000;
-      },
-      log: log,
-      peerKey: () => session?.peerKey,
-      chunksFor: _chunks.hashesFor,
-      partialFor: (id) => PartialTrack.peek(cache.dir, id),
-    );
-    try {
-      final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
-      server.listen(files.handle, onError: (Object e) => log.warn('peer.server', '$e'));
-      _peerServer = server;
-      _peerFiles = files;
-    } catch (e) {
-      log.warn('peer.server', 'phone-to-phone sharing unavailable: $e');
-    }
-  }
-
-  Future<void> _stopPeerServer() async {
-    final s = _peerServer;
-    _peerServer = null;
-    _peerFiles = null;
-    await s?.close(force: true);
-  }
-
-  /// Bytes this phone served to other guests (diagnostics).
-  int get bytesSharedWithPeers => _peerFiles?.bytesServed ?? 0;
 
   void _updateNowPlaying(RoomState r) {
     final tl = r.timeline;
@@ -624,7 +500,6 @@ class RoomService {
   /// so guests exercise failover.
   Future<void> crashForTesting() async {
     _stopWatch();
-    _stopChunkRoots();
     _cancelSubs();
     final c = coordinator;
     coordinator = null;
@@ -636,7 +511,6 @@ class RoomService {
     final s = session;
     session = null;
     await s?.close();
-    await _stopPeerServer();
     info = null;
   }
 
@@ -693,12 +567,11 @@ class RoomService {
     final c = coordinator;
     // A phone that only stepped in for the host hands the party on rather
     // than ending it (planned leadership transfer).
-    final passOn = c != null && (promotedByFailover || !endParty);
-    var handedOff = false;
-    if (passOn) {
+    if (c != null && (promotedByFailover || !endParty)) {
       try {
-        handedOff = await c.handOff().timeout(const Duration(seconds: 8), onTimeout: () => false);
-        if (handedOff) await Future<void>.delayed(const Duration(milliseconds: 600));
+        if (await c.handOff().timeout(const Duration(seconds: 8), onTimeout: () => false)) {
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+        }
       } catch (e) {
         log.warn('room.handoff', 'hand-off failed: $e');
       }
@@ -710,7 +583,6 @@ class RoomService {
       await store.saveHostedRoom(null);
     }
     _stopWatch();
-    _stopChunkRoots();
     _cancelSubs();
     final s = session;
     session = null;
@@ -718,23 +590,11 @@ class RoomService {
     _beacon?.stop();
     _beacon = null;
     coordinator = null;
-    if (c != null) {
-      if (passOn && !handedOff) {
-        // Nobody confirmed the hand-off in time: leave without `bye`, so the
-        // other phones fail over and keep the party instead of ending it.
-        log.warn('room.handoff', 'hand-off not confirmed; leaving without ending the party');
-        await c.abort();
-      } else {
-        await c.close(reason: 'host left; room closed');
-      }
-    }
+    if (c != null) await c.close(reason: 'host left; room closed');
     await _server?.close();
     _server = null;
     _downloader?.close();
     _downloader = null;
-    _swarm?.close();
-    _swarm = null;
-    await _stopPeerServer();
     info = null;
     promotedByFailover = false;
     await hooks.leaveRoom();

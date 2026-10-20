@@ -32,16 +32,8 @@ The suite is deterministic for a given `--seed` (default 42). It covers:
 - **Listening-spot calibration:** 4 devices at 0.3, 2, 4.5 and 7 m from the listener (one on uncalibrated
   Bluetooth), without and with "calibrate to this spot". A virtual microphone synthesizes the recording (propagation,
   noise, 18 ms input timestamp error); the metric is the spread *at the listener*, propagation included.
-- **Surround measurement** (`surround-calibration-n6`): a listener plus 5 phones on ITU angles; every phone has a
-  virtual microphone that hears the others with the right propagation delay. It reports pairwise distance error,
-  angle error after orienting, the suggested roles and the spread at the listener. There is no reverberation or
-  multipath in the model.
 - **Channel-role switches** during playback (a fresh segment per switch).
 - **Drift over 60 min:** ±100 ppm clock skew and ±80 ppm audio-clock error, with correction disabled vs. enabled.
-- **Failure detectors** (`detector-{fixed,phi}-{wifi-good,wifi-flaky}-n4`): 10 min of playback, a guest cut off for
-  10 s, then the host app killed. `wifi-flaky` adds a 2–5 s link stall about every 40 s per phone. The run reports
-  false alarms (member links closed, reconnects, host changes), the time until a cut-off guest is declared failed, and
-  the time from the kill until a successor runs.
 
 **Metrics** (all from ground truth unless noted):
 
@@ -72,11 +64,6 @@ Highlights (SIMULATED):
 - Listening-spot calibration: spread at the listener drops from 192 ms to 4.6 ms median (p95 22 ms, mostly from the first
   ~10 s after music resumes). The devices' *output* spread rises to ~19 ms, which is intended: nearer speakers are
   delayed by their distance difference.
-- Failure detection (optional φ accrual vs. the default fixed timeouts): φ declares a cut-off guest failed after 4.2 s on
-  steady Wi-Fi (fixed: 8.2 s) and after 5.2 s on stall-prone Wi-Fi (8.2 s), with one false alarm in 10 min there (fixed:
-  none). On real phones φ caused extra reconnects, so fixed is the default. The host never changed
-  because of a stall, thanks to the 8 s silence gate and the isolation hold-off. See
-  [research-next.md](research-next.md).
 - A channel-role switch costs a short blip (≤25 ms max in `channel-role-switch-n3`), then rate correction recovers.
 - The reported clock uncertainty contained the true offset in ≥ 99.9 % of samples in every scenario. It is
   conservative. Actual offset error p95 ranged from 0.1 ms (`lan-ideal`) to 8.5 ms (`wifi-congested`); median

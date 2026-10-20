@@ -54,9 +54,7 @@ class Fixture {
         joinKey: kKey,
         kdfIterations: 5,
         defaultRole: defaultRole,
-        // Raw test clients send no heartbeats: keep the fixed-timeout detector.
-        config: SyncConfig(
-            membership: MembershipConfig(maxParticipants: maxParticipants, detector: FailureDetectorKind.fixed)),
+        config: SyncConfig(membership: MembershipConfig(maxParticipants: maxParticipants)),
         preferredCoordinator: preferredCoordinator,
         coordinatorEpoch: epoch,
       ),
@@ -226,54 +224,6 @@ void main() {
       final added = f.coord.state.trackById(song.id)!;
       expect(added.hostServes, isTrue);
       expect(f.coord.state.playlist.length, tracks.length + 1);
-    });
-  });
-
-  test('identify: any phone may flash itself; flashing others needs control rights', () {
-    fakeAsync((fa) {
-      final f = Fixture(fa);
-      final (host, _) = f.join('host-device');
-      final (p, _) = f.join('phone-1');
-      p.send(const ControlMsg(requestId: 1, action: ControlAction.identify, baseVersion: 0));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(p.last<ControlAckMsg>()!.accepted, isTrue);
-      expect(f.coord.state.identify!.deviceId, 'phone-1');
-      expect(f.coord.state.identify!.seq, 1);
-      p.send(const ControlMsg(requestId: 2, action: ControlAction.identify, baseVersion: 0, targetDevice: 'host-device'));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(p.last<ControlAckMsg>()!.error, ControlError.unauthorized);
-      host.send(const ControlMsg(requestId: 1, action: ControlAction.identify, baseVersion: 0, targetDevice: 'phone-1'));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(f.coord.state.identify!.seq, 2, reason: 'asking again re-triggers');
-      final back = RoomState.fromJson(f.coord.state.toJson());
-      expect(back.identify!.deviceId, 'phone-1');
-      expect(back.identify!.untilUs, f.coord.state.identify!.untilUs);
-    });
-  });
-
-  test('surround roles only when every connected phone supports them', () {
-    fakeAsync((fa) {
-      const sur = DeviceCapabilities(rateControl: true, backend: 'test', surround: true);
-      final f = Fixture(fa, defaultRole: ParticipantRole.controller);
-      final (host, _) = f.join('host-device', caps: sur);
-      f.join('phone-1', caps: sur);
-      final (old, _) = f.join('old-phone'); // an older app: no surround support
-      host.send(const ControlMsg(
-          requestId: 1, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'surroundLeft'));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(host.last<ControlAckMsg>()!.error, ControlError.invalid);
-      host.send(const ControlMsg(
-          requestId: 2, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'left'));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(host.last<ControlAckMsg>()!.accepted, isTrue, reason: 'stereo roles still work');
-      old.conn.close();
-      fa.elapse(const Duration(seconds: 1));
-      host.send(const ControlMsg(
-          requestId: 3, action: ControlAction.setChannelRole, baseVersion: 0, targetDevice: 'phone-1', mode: 'surroundLeft'));
-      fa.elapse(const Duration(milliseconds: 10));
-      expect(host.last<ControlAckMsg>()!.accepted, isTrue);
-      expect(f.coord.state.participant('phone-1')!.channel, ChannelRole.surroundLeft);
-      expect(RoomState.fromJson(f.coord.state.toJson()).participant('phone-1')!.channel, ChannelRole.surroundLeft);
     });
   });
 

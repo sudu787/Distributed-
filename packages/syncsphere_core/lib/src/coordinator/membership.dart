@@ -1,13 +1,12 @@
 /// Membership manager: who is in the room, how healthy their link is, and
 /// what each participant last told us about its sync state.
 ///
-/// Failure detection is per member ([FailureDetector], φ accrual by
-/// default): any inbound traffic proves liveness, heartbeat inter-arrival
-/// times are learned.
+/// Failure detection is timeout-based on *any* inbound traffic (heartbeats,
+/// clock probes and reports all count):
 ///
-///     connected --(detector: suspect)---------> suspect
+///     connected --(no traffic ≥ suspectAfter)--> suspect
 ///     suspect   --(traffic)-------------------> connected
-///     suspect   --(detector: failed)----------> disconnected (link closed)
+///     suspect   --(no traffic ≥ failAfter)----> disconnected (link closed)
 ///     disconnected --(re-auth within grace)---> connected (same slot)
 ///     disconnected --(grace expired)----------> removed
 library;
@@ -16,7 +15,6 @@ import '../config/sync_config.dart';
 import '../model/room_state.dart';
 import '../protocol/auth.dart';
 import '../protocol/messages.dart';
-import 'failure_detector.dart';
 
 class Member {
   final String deviceId;
@@ -31,19 +29,12 @@ class Member {
   /// Failover endpoint (`host:port`), if the device offered one.
   String? endpoint;
 
-  /// Peer file server (`host:port`) for phone-to-phone sharing.
-  String? peerEndpoint;
-
   /// Experimental stereo role and the room-calibration result; both survive
   /// reconnects.
   ChannelRole channel = ChannelRole.stereo;
   int? calibrationUs;
   int lastSeenUs;
   final int joinedAtUs;
-
-  /// Judges this member's link; survives reconnects so the learned
-  /// heartbeat distribution is kept.
-  FailureDetector detector;
 
   /// Start of the current uninterrupted healthy connection (null while
   /// suspect or disconnected). Used for handback hysteresis.
@@ -75,7 +66,6 @@ class Member {
     required this.sessionId,
     required this.keys,
     required this.lastSeenUs,
-    required this.detector,
   }) : joinedAtUs = lastSeenUs;
 
   bool get isConnected => connection != ConnectionStatus.disconnected;
@@ -93,7 +83,6 @@ class Member {
         endpoint: caps.canHost ? endpoint : null,
         channel: channel,
         calibrationUs: calibrationUs,
-        peer: isConnected ? peerEndpoint : null,
       );
 }
 
@@ -155,7 +144,6 @@ class MembershipManager {
         ..lastReport = null
         ..lastReportAtUs = null
         ..stableSinceUs = nowUs;
-      existing.detector.traffic(nowUs);
       return existing;
     }
     if (!hasCapacity) return null;
@@ -167,7 +155,6 @@ class MembershipManager {
       sessionId: sessionId,
       keys: keys,
       lastSeenUs: nowUs,
-      detector: FailureDetector.forConfig(config, nowUs),
     )
       ..linkEpoch = 1
       ..stableSinceUs = nowUs;
@@ -178,7 +165,6 @@ class MembershipManager {
   /// Records inbound traffic. Returns true if this recovered a suspect member.
   bool touch(Member m, int nowUs) {
     m.lastSeenUs = nowUs;
-    m.detector.traffic(nowUs);
     if (m.connection == ConnectionStatus.suspect) {
       m.connection = ConnectionStatus.connected;
       m.stableSinceUs = nowUs;
@@ -186,9 +172,6 @@ class MembershipManager {
     }
     return false;
   }
-
-  /// Records a heartbeat (learned by the failure detector).
-  void heartbeat(Member m, int nowUs) => m.detector.heartbeat(nowUs);
 
   void markDisconnected(Member m, int nowUs) {
     if (m.connection == ConnectionStatus.disconnected) return;
@@ -203,18 +186,18 @@ class MembershipManager {
   SweepResult sweep(int nowUs) {
     final suspect = <Member>[], recovered = <Member>[], failed = <Member>[], removed = <Member>[];
     for (final m in _members.values.toList()) {
-      final d = m.detector;
+      final silent = nowUs - m.lastSeenUs;
       switch (m.connection) {
         case ConnectionStatus.connected:
-          if (d.isFailed(nowUs)) {
+          if (silent >= config.failAfter.inMicroseconds) {
             failed.add(m);
-          } else if (d.isSuspect(nowUs)) {
+          } else if (silent >= config.suspectAfter.inMicroseconds) {
             m.connection = ConnectionStatus.suspect;
             m.stableSinceUs = null;
             suspect.add(m);
           }
         case ConnectionStatus.suspect:
-          if (d.isFailed(nowUs)) failed.add(m);
+          if (silent >= config.failAfter.inMicroseconds) failed.add(m);
         case ConnectionStatus.disconnected:
           final since = m.disconnectedAtUs ?? nowUs;
           if (m.role != ParticipantRole.host &&

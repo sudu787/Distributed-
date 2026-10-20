@@ -12,6 +12,3 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
-
-# Public development signing key, intentionally committed (see app/build.gradle.kts).
-!app/syncsphere-dev.keystore

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,10 +9,8 @@ import '../state/room_controller.dart';
 import 'diagnostics_screen.dart';
 import 'format.dart';
 import 'haptics.dart';
-import 'now_playing_bar.dart';
 import 'player_screen.dart';
 import 'queue_view.dart';
-import 'speaker_layout.dart';
 import 'widgets.dart';
 
 /// The room: three tabs (Playing, Queue, Speakers). Technical details live
@@ -45,40 +41,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       } else if (next.$2 != prev.$2) {
         haptic(ref, Haptic.action);
       }
-    });
-    // "Which phone is this?": flash and vibrate when this phone is identified.
-    ref.listen(roomControllerProvider.select((v) => v.room?.identify), (prev, next) {
-      if (next == null || next.seq == prev?.seq) return;
-      final myId = ref.read(identityProvider).deviceId;
-      if (next.deviceId != myId) return;
-      final me = ref.read(roomControllerProvider).room?.participant(myId);
-      unawaited(showIdentifyOverlay(context, ref, me?.channel ?? ChannelRole.stereo, me?.displayName ?? 'This phone'));
-    });
-    // A surround measurement finished: the phone that measured orients it.
-    ref.listen(roomControllerProvider.select((v) => (v.room != null, v.room?.layout)), (prev, next) {
-      final layout = next.$2;
-      if (prev == null || !prev.$1 || layout == null || layout.id == prev.$2?.id) return;
-      if (layout.listener != ref.read(identityProvider).deviceId) return;
-      unawaited(showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        showDragHandle: true,
-        builder: (_) => SurroundOrientSheet(layout: layout),
-      ));
-    });
-    // Another phone wanted this phone's microphone for a room measurement.
-    ref.listen(roomControllerProvider.select((v) => v.declinedMeasurement), (prev, next) {
-      if (next == null || next.$1 == prev?.$1) return;
-      final who = ref.read(roomControllerProvider).room?.participant(next.$2)?.displayName ?? 'Another phone';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        duration: const Duration(seconds: 8),
-        content: Text('$who wanted to measure the room with this phone\'s microphone. '
-            '"Help measure the room" is off.'),
-        action: SnackBarAction(
-          label: 'Allow next time',
-          onPressed: () => ref.read(roomMeasurementProvider.notifier).set(true),
-        ),
-      ));
     });
     return PopScope(
       canPop: false,
@@ -129,48 +91,25 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         ),
         body: room == null
             ? const Center(child: CircularProgressIndicator())
-            : AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: KeyedSubtree(
-                  key: ValueKey(_tab),
-                  child: switch (_tab) {
-                    0 => NowPlayingView(onOpenQueue: () => _select(1)),
-                    1 => const QueueView(),
-                    _ => const SpeakersView(),
-                  },
-                ),
-              ),
-        bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
-          // What is playing, with controls, wherever you are in the room.
-          if (room != null && _tab != 0) NowPlayingBar(onOpen: () => _select(0)),
-          NavigationBar(
-            selectedIndex: _tab,
-            onDestinationSelected: _select,
-            destinations: [
-              const NavigationDestination(
-                  icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
-              NavigationDestination(
-                icon: Badge.count(
-                  count: room?.playlist.length ?? 0,
-                  isLabelVisible: (room?.playlist.length ?? 0) > 0,
-                  child: const Icon(Icons.queue_music_outlined),
-                ),
-                selectedIcon: const Icon(Icons.queue_music),
-                label: 'Queue',
-              ),
-              const NavigationDestination(
-                  icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
-            ],
-          ),
-        ]),
+            : switch (_tab) {
+                0 => const NowPlayingView(),
+                1 => const QueueView(),
+                _ => const SpeakersView(),
+              },
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(
+                icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Playing'),
+            NavigationDestination(
+                icon: Icon(Icons.queue_music_outlined), selectedIcon: Icon(Icons.queue_music), label: 'Queue'),
+            NavigationDestination(
+                icon: Icon(Icons.speaker_group_outlined), selectedIcon: Icon(Icons.speaker_group), label: 'Speakers'),
+          ],
+        ),
       ),
     );
-  }
-
-  void _select(int tab) {
-    if (tab == _tab) return;
-    haptic(ref, Haptic.tap);
-    setState(() => _tab = tab);
   }
 
   /// Back button in a party: never drop out of the party by accident.
@@ -305,7 +244,6 @@ class SpeakersView extends ConsumerWidget {
             hostName: room.participant(room.coordinatorId)?.displayName ?? 'Another phone',
             ownerName: room.participant(room.preferredCoordinator!)?.displayName,
           ),
-        const SpeakerLayoutCard(),
         const _ListeningSpot(),
         const SectionHeader('Phones'),
         for (final p in room.participants) _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
@@ -385,6 +323,7 @@ class _DeviceTile extends ConsumerWidget {
         ConnectionStatus.suspect => 'not responding',
         ConnectionStatus.disconnected => 'disconnected',
       },
+      if (p.channel != ChannelRole.stereo) channelLabel(p.channel).replaceAll(' (experimental)', ''),
       if ((p.calibrationUs ?? 0) != 0) offsetLabel(p.calibrationUs).toLowerCase(),
     ];
     final canEdit = s.isLive && (isMe || s.canControl);
@@ -396,10 +335,7 @@ class _DeviceTile extends ConsumerWidget {
       ]),
       title: Text('${p.displayName}${isMe ? ' (this phone)' : ''}'),
       subtitle: Text(parts.join(' · ')),
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        ChannelBadge(p.channel),
-        if (canEdit) ...[const SizedBox(width: 8), const Icon(Icons.tune)],
-      ]),
+      trailing: canEdit ? const Icon(Icons.tune) : null,
       onTap: canEdit
           ? () => showModalBottomSheet<void>(
                 context: context,
@@ -452,43 +388,18 @@ class DeviceSettingsSheet extends ConsumerWidget {
           const SizedBox(height: 6),
           SegmentedButton<ChannelRole>(
             showSelectedIcon: false,
-            emptySelectionAllowed: true,
             segments: const [
               ButtonSegment(value: ChannelRole.stereo, label: Text('Stereo')),
               ButtonSegment(value: ChannelRole.left, label: Text('Left')),
               ButtonSegment(value: ChannelRole.right, label: Text('Right')),
               ButtonSegment(value: ChannelRole.mono, label: Text('Mono')),
             ],
-            selected: {if (!p.channel.isSurroundRole) p.channel},
-            onSelectionChanged: (v) {
-              if (v.isNotEmpty) run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId));
-            },
-          ),
-          const SizedBox(height: 6),
-          SegmentedButton<ChannelRole>(
-            showSelectedIcon: false,
-            emptySelectionAllowed: true,
-            segments: const [
-              ButtonSegment(value: ChannelRole.center, label: Text('Center')),
-              ButtonSegment(value: ChannelRole.surroundLeft, label: Text('Surround L')),
-              ButtonSegment(value: ChannelRole.surroundRight, label: Text('Surround R')),
-            ],
-            selected: {if (p.channel.isSurroundRole) p.channel},
-            onSelectionChanged: (v) {
-              if (v.isNotEmpty) run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId));
-            },
+            selected: {p.channel},
+            onSelectionChanged: (v) => run(ctl.setChannelRole(v.first, deviceId: isMe ? null : deviceId)),
           ),
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('For a stereo effect put the left and right phones a few metres apart, facing you.', style: t.bodySmall),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.flashlight_on_outlined),
-              label: const Text('Identify this phone'),
-              onPressed: () => run(ctl.identify(deviceId)),
-            ),
+            child: Text('Left/Right is experimental: put two phones apart for a stereo effect.', style: t.bodySmall),
           ),
           if (s.role == ParticipantRole.host && p.role != ParticipantRole.host) ...[
             const SizedBox(height: 16),
@@ -574,39 +485,33 @@ class _ListeningSpot extends ConsumerStatefulWidget {
   ConsumerState<_ListeningSpot> createState() => _ListeningSpotState();
 }
 
-/// Asks for confirmation and starts "calibrate to this spot" with this
-/// phone's microphone. Returns null on success, else a user-facing error
-/// (or null when the user cancelled; [started] tells them apart).
-Future<({bool started, String? error})> startSpotCalibration(BuildContext context, WidgetRef ref) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (c) => AlertDialog(
-      title: const Text('Calibrate to this spot?'),
-      content: const Text(
-        'Stand where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
-        'clicks in turn. Keep the room quiet and the volumes as they are.\n\n'
-        'The recording stays on this phone; only timing results are shared.',
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
-      ],
-    ),
-  );
-  if (ok != true) return (started: false, error: null);
-  final err = await ref.read(roomControllerProvider.notifier).calibrateHere();
-  return (started: err == null, error: err);
-}
-
 class _ListeningSpotState extends ConsumerState<_ListeningSpot> {
   bool _requested = false;
 
   Future<void> _calibrate() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Calibrate to this spot?'),
+        content: const Text(
+          'Stand where you will listen and hold this phone. The music pauses for 15–30 seconds while each phone '
+          'clicks in turn. Keep the room quiet and the volumes as they are.\n\n'
+          'The recording stays on this phone; only timing results are shared.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Start')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     setState(() => _requested = true);
-    final r = await startSpotCalibration(context, ref);
+    final err = await ref.read(roomControllerProvider.notifier).calibrateHere();
     if (!mounted) return;
-    if (!r.started) setState(() => _requested = false);
-    if (r.error != null) showMessage(context, r.error!, error: true);
+    if (err != null) {
+      setState(() => _requested = false);
+      showMessage(context, err, error: true);
+    }
   }
 
   @override

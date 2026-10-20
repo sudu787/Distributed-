@@ -14,19 +14,14 @@ import 'package:syncsphere/src/services/network_info.dart';
 import 'package:syncsphere/src/services/room_service.dart';
 import 'package:syncsphere/src/state/providers.dart';
 import 'package:syncsphere/src/state/room_controller.dart';
-import 'package:syncsphere/src/services/audius_client.dart';
-import 'package:syncsphere/src/ui/add_music.dart';
 import 'package:syncsphere/src/ui/diagnostics_screen.dart';
 import 'package:syncsphere/src/ui/home_screen.dart';
-import 'package:syncsphere/src/ui/now_playing_bar.dart';
 import 'package:syncsphere/src/ui/player_screen.dart';
 import 'package:syncsphere/src/ui/queue_view.dart';
 import 'package:syncsphere/src/ui/widgets.dart';
 import 'package:syncsphere/src/ui/room_screen.dart';
-import 'package:syncsphere/src/ui/speaker_layout.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 import 'dart:io';
-import 'dart:math';
 
 const _identity = DeviceIdentity(deviceId: 'dev-me', displayName: 'My Phone');
 
@@ -75,14 +70,10 @@ class _FakeRoomController extends RoomController {
       String? targetDevice,
       ParticipantRole? role,
       String? mode,
-      int? offsetUs,
-      int? toIndex}) async {
+      int? offsetUs}) async {
     sent.add(action);
-    if (action == ControlAction.moveTrack) moves.add((trackId!, toIndex!));
     return null;
   }
-
-  final List<(String, int)> moves = [];
 
   @override
   int? expectedPositionUs() => 65000000;
@@ -114,19 +105,8 @@ List<Override> _overrides(RoomViewState state, {_FakeRoomController? controller,
   ];
 }
 
-class _FakeAudius extends AudiusClient {
-  @override
-  Future<List<AudiusTrack>> search(String query, {int limit = 25}) async => const [
-        AudiusTrack(id: 'D7KyD', title: 'Night Drive', artist: 'Nova', duration: Duration(seconds: 215)),
-        AudiusTrack(id: 'X1', title: 'Sunrise', artist: 'Mira'),
-      ];
-}
-
 Widget _wrap(Widget child, List<Override> overrides) =>
     ProviderScope(key: UniqueKey(), overrides: overrides, child: MaterialApp(home: child));
-
-/// A tab in the room's bottom navigation bar.
-Finder _tab(String label) => find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
 
 /// Phone-shaped, tall viewport so lazily built list items are on screen.
 void _phone(WidgetTester tester) {
@@ -201,225 +181,12 @@ void main() {
     expect(find.byType(TrackArt), findsOneWidget);
     await tester.tap(find.text('Add songs'));
     await tester.pumpAndSettle();
-    expect(find.text('Pick files…'), findsOneWidget);
+    expect(find.text('From this phone…'), findsOneWidget);
 
     await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(guest(ParticipantRole.listener))));
     await tester.pumpAndSettle();
     expect(find.text('Add songs'), findsNothing);
     expect(find.textContaining('can pick or add songs'), findsOneWidget);
-  });
-
-  testWidgets('add songs: Audius search and links are offered; Audius results are listed', (tester) async {
-    _phone(tester);
-    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(_roomState())));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Add songs'));
-    await tester.pumpAndSettle();
-    expect(find.text('Search Audius'), findsOneWidget);
-    expect(find.text('From a link'), findsOneWidget);
-
-    await tester.pumpWidget(_wrap(
-        const AudiusSearchScreen(), [..._overrides(const RoomViewState()), audiusClientProvider.overrideWithValue(_FakeAudius())]));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'night');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle();
-    expect(find.text('Night Drive'), findsOneWidget);
-    expect(find.text('Nova · 3:35'), findsOneWidget);
-    expect(find.text('Sunrise'), findsOneWidget);
-    expect(find.textContaining('artists are credited'), findsOneWidget);
-  });
-
-  testWidgets('speakers: layout shows which phone is left and right; stereo pair and identify', (tester) async {
-    _phone(tester);
-    final base = _roomState();
-    final room = base.room!;
-    RoomState withChannels(ChannelRole mine, ChannelRole other, {IdentifyRequest? identify}) => RoomState(
-          roomId: room.roomId,
-          roomName: room.roomName,
-          coordinatorId: room.coordinatorId,
-          version: room.version + 1,
-          timeline: room.timeline,
-          playlist: room.playlist,
-          identify: identify,
-          participants: [
-            for (final p in room.participants)
-              ParticipantSummary(
-                deviceId: p.deviceId,
-                displayName: p.displayName,
-                role: p.role,
-                connection: p.connection,
-                currentTrack: p.currentTrack,
-                channel: p.deviceId == 'dev-me' ? mine : other,
-              ),
-          ],
-        );
-    final ctl = _FakeRoomController(base.copyWith(room: withChannels(ChannelRole.left, ChannelRole.right)));
-    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(base, controller: ctl)));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('This phone plays the LEFT channel'), findsOneWidget);
-    await tester.tap(_tab('Speakers'));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Speaker layout'), findsOneWidget);
-    expect(find.text('L'), findsWidgets);
-    expect(find.text('R'), findsWidgets);
-    expect(find.text('Swap L/R'), findsOneWidget);
-    expect(find.text('Test sound'), findsOneWidget);
-    await tester.tap(find.text('Kitchen').first);
-    await tester.pump();
-    expect(ctl.sent, contains(ControlAction.identify));
-
-    // The coordinator asks this phone to identify itself: full-screen LEFT.
-    ctl.state = ctl.state.copyWith(
-        room: withChannels(ChannelRole.left, ChannelRole.right,
-            identify: const IdentifyRequest(deviceId: 'dev-me', seq: 1, untilUs: 1 << 40)));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('LEFT'), findsOneWidget);
-    expect(find.text('This phone plays the left channel'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('LEFT'), findsNothing, reason: 'closes by itself');
-  });
-
-  testWidgets('surround setup assigns positions; surround roles appear on the map', (tester) async {
-    _phone(tester);
-    final ctl = _FakeRoomController(_roomState());
-    await tester.pumpWidget(_wrap(const Scaffold(body: SurroundSetupSheet()), _overrides(_roomState(), controller: ctl)));
-    await tester.pump();
-    expect(find.text('Center (in front of you)'), findsOneWidget);
-    // Kitchen becomes the surround-left phone.
-    final kitchenChips = find.widgetWithText(ChoiceChip, 'Kitchen');
-    await tester.tap(kitchenChips.at(3));
-    await tester.pump();
-    await tester.tap(find.text('Use this layout'));
-    await tester.pump();
-    expect(ctl.sent, contains(ControlAction.setChannelRole));
-    expect(roleAngle(ChannelRole.surroundLeft), -110);
-    expect(roleStyle(ChannelRole.center).short, 'C');
-  });
-
-  testWidgets('surround measurement: pick the front phones and a left phone; roles and volume trims follow',
-      (tester) async {
-    _phone(tester);
-    final base = _roomState();
-    final room = base.room!;
-    // True room (listener facing +y); the measurement only knows distances,
-    // so the published layout is rotated, mirrored and shifted.
-    final truth = {
-      'dev-me': (0.0, 0.0),
-      'fl': (-1.0, 1.732),
-      'fr': (1.0, 1.732),
-      'bl': (-1.691, -0.616),
-      'br': (1.691, -0.616),
-    };
-    const a = 70 * pi / 180;
-    final layout = SpeakerLayout(
-      id: 3,
-      listener: 'dev-me',
-      positions: {
-        for (final e in truth.entries)
-          e.key: (-(e.value.$1 * cos(a) - e.value.$2 * sin(a)) + 1, e.value.$1 * sin(a) + e.value.$2 * cos(a) - 2),
-      },
-      levelsDb: const {'dev-me': -3, 'fl': -20, 'fr': -24, 'bl': -18, 'br': -19},
-      residualM: 0.02,
-    );
-    final names = {'dev-me': 'My Phone', 'fl': 'Front L', 'fr': 'Front R', 'bl': 'Back L', 'br': 'Back R'};
-    final state = base.copyWith(
-      room: RoomState(
-        roomId: room.roomId,
-        roomName: room.roomName,
-        coordinatorId: room.coordinatorId,
-        version: room.version + 1,
-        timeline: room.timeline,
-        playlist: room.playlist,
-        layout: layout,
-        participants: [
-          for (final e in names.entries)
-            ParticipantSummary(
-                deviceId: e.key,
-                displayName: e.value,
-                role: e.key == 'dev-me' ? ParticipantRole.host : ParticipantRole.listener,
-                connection: ConnectionStatus.connected),
-        ],
-      ),
-    );
-    final ctl = _FakeRoomController(state);
-    await tester.pumpWidget(_wrap(Scaffold(body: SurroundOrientSheet(layout: layout)), _overrides(state, controller: ctl)));
-    await tester.pump();
-    expect(find.textContaining('Found 4 phones'), findsOneWidget);
-    expect(find.text('Use this layout'), findsNothing);
-    await tester.tap(find.widgetWithText(FilterChip, 'Front L').at(0));
-    await tester.tap(find.widgetWithText(FilterChip, 'Front R').at(0));
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilterChip, 'Front L').at(1));
-    await tester.pump();
-    for (final badge in ['L', 'R', 'SL', 'SR']) {
-      expect(find.text(badge), findsWidgets, reason: badge);
-    }
-    expect(find.text('30° left, 2.0 m · volume -4 dB'), findsOneWidget);
-    expect(find.text('30° right, 2.0 m'), findsOneWidget);
-    expect(find.textContaining('110° right, 1.8 m · volume -8 dB'), findsOneWidget);
-    await tester.tap(find.text('Use this layout'));
-    await tester.pump();
-    expect(ctl.sent.where((x) => x == ControlAction.setChannelRole).length, 4);
-    // Trims down to the quietest front phone (Front R); rears 3 dB lower.
-    expect(ctl.sent.where((x) => x == ControlAction.deviceVolume).length, 3);
-  });
-
-  testWidgets('queue editing: drag to reorder, swipe to remove with undo, play next', (tester) async {
-    _phone(tester);
-    final base = _roomState();
-    final room = base.room!;
-    final extra = [
-      TrackInfo(id: 'b' * 64, title: 'Second Song', durationUs: 180000000, sizeBytes: 1, availableCount: 2),
-      TrackInfo(id: 'c' * 64, title: 'Third Song', durationUs: 240000000, sizeBytes: 1, availableCount: 2),
-    ];
-    final state = base.copyWith(
-      room: RoomState(
-        roomId: room.roomId,
-        roomName: room.roomName,
-        coordinatorId: room.coordinatorId,
-        version: room.version + 1,
-        timeline: room.timeline,
-        playlist: [_track, ...extra],
-        participants: room.participants,
-        upNext: 'b' * 64,
-      ),
-    );
-    final ctl = _FakeRoomController(state);
-    await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(state, controller: ctl)));
-    await tester.pump();
-    expect(find.text('Now playing'), findsOneWidget);
-    expect(find.text('Next'), findsOneWidget);
-    expect(find.textContaining('3 songs · 10 min'), findsOneWidget);
-
-    // Drag "Third Song" to the top.
-    final handle = find.byIcon(Icons.drag_handle_rounded).at(2);
-    final g = await tester.startGesture(tester.getCenter(handle));
-    await tester.pump(const Duration(milliseconds: 100));
-    for (var i = 0; i < 8; i++) {
-      await g.moveBy(const Offset(0, -25));
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-    await g.up();
-    await tester.pumpAndSettle();
-    expect(ctl.moves, [('c' * 64, 0)]);
-
-    // Swipe "Second Song" away: removed at once, with Undo.
-    await tester.drag(find.text('Second Song'), const Offset(-600, 0));
-    await tester.pumpAndSettle();
-    expect(ctl.sent, contains(ControlAction.removeTrack));
-    expect(find.text('Second Song'), findsNothing);
-    expect(find.text('Undo'), findsOneWidget);
-
-    // ⋮ → Play next.
-    await tester.tap(find.byTooltip('More').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Play next'));
-    await tester.pumpAndSettle();
-    expect(ctl.moves.last, ('c' * 64, 1), reason: 'right after the playing song');
   });
 
   testWidgets('queue shows upload progress', (tester) async {
@@ -434,33 +201,20 @@ void main() {
 
   testWidgets('room: three tabs with player, queue and speakers', (tester) async {
     _phone(tester);
-    final ctl = _FakeRoomController(_roomState());
-    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
+    await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
     await tester.pump();
     expect(find.text('Living room'), findsOneWidget);
     expect(find.textContaining('2 phones · In sync'), findsOneWidget);
     expect(find.text('Blue Hour'), findsOneWidget); // Playing tab
 
-    expect(find.byType(NowPlayingBar), findsNothing, reason: 'the Playing tab is the full player');
-    expect(find.text('Up next'), findsOneWidget);
-
-    await tester.tap(_tab('Queue'));
+    await tester.tap(find.text('Queue'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300)); // tab cross-fade
-    // The queue row and the now-playing bar above the tabs.
-    expect(find.text('Blue Hour'), findsNWidgets(2));
-    expect(find.byType(NowPlayingBar), findsOneWidget);
-    expect(find.text('Now playing'), findsOneWidget);
+    expect(find.text('Blue Hour'), findsOneWidget);
     expect(find.text('1/2'), findsOneWidget);
 
-    await tester.tap(_tab('Speakers'));
+    await tester.tap(find.text('Speakers'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(NowPlayingBar), findsOneWidget, reason: 'what is playing stays visible on every tab');
-    await tester.tap(find.descendant(of: find.byType(NowPlayingBar), matching: find.byTooltip('Pause')));
-    await tester.pump();
-    expect(ctl.sent, contains(ControlAction.pause));
-    expect(find.descendant(of: find.byType(ListTile), matching: find.textContaining('Kitchen')), findsOneWidget);
+    expect(find.textContaining('Kitchen'), findsOneWidget);
     expect(find.textContaining('downloading song'), findsOneWidget);
     expect(find.text('Calibrate to this spot'), findsOneWidget);
     expect(find.textContaining('cannot record audio'), findsOneWidget);
@@ -482,9 +236,9 @@ void main() {
     final ctl = _FakeRoomController(_roomState());
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState(), controller: ctl)));
     await tester.pump();
-    await tester.tap(_tab('Speakers'));
+    await tester.tap(find.text('Speakers'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'Kitchen'));
+    await tester.tap(find.text('Kitchen'));
     await tester.pumpAndSettle();
     expect(find.text('No adjustment'), findsOneWidget);
     await tester.tap(find.text('Left'));
@@ -587,11 +341,11 @@ void main() {
     _phone(tester);
     await tester.pumpWidget(_wrap(const RoomScreen(), _overrides(_roomState())));
     await tester.pump();
-    await tester.tap(_tab('Queue'));
+    await tester.tap(find.text('Queue'));
     await tester.pump();
     await tester.tap(find.text('Add songs'));
     await tester.pumpAndSettle();
-    expect(find.text('Pick files…'), findsOneWidget);
+    expect(find.text('From this phone…'), findsOneWidget);
     expect(find.text('From My music'), findsOneWidget);
   });
 }

@@ -60,31 +60,3 @@ void haptic(WidgetRef ref, Haptic kind) {
       HapticFeedback.heavyImpact();
   }
 }
-
-/// The "calibrate for the best sync" tip was dismissed (saved on the phone).
-class CalibrationTipDismissed extends Notifier<bool> {
-  static const key = 'calTipDismissed';
-
-  @override
-  bool build() {
-    _load();
-    return false;
-  }
-
-  Future<void> _load() async {
-    try {
-      if (await ref.read(appStoreProvider).setting(key) == '1') state = true;
-    } catch (_) {
-      // No store (tests): keep showing the tip.
-    }
-  }
-
-  Future<void> dismiss() async {
-    state = true;
-    try {
-      await ref.read(appStoreProvider).saveSetting(key, '1');
-    } catch (_) {}
-  }
-}
-
-final calibrationTipDismissedProvider = NotifierProvider<CalibrationTipDismissed, bool>(CalibrationTipDismissed.new);

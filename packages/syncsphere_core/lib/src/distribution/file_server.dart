@@ -19,7 +19,6 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -27,7 +26,6 @@ import 'package:crypto/crypto.dart';
 import '../config/sync_config.dart';
 import '../observability/event_log.dart';
 import '../protocol/auth.dart';
-import 'chunks.dart';
 import '../model/room_state.dart';
 
 class TrackFileServer {
@@ -53,18 +51,6 @@ class TrackFileServer {
   /// Where incoming uploads are written while they are verified.
   final Directory? uploadDir;
 
-  /// Room-wide peer key (phone-to-phone sharing): tokens signed with it are
-  /// accepted from any member. Null: session tokens only.
-  final List<int>? Function()? peerKey;
-
-  /// Chunk hashes of a served (complete) file.
-  final Future<List<String>> Function(String trackId, File file)? chunksFor;
-
-  /// A track this device is still assembling (served chunk by chunk).
-  final Future<PartialTrack?> Function(String trackId)? partialFor;
-
-  int bytesServedFromPartial = 0;
-
   final Set<String> _uploading = {};
   int bytesUploaded = 0;
 
@@ -82,83 +68,7 @@ class TrackFileServer {
     this.canUpload,
     this.acceptUpload,
     this.uploadDir,
-    this.peerKey,
-    this.chunksFor,
-    this.partialFor,
   });
-
-  /// Accounting id of an authorised request (session id, or `peer:<device>`
-  /// for a peer token), or null.
-  String? _authorize(TransferToken token, String path) {
-    final keys = keysForSession(token.sessionId);
-    if (keys != null && token.verify(keys.transfer, path)) return token.sessionId;
-    final pk = peerKey?.call();
-    if (pk != null && token.verify(pk, path)) return 'peer:${token.sessionId}';
-    return null;
-  }
-
-  Future<void> _json(HttpResponse res, Object body) async {
-    res.headers.contentType = ContentType.json;
-    res.write(jsonEncode(body));
-    await res.close();
-  }
-
-  Future<void> _chunks(HttpResponse res, String id, File? file, PartialTrack? part) async {
-    if (file != null && chunksFor != null) {
-      return _json(res, {'size': await file.length(), 'hashes': await chunksFor!(id, file)});
-    }
-    if (part != null) return _json(res, {'size': part.sizeBytes, 'hashes': part.hashes});
-    return _fail(res, HttpStatus.notFound, 'track not served');
-  }
-
-  Future<void> _have(HttpResponse res, File? file, PartialTrack? part) async {
-    if (file != null) return _json(res, ChunkMap.full(chunkCount(await file.length())).toJson());
-    if (part != null) return _json(res, part.map.toJson());
-    return _fail(res, HttpStatus.notFound, 'track not served');
-  }
-
-  /// Range requests for chunks this device already has.
-  Future<void> _servePartial(HttpRequest req, HttpResponse res, String id, PartialTrack part, String who) async {
-    final range = req.headers.value(HttpHeaders.rangeHeader);
-    final r = range == null ? null : parseByteRange(range, part.sizeBytes);
-    if (r == null || !part.map.covers(r.$1, r.$2 + 1, part.sizeBytes)) {
-      res.headers.set(HttpHeaders.contentRangeHeader, 'bytes */${part.sizeBytes}');
-      return _fail(res, HttpStatus.requestedRangeNotSatisfiable, 'chunk not available yet');
-    }
-    final perSession = _activePerSession[who] ?? 0;
-    if (perSession >= config.maxConcurrentPerSession || _activeTotal >= config.maxConcurrentTotal) {
-      res.headers.set(HttpHeaders.retryAfterHeader, '1');
-      return _fail(res, HttpStatus.tooManyRequests, 'too many concurrent transfers');
-    }
-    final (start, end) = r;
-    res.statusCode = HttpStatus.partialContent;
-    res.headers.set(HttpHeaders.contentRangeHeader, 'bytes $start-$end/${part.sizeBytes}');
-    res.headers.contentType = ContentType('application', 'octet-stream');
-    res.contentLength = end - start + 1;
-    if (req.method == 'HEAD') return res.close();
-    _activePerSession[who] = perSession + 1;
-    _activeTotal++;
-    try {
-      await res.addStream(part.data.openRead(start, end + 1).map((c) {
-        bytesServed += c.length;
-        bytesServedFromPartial += c.length;
-        return c;
-      }));
-      await res.close();
-    } on SocketException catch (e) {
-      log.info('transfer.aborted', 'peer aborted chunk of ${id.substring(0, 8)}: ${e.message}');
-    } on HttpException catch (e) {
-      log.info('transfer.aborted', 'chunk of ${id.substring(0, 8)} interrupted: ${e.message}');
-    } finally {
-      _activeTotal--;
-      final n = (_activePerSession[who] ?? 1) - 1;
-      if (n <= 0) {
-        _activePerSession.remove(who);
-      } else {
-        _activePerSession[who] = n;
-      }
-    }
-  }
 
   /// HTTP handler, mount it on the coordinator's `HttpServer`.
   Future<void> handle(HttpRequest req) async {
@@ -171,41 +81,29 @@ class TrackFileServer {
     if (!path.startsWith('/tracks/')) {
       return _fail(res, HttpStatus.notFound, 'not found');
     }
-    var rest = path.substring('/tracks/'.length);
-    String? sub;
-    final slash = rest.indexOf('/');
-    if (slash >= 0) {
-      sub = rest.substring(slash + 1);
-      rest = rest.substring(0, slash);
-    }
-    final id = rest;
-    if (!TrackInfo.isValidTrackId(id) || (sub != null && sub != 'chunks' && sub != 'have')) {
+    final id = path.substring('/tracks/'.length);
+    if (!TrackInfo.isValidTrackId(id)) {
       return _fail(res, HttpStatus.badRequest, 'invalid track id');
     }
     final header = req.headers.value('x-syncsphere-auth');
     final token = header == null ? null : TransferToken.parse(header);
-    final who = token == null ? null : _authorize(token, path);
-    if (token == null || who == null) {
+    final keys = token == null ? null : keysForSession(token.sessionId);
+    if (token == null || keys == null || !token.verify(keys.transfer, path)) {
       log.warn('transfer.auth', 'unauthorised download attempt for ${id.substring(0, 8)} from ${req.connectionInfo?.remoteAddress.address}');
       return _fail(res, HttpStatus.unauthorized, 'unauthorised');
     }
     if (token.expiryMs < nowMs()) {
       return _fail(res, HttpStatus.unauthorized, 'token expired');
     }
-    final served = fileForTrack(id);
-    final file = served != null && await served.exists() ? served : null;
-    final part = file == null && partialFor != null ? await partialFor!(id) : null;
-    if (sub == 'chunks') return _chunks(res, id, file, part);
-    if (sub == 'have') return _have(res, file, part);
-    if (file == null) {
-      if (part != null) return _servePartial(req, res, id, part, who);
+    final file = fileForTrack(id);
+    if (file == null || !await file.exists()) {
       return _fail(res, HttpStatus.notFound, 'track not served');
     }
     final length = await file.length();
     if (length > config.maxFileBytes) {
       return _fail(res, HttpStatus.requestEntityTooLarge, 'file exceeds transfer limit');
     }
-    final perSession = _activePerSession[who] ?? 0;
+    final perSession = _activePerSession[token.sessionId] ?? 0;
     if (perSession >= config.maxConcurrentPerSession || _activeTotal >= config.maxConcurrentTotal) {
       res.headers.set(HttpHeaders.retryAfterHeader, '2');
       return _fail(res, HttpStatus.tooManyRequests, 'too many concurrent transfers');
@@ -237,7 +135,7 @@ class TrackFileServer {
       return;
     }
 
-    _activePerSession[who] = perSession + 1;
+    _activePerSession[token.sessionId] = perSession + 1;
     _activeTotal++;
     requestsServed++;
     try {
@@ -252,11 +150,11 @@ class TrackFileServer {
       log.info('transfer.aborted', 'download of ${id.substring(0, 8)} interrupted: ${e.message}');
     } finally {
       _activeTotal--;
-      final n = (_activePerSession[who] ?? 1) - 1;
+      final n = (_activePerSession[token.sessionId] ?? 1) - 1;
       if (n <= 0) {
-        _activePerSession.remove(who);
+        _activePerSession.remove(token.sessionId);
       } else {
-        _activePerSession[who] = n;
+        _activePerSession[token.sessionId] = n;
       }
     }
   }

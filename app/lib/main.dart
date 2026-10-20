@@ -6,13 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:syncsphere_audio/syncsphere_audio.dart';
 import 'package:syncsphere_core/syncsphere_core.dart';
 
 import 'src/app.dart';
 import 'src/data/sqflite_store.dart';
-import 'src/services/device_media.dart';
 import 'src/services/artwork_service.dart';
 import 'src/services/library_service.dart';
 import 'src/services/room_service.dart';
@@ -20,15 +18,7 @@ import 'src/state/providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (Platform.isWindows || Platform.isLinux) {
-    // sqflite has no desktop plugin; use the FFI implementation.
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
-  // On desktop, keep data in the app's own folder, not in Documents.
-  final docs = Platform.isAndroid || Platform.isIOS
-      ? await getApplicationDocumentsDirectory()
-      : await getApplicationSupportDirectory();
+  final docs = await getApplicationDocumentsDirectory();
   final cache = await getApplicationCacheDirectory();
   final store = await SqfliteAppStore.open(p.join(docs.path, 'syncsphere.db'));
   final identity = await store.loadIdentity(defaultName: _defaultName());
@@ -40,11 +30,8 @@ Future<void> main() async {
     };
   }
 
-  // Android: Media3/ExoPlayer; Windows: WASAPI + Media Foundation (same
-  // channel, see packages/syncsphere_audio/windows).
-  final native = Platform.isAndroid || Platform.isWindows ? MethodChannelAudioApi() : null;
-  final android = Platform.isAndroid ? native : null;
-  final hooks = android == null ? null : _AndroidHooks(android, log);
+  final native = Platform.isAndroid ? MethodChannelAudioApi() : null;
+  final hooks = native == null ? null : _AndroidHooks(native, log);
   final library = LibraryService(
     store: store,
     libraryDir: Directory(p.join(docs.path, 'library')),
@@ -57,18 +44,17 @@ Future<void> main() async {
     clock: clock,
     log: log,
     hooks: hooks ?? const NoopPlatformHooks(),
-    // Microphone calibration is Android-only for now.
-    recorderFor: (b) => Platform.isAndroid && b is Media3AudioBackend ? b.calibrationRecorder() : null,
+    recorderFor: (b) => b is Media3AudioBackend ? b.calibrationRecorder() : null,
     // VBR MP3 seeks are approximate in ExoPlayer; play exact PCM copies.
     converterFor: (b) => b is Media3AudioBackend ? b.exactSeekConverter(Directory(p.join(cache.path, 'pcm'))) : null,
     backendFactory: (log) async {
       if (native == null) {
-        // Other desktop/dev builds: follow the timeline without rendering audio.
+        // Desktop/dev builds: follow the timeline without rendering audio.
         return NullAudioBackend(clock.nowMicros);
       }
       final b = Media3AudioBackend(api: native, clock: clock, log: log);
       await b.initialize();
-      hooks?.attach(b);
+      hooks!.attach(b);
       if (b.deviceInfo['bluetoothOutputPresent'] == true) {
         log.warn('audio.bluetooth',
             'Bluetooth output detected: its latency is not visible to sync estimates; calibrate acoustically.');
@@ -84,27 +70,12 @@ Future<void> main() async {
     trackCacheDir: Directory(p.join(cache.path, 'tracks')),
   );
 
-  final deviceMedia = android == null
-      ? DeviceMedia.none()
-      : DeviceMedia(
-          requestAccess: () => android.requestPermission('audio'),
-          query: android.queryAudio,
-          copy: android.copyContent,
-          takeShared: android.takeSharedAudio,
-          artwork: android.extractArtwork,
-          artDir: Directory(p.join(cache.path, 'device-art')),
-          shareArrived: android.events.where((e) => e['kind'] == 'shared').map((_) {}),
-        );
-
   runApp(ProviderScope(
     overrides: [
       artworkServiceProvider.overrideWithValue(artwork),
       appStoreProvider.overrideWithValue(store),
       libraryServiceProvider.overrideWithValue(library),
       roomServiceProvider.overrideWithValue(rooms),
-      deviceMediaProvider.overrideWithValue(deviceMedia),
-      if (android != null)
-        microphonePermissionProvider.overrideWithValue(() => android.requestPermission('microphone')),
       initialIdentityProvider.overrideWithValue(identity),
     ],
     child: const SyncSphereApp(),
@@ -113,9 +84,7 @@ Future<void> main() async {
 
 String _defaultName() {
   final host = Platform.localHostname;
-  if (host.isEmpty || host == 'localhost') {
-    return Platform.isAndroid ? 'Android phone' : (Platform.isWindows ? 'Windows PC' : 'SyncSphere device');
-  }
+  if (host.isEmpty || host == 'localhost') return Platform.isAndroid ? 'Android phone' : 'SyncSphere device';
   return host;
 }
 

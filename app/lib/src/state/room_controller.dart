@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncsphere_audio/syncsphere_audio.dart';
@@ -31,10 +30,6 @@ class RoomViewState {
   /// Songs being added from this phone: (done, total); null when idle.
   final (int, int)? adding;
 
-  /// (count, device id): this phone declined to record for that phone's
-  /// room measurement ("Help measure the room" is off).
-  final (int, String)? declinedMeasurement;
-
   const RoomViewState({
     this.status = RoomStatus.none,
     this.info,
@@ -49,7 +44,6 @@ class RoomViewState {
     this.error,
     this.events = const [],
     this.adding,
-    this.declinedMeasurement,
   });
 
   bool get isLive => phase == SessionPhase.joined || phase == SessionPhase.syncing;
@@ -72,7 +66,6 @@ class RoomViewState {
     List<SyncEvent>? events,
     (int, int)? adding,
     bool clearAdding = false,
-    (int, String)? declinedMeasurement,
   }) =>
       RoomViewState(
         status: status ?? this.status,
@@ -88,7 +81,6 @@ class RoomViewState {
         error: clearError ? null : (error ?? this.error),
         events: events ?? this.events,
         adding: clearAdding ? null : (adding ?? this.adding),
-        declinedMeasurement: declinedMeasurement ?? this.declinedMeasurement,
       );
 }
 
@@ -101,7 +93,6 @@ class RoomController extends Notifier<RoomViewState> {
   @override
   RoomViewState build() {
     ref.onDispose(_detach);
-    ref.listen<bool>(roomMeasurementProvider, (_, on) => _svc.allowRoomMeasurement = on);
     return const RoomViewState();
   }
 
@@ -188,11 +179,8 @@ class RoomController extends Notifier<RoomViewState> {
 
   void _attach(RoomInfo info) {
     final s = _svc.session!;
-    _svc.allowRoomMeasurement = ref.read(roomMeasurementProvider);
     state = RoomViewState(status: RoomStatus.active, info: info, room: s.state, phase: s.phase, role: s.role);
     _subs
-      ..add(_svc.measurementDeclined.listen((id) =>
-          state = state.copyWith(declinedMeasurement: ((state.declinedMeasurement?.$1 ?? 0) + 1, id))))
       ..add(s.stateStream.listen((r) => state = state.copyWith(room: r, role: s.role)))
       ..add(s.phaseStream.listen((p) {
         state = state.copyWith(
@@ -289,8 +277,7 @@ class RoomController extends Notifier<RoomViewState> {
       String? targetDevice,
       ParticipantRole? role,
       String? mode,
-      int? offsetUs,
-      int? toIndex}) async {
+      int? offsetUs}) async {
     final s = _svc.session;
     if (s == null) return 'Not in a room';
     final ack = await s.control(action,
@@ -300,8 +287,7 @@ class RoomController extends Notifier<RoomViewState> {
         targetDevice: targetDevice,
         role: role,
         mode: mode,
-        offsetUs: offsetUs,
-        toIndex: toIndex);
+        offsetUs: offsetUs);
     if (ack.accepted) return null;
     return describeControlError(ack.error, action);
   }
@@ -330,79 +316,14 @@ class RoomController extends Notifier<RoomViewState> {
 
   Future<String?> setRepeat(PlaylistRepeat mode) => control(ControlAction.setRepeat, mode: mode.name);
 
-  /// Plays [trackId] now (on every phone).
-  Future<String?> playNow(String trackId) => control(ControlAction.setTrack, trackId: trackId);
-
-  /// Removes a song from the queue (the playing song moves on to the next).
-  Future<String?> removeTrack(String trackId) => control(ControlAction.removeTrack, trackId: trackId);
-
-  /// Moves a song to queue position [to].
-  Future<String?> moveTrack(String trackId, int to) => control(ControlAction.moveTrack, trackId: trackId, toIndex: to);
-
-  /// Puts a song right after the one playing.
-  Future<String?> playNext(String trackId) {
-    final room = state.room;
-    if (room == null) return Future.value('Not in a room');
-    final cur = room.indexOfTrack(room.pending?.trackId ?? room.timeline.trackId);
-    final from = room.indexOfTrack(trackId);
-    final to = cur < 0 ? 0 : (from >= 0 && from < cur ? cur : cur + 1);
-    return moveTrack(trackId, to);
-  }
-
-  /// Puts a removed song back at position [index] (undo). The host still has
-  /// the file, so nothing is uploaded again.
-  Future<String?> restoreTrack(TrackInfo track, int index) async {
-    final s = _svc.session;
-    if (s == null) return 'Not in a room';
-    final ack = await s.control(ControlAction.addTrack, info: track);
-    if (!ack.accepted) return describeControlError(ack.error, ControlAction.addTrack);
-    return moveTrack(track.id, index);
-  }
-
   Future<String?> setShuffle(bool on) => control(ControlAction.setShuffle, value: on ? 1 : 0);
 
   /// Channel role of [deviceId] (default: this device).
-  /// Makes [deviceId]'s phone flash its channel and vibrate for 3 s.
-  Future<String?> identify(String deviceId) => control(ControlAction.identify,
-      targetDevice: deviceId == ref.read(identityProvider).deviceId ? null : deviceId);
-
   Future<String?> setChannelRole(ChannelRole role, {String? deviceId}) =>
       control(ControlAction.setChannelRole, mode: role.name, targetDevice: deviceId);
 
   /// Starts an acoustic calibration measured by this device's microphone.
   Future<String?> calibrateHere() => control(ControlAction.calibrate);
-
-  /// Surround calibration: every phone with a microphone records, so the
-  /// room can measure where the phones are (needs 3 or more phones).
-  Future<String?> calibrateSurround() => control(ControlAction.calibrate, mode: 'surround');
-
-  /// Adds the speaker test sound (beeps on the left channel only, then the
-  /// right only, then center and surround parts) and plays it now.
-  Future<String?> playSpeakerTest() async {
-    final tmp = await Directory.systemTemp.createTemp('speaker-test');
-    try {
-      final f = File('${tmp.path}/speaker-test.wav');
-      await f.writeAsBytes(speakerTestWav());
-      final track = await ref.read(libraryServiceProvider).import(f, title: kSpeakerTestTitle, artist: 'SyncSphere');
-      ref.invalidate(libraryProvider);
-      final err = await addTracks([track]);
-      if (err != null) return err;
-      // The new playlist entry may still be on its way to this phone.
-      for (var i = 0; i < 20 && state.room?.trackById(track.id) == null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      }
-      var e = await control(ControlAction.setTrack, trackId: track.id);
-      if (e != null) {
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        e = await control(ControlAction.setTrack, trackId: track.id);
-      }
-      return e;
-    } catch (e) {
-      return 'Could not prepare the test sound: $e';
-    } finally {
-      unawaited(tmp.delete(recursive: true).then((_) {}, onError: (Object _) {}));
-    }
-  }
 
   /// Whether this device can take part as the calibration listener.
   bool get hasMicrophone => _svc.session?.calibrationListener != null;
@@ -524,14 +445,10 @@ String describeControlError(String? error, ControlAction action) => switch (erro
       ControlError.unauthorized when action == ControlAction.addTrack =>
         'Only the host and phones allowed to control the music can add songs.',
       ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
-      ControlError.busy when action == ControlAction.removeTrack =>
-        'That song comes back after the calibration. Try again in a few seconds.',
       ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
       ControlError.invalid when action == ControlAction.calibrate =>
         'Calibration needs microphone access and at least one connected device.',
       ControlError.invalid when action == ControlAction.addTrack => 'The host could not add that song.',
-      ControlError.invalid when action == ControlAction.setChannelRole =>
-        'Surround needs the latest SyncSphere on every phone in the party.',
       ControlError.staleVersion => 'The room changed meanwhile — try again.',
       ControlError.notConnected => 'Not connected to the room coordinator.',
       ControlError.nothingToPlay => 'Nothing to play.',

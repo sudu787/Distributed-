@@ -189,23 +189,6 @@ class TrackInfo {
   /// Number of connected participants that reported the track available.
   final int availableCount;
 
-  /// Where the song can be downloaded directly (http/https), e.g. an open
-  /// catalog such as Audius or the user's own music server. When set, every
-  /// device fetches it from there first (the catalog streams to each
-  /// listener) and falls back to the host. The SHA-256 [id] still decides.
-  final String? sourceUrl;
-
-  /// Cover image URL from the catalog (used when the file has no picture).
-  final String? artUrl;
-
-  /// Attribution shown with the song, e.g. "via Audius".
-  final String? credit;
-
-  /// SHA-256 over the track's chunk hashes (chunks.dart). Lets devices
-  /// download chunks from each other and verify the chunk list from any
-  /// peer. Null: whole-file download only.
-  final String? chunkRoot;
-
   const TrackInfo({
     required this.id,
     required this.title,
@@ -216,13 +199,9 @@ class TrackInfo {
     this.mimeType,
     this.hostServes = true,
     this.availableCount = 0,
-    this.sourceUrl,
-    this.artUrl,
-    this.credit,
-    this.chunkRoot,
   });
 
-  TrackInfo copyWith({int? availableCount, bool? hostServes, int? durationUs, String? chunkRoot}) =>
+  TrackInfo copyWith({int? availableCount, bool? hostServes, int? durationUs}) =>
       TrackInfo(
         id: id,
         title: title,
@@ -233,10 +212,6 @@ class TrackInfo {
         mimeType: mimeType,
         hostServes: hostServes ?? this.hostServes,
         availableCount: availableCount ?? this.availableCount,
-        sourceUrl: sourceUrl,
-        artUrl: artUrl,
-        credit: credit,
-        chunkRoot: chunkRoot ?? this.chunkRoot,
       );
 
   Map<String, Object?> toJson() => {
@@ -249,10 +224,6 @@ class TrackInfo {
         if (mimeType != null) 'mime': mimeType,
         'serves': hostServes,
         'avail': availableCount,
-        if (sourceUrl != null) 'src': sourceUrl,
-        if (artUrl != null) 'art': artUrl,
-        if (credit != null) 'credit': credit,
-        if (chunkRoot != null) 'croot': chunkRoot,
       };
 
   factory TrackInfo.fromJson(Map<String, Object?> j) {
@@ -271,30 +242,7 @@ class TrackInfo {
       mimeType: r.optString('mime', maxLength: 100),
       hostServes: r.optBoolean('serves') ?? false,
       availableCount: r.optInteger('avail', min: 0) ?? 0,
-      sourceUrl: _optWebUrl(r, 'src'),
-      artUrl: _optWebUrl(r, 'art'),
-      credit: r.optString('credit', maxLength: 64),
-      chunkRoot: _optHash(r, 'croot'),
     );
-  }
-
-  static String? _optHash(Reader r, String key) {
-    final v = r.optString(key, maxLength: 64);
-    if (v != null && !isValidTrackId(v)) throw r.error(key, 'must be 64 lowercase hex chars');
-    return v;
-  }
-
-  static String? _optWebUrl(Reader r, String key) {
-    final v = r.optString(key, maxLength: 1024);
-    if (v == null) return null;
-    if (!isWebUrl(v)) throw r.error(key, 'must be an http(s) URL');
-    return v;
-  }
-
-  /// True for absolute http/https URLs with a host.
-  static bool isWebUrl(String v) {
-    final u = Uri.tryParse(v);
-    return u != null && (u.scheme == 'http' || u.scheme == 'https') && u.host.isNotEmpty;
   }
 
   static final _hex64 = RegExp(r'^[0-9a-f]{64}$');
@@ -304,36 +252,7 @@ class TrackInfo {
 /// What a device plays from a stereo source (experimental distributed
 /// stereo). Phones usually have one loudspeaker, so `left`/`right` route a
 /// single source channel to all of the device's outputs.
-/// What a phone plays. Phones usually have one loudspeaker, so each phone
-/// is one point of a stereo or surround layout.
-///
-/// [center], [surroundLeft] and [surroundRight] are the surround roles
-/// (ITU-R BS.775 5.1 positions: 0°, ±110°). For stereo music they are
-/// upmixed with a passive matrix (center = 0.707·(L+R), surround =
-/// 0.707·(L−R) at −3 dB and [kSurroundDelayUs] later); 5.1 files play the
-/// matching channel. Only used when every phone supports them
-/// ([DeviceCapabilities.surround]).
-enum ChannelRole {
-  stereo,
-  left,
-  right,
-  mono,
-  center,
-  surroundLeft,
-  surroundRight;
-
-  bool get isSurroundRole => this == center || this == surroundLeft || this == surroundRight;
-  bool get isRear => this == surroundLeft || this == surroundRight;
-}
-
-/// Extra delay of the rear (surround) phones. Matrix decoders delay the
-/// surround channels by 15–20 ms so the precedence (Haas) effect keeps
-/// sounds anchored at the front; it also makes the rear phones tolerant of
-/// millisecond-level sync error.
-const kSurroundDelayUs = 15000;
-
-/// Delay a phone adds because of its role (µs).
-int roleDelayUs(ChannelRole r) => r.isRear ? kSurroundDelayUs : 0;
+enum ChannelRole { stereo, left, right, mono }
 
 /// Room-wide repeat behaviour at the end of a track.
 enum PlaylistRepeat { off, all, one }
@@ -377,10 +296,6 @@ class ParticipantSummary {
   /// or null if the device was not calibrated in this room.
   final int? calibrationUs;
 
-  /// `host:port` of this device's peer file server (phone-to-phone song
-  /// sharing), or null.
-  final String? peer;
-
   const ParticipantSummary({
     required this.deviceId,
     required this.displayName,
@@ -392,7 +307,6 @@ class ParticipantSummary {
     this.endpoint,
     this.channel = ChannelRole.stereo,
     this.calibrationUs,
-    this.peer,
   });
 
   ParticipantSummary copyWith({
@@ -413,7 +327,6 @@ class ParticipantSummary {
         endpoint: endpoint,
         channel: channel,
         calibrationUs: calibrationUs,
-        peer: peer,
       );
 
   Map<String, Object?> toJson() => {
@@ -427,7 +340,6 @@ class ParticipantSummary {
         if (endpoint != null) 'ep': endpoint,
         if (channel != ChannelRole.stereo) 'ch': channel.name,
         if (calibrationUs != null) 'cal': calibrationUs,
-        if (peer != null) 'peer': peer,
       };
 
   factory ParticipantSummary.fromJson(Map<String, Object?> j) {
@@ -443,80 +355,6 @@ class ParticipantSummary {
       endpoint: r.optString('ep', maxLength: 128),
       channel: r.optEnum('ch', ChannelRole.values) ?? ChannelRole.stereo,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000),
-      peer: r.optString('peer', maxLength: 128),
-    );
-  }
-}
-
-/// "Which phone is this?": the coordinator asks [deviceId] to flash its
-/// screen, show its channel and vibrate until [untilUs] (coordinator time).
-/// [seq] increases with every request, so asking twice re-triggers it.
-class IdentifyRequest {
-  final String deviceId;
-  final int seq;
-  final int untilUs;
-  const IdentifyRequest({required this.deviceId, required this.seq, required this.untilUs});
-
-  Map<String, Object?> toJson() => {'dev': deviceId, 'seq': seq, 'until': untilUs};
-
-  factory IdentifyRequest.fromJson(Map<String, Object?> j) {
-    final r = Reader(j, 'identify');
-    return IdentifyRequest(deviceId: r.string('dev', maxLength: 64), seq: r.integer('seq', min: 0), untilUs: r.integer('until'));
-  }
-}
-
-/// Result of a surround calibration: phone positions (m) in an arbitrary
-/// rotation with the [listener] somewhere in it (oriented on the listener's
-/// phone by tapping the front and the left phone, see calibration/layout.dart),
-/// click levels at the listener (dBFS) and the fit's RMS residual (m).
-class SpeakerLayout {
-  final int id;
-  final String listener;
-  final Map<String, (double, double)> positions;
-  final Map<String, double> levelsDb;
-  final double residualM;
-  const SpeakerLayout({
-    required this.id,
-    required this.listener,
-    required this.positions,
-    this.levelsDb = const {},
-    this.residualM = 0,
-  });
-
-  Map<String, Object?> toJson() => {
-        'id': id,
-        'listener': listener,
-        'pos': {
-          for (final e in positions.entries) e.key: [_r(e.value.$1), _r(e.value.$2)]
-        },
-        if (levelsDb.isNotEmpty) 'lvl': {for (final e in levelsDb.entries) e.key: _r(e.value)},
-        'res': _r(residualM),
-      };
-
-  static double _r(double v) => (v * 1000).round() / 1000;
-
-  factory SpeakerLayout.fromJson(Map<String, Object?> j) {
-    final r = Reader(j, 'layout');
-    final pos = <String, (double, double)>{};
-    final raw = r.map('pos');
-    if (raw.length > 64) throw r.error('pos', 'too many devices');
-    raw.forEach((k, v) {
-      if (k.length > 64 || v is! List || v.length != 2 || v.any((e) => e is! num || !e.isFinite || e.abs() > 1000)) {
-        throw r.error('pos', 'invalid position for $k');
-      }
-      pos[k] = ((v[0] as num).toDouble(), (v[1] as num).toDouble());
-    });
-    final lvl = <String, double>{};
-    (r.optMap('lvl') ?? const {}).forEach((k, v) {
-      if (k.length > 64 || v is! num || !v.isFinite) throw r.error('lvl', 'invalid level for $k');
-      lvl[k] = v.toDouble();
-    });
-    return SpeakerLayout(
-      id: r.integer('id', min: 0),
-      listener: r.string('listener', maxLength: 64),
-      positions: pos,
-      levelsDb: lvl,
-      residualM: r.number('res', min: 0, max: 1000),
     );
   }
 }
@@ -548,16 +386,6 @@ class RoomState {
   /// `participant/failover.dart`). Null: no preference.
   final String? preferredCoordinator;
 
-  /// Latest "identify this phone" request (see [IdentifyRequest]).
-  final IdentifyRequest? identify;
-
-  /// Latest surround calibration result (see [SpeakerLayout]).
-  final SpeakerLayout? layout;
-
-  /// The song that plays after the current one (play order, so it follows
-  /// shuffle and repeat), or null at the end / when nothing is loaded.
-  final String? upNext;
-
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -574,9 +402,6 @@ class RoomState {
     this.shuffle = false,
     this.calibration,
     this.preferredCoordinator,
-    this.identify,
-    this.layout,
-    this.upNext,
   });
 
   TrackInfo? trackById(String? id) {
@@ -619,10 +444,6 @@ class RoomState {
     CalibrationPlan? calibration,
     bool clearCalibration = false,
     String? preferredCoordinator,
-    IdentifyRequest? identify,
-    SpeakerLayout? layout,
-    String? upNext,
-    bool clearUpNext = false,
   }) =>
       RoomState(
         roomId: roomId,
@@ -640,9 +461,6 @@ class RoomState {
         shuffle: shuffle ?? this.shuffle,
         calibration: clearCalibration ? null : (calibration ?? this.calibration),
         preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
-        identify: identify ?? this.identify,
-        layout: layout ?? this.layout,
-        upNext: clearUpNext ? null : (upNext ?? this.upNext),
       );
 
   Map<String, Object?> toJson() => {
@@ -661,9 +479,6 @@ class RoomState {
         if (shuffle) 'shuf': true,
         if (calibration != null) 'cal': calibration!.toJson(),
         if (preferredCoordinator != null) 'pref': preferredCoordinator,
-        if (identify != null) 'ident': identify!.toJson(),
-        if (layout != null) 'layout': layout!.toJson(),
-        if (upNext != null) 'nxt': upNext,
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -692,9 +507,6 @@ class RoomState {
       shuffle: r.optBoolean('shuf') ?? false,
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
       preferredCoordinator: r.optString('pref', maxLength: 64),
-      identify: r.optMap('ident') == null ? null : IdentifyRequest.fromJson(r.optMap('ident')!),
-      layout: r.optMap('layout') == null ? null : SpeakerLayout.fromJson(r.optMap('layout')!),
-      upNext: r.optString('nxt', maxLength: 64),
     );
   }
 }

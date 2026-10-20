@@ -20,10 +20,7 @@ import 'dart:math';
 
 import '../audio/audio_backend.dart';
 import '../config/sync_config.dart';
-import '../coordinator/failure_detector.dart';
-import '../distribution/swarm.dart';
 import '../distribution/track_resolver.dart';
-import '../model/calibration_plan.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
 import '../protocol/auth.dart';
@@ -84,13 +81,6 @@ class ParticipantOptions {
   /// Microphone access; makes this device able to lead a room calibration.
   final CalibrationRecorder? recorder;
 
-  /// Whether a surround measurement started on another phone may record
-  /// with this phone's microphone (the owner's choice). Null: allowed.
-  final bool Function()? allowRemoteCalibration;
-
-  /// This phone declined to record for another phone's measurement.
-  final void Function(CalibrationPlan plan)? onRemoteCalibrationDeclined;
-
   /// Where calibration click tracks are written (default: a temp folder).
   final CalibrationTrackFactory? calibrationTracks;
 
@@ -98,10 +88,6 @@ class ParticipantOptions {
   /// Null keeps the conservative behaviour: report that the room is gone.
   final FailoverDelegate? failover;
   final FailoverPolicy failoverPolicy;
-
-  /// Port of this device's peer file server (phone-to-phone sharing), if
-  /// it runs one; advertised to the room.
-  final int? peerPort;
 
   const ParticipantOptions({
     required this.deviceId,
@@ -119,10 +105,7 @@ class ParticipantOptions {
     this.failover,
     this.failoverPolicy = const FailoverPolicy(),
     this.recorder,
-    this.allowRemoteCalibration,
-    this.onRemoteCalibrationDeclined,
     this.calibrationTracks,
-    this.peerPort,
   });
 }
 
@@ -160,21 +143,6 @@ class ParticipantSession implements ClockSource {
   Timer? _livenessTimer;
   Timer? _probeTimer;
   int _lastHeardUs = 0;
-
-  /// Judges the coordinator link (φ accrual by default); kept across
-  /// reconnects so the learned heartbeat distribution survives.
-  FailureDetector? _coordDetector;
-  String? _coordDetectorConfig;
-
-  /// The current link loss was declared by the failure detector (silence),
-  /// not by the connection closing.
-  bool _lostBySilence = false;
-
-  /// Target and HTTP base of the last coordinator that welcomed us (where
-  /// to go back to when holding off a self-promotion).
-  Connector? _lastGoodTarget;
-  Uri? _lastGoodBase;
-  bool _holdLogged = false;
   bool _coordinatorSuspect = false;
   int _probeId = 0;
   int _burstRemaining = 0;
@@ -247,8 +215,6 @@ class ParticipantSession implements ClockSource {
         estimate: () => estimate,
         send: _sendIfActive,
         log: this.log,
-        allowRemote: options.allowRemoteCalibration,
-        onDeclined: options.onRemoteCalibrationDeclined,
       );
     }
   }
@@ -262,25 +228,6 @@ class ParticipantSession implements ClockSource {
   DiagnosticsMsg? get diagnostics => _diagnostics;
   Stream<DiagnosticsMsg> get diagnosticsStream => _diagCtl.stream;
   ParticipantRole? get role => _role;
-
-  /// Room-wide key that authorises phone-to-phone chunk requests (null
-  /// before the first handshake).
-  List<int>? get peerKey => _roomKey?.peerKey();
-
-  /// Other members' peer servers (not this device, not the coordinator,
-  /// which serves the room anyway).
-  List<PeerSource> _peerSources() {
-    final s = _state;
-    if (s == null) return const [];
-    return [
-      for (final p in s.participants)
-        if (p.peer != null &&
-            p.deviceId != options.deviceId &&
-            p.deviceId != s.coordinatorId &&
-            p.connection != ConnectionStatus.disconnected)
-          if (Uri.tryParse('http://${p.peer}') case final u?) PeerSource(p.deviceId, u),
-    ];
-  }
   String? get sessionId => _sessionId;
   SyncConfig get config => _config;
   bool get isLive => _phase == SessionPhase.joined || _phase == SessionPhase.syncing;
@@ -350,7 +297,7 @@ class ParticipantSession implements ClockSource {
       // Do not sleep past the failover deadline.
       final lost = _linkLostAtUs;
       if (options.failover != null && lost != null && !_promoted && !_tryingCandidate) {
-        final untilFailover = _failoverDeadlineUs(lost) - clock.nowMicros();
+        final untilFailover = lost + options.failoverPolicy.failoverAfter.inMicroseconds - clock.nowMicros();
         if (untilFailover > 0 && untilFailover < delayUs) delayUs = untilFailover + 1000;
       }
       final delay = Duration(microseconds: delayUs);
@@ -362,14 +309,6 @@ class ParticipantSession implements ClockSource {
 
   bool _hadJoinedThisLink = false;
 
-  /// Earliest time failover may start after losing the link at [lostUs].
-  int _failoverDeadlineUs(int lostUs) {
-    final p = options.failoverPolicy;
-    final afterLoss = lostUs + p.failoverAfter.inMicroseconds;
-    if (!_lostBySilence) return afterLoss;
-    return max(afterLoss, _lastHeardUs + p.silenceBeforeFailover.inMicroseconds);
-  }
-
   /// Decides whether to switch to (or become) a successor coordinator.
   /// Returns true when the connection target changed.
   Future<bool> _maybeFailover() async {
@@ -377,7 +316,7 @@ class ParticipantSession implements ClockSource {
     final s = _state;
     final lost = _linkLostAtUs;
     if (d == null || s == null || lost == null || _promoted) return false;
-    if (clock.nowMicros() < _failoverDeadlineUs(lost)) return false;
+    if (clock.nowMicros() - lost < options.failoverPolicy.failoverAfter.inMicroseconds) return false;
     final order = successionOrder(s);
     if (_tryingCandidate) {
       // Already trying a candidate: give it a few attempts, then move on.
@@ -394,27 +333,6 @@ class ParticipantSession implements ClockSource {
     final cand = order[_candidateIndex];
     failoverCount++;
     if (cand.deviceId == options.deviceId) {
-      final p = options.failoverPolicy;
-      final silent = clock.nowMicros() - _lastHeardUs;
-      if (_candidateIndex > 0 &&
-          _lostBySilence &&
-          silent < (p.silenceBeforeFailover + p.isolationHoldOff).inMicroseconds) {
-        // The coordinator went silent (no closed connection) and nobody
-        // ahead of us in the succession order answered: most likely this
-        // phone is the one cut off. Go round again, coordinator first. (A
-        // closed connection means the coordinator process ended; then the
-        // phones ahead are the ones that may be gone, so we go ahead.)
-        if (!_holdLogged) {
-          _holdLogged = true;
-          log.warn('failover.hold', 'no successor ahead of this device answers; not taking over yet (this phone may be cut off)');
-        }
-        _target = _lastGoodTarget;
-        _targetBase = _lastGoodBase;
-        _tryingCandidate = false;
-        _candidateIndex = 0;
-        _candidateAttempts = 0;
-        return false;
-      }
       final est = estimate;
       final key = _roomKey;
       if (est == null || key == null) return false;
@@ -553,8 +471,6 @@ class ParticipantSession implements ClockSource {
         failoverPort: options.failover?.failoverPort,
         microphone: options.recorder != null,
         calibrationUs: engine.outputCalibrationUs,
-        peerPort: options.peerPort,
-        surround: true,
       ),
     ));
   }
@@ -605,7 +521,6 @@ class ParticipantSession implements ClockSource {
       return;
     }
     _lastHeardUs = t4;
-    _coordDetector?.traffic(t4);
     if (_coordinatorSuspect) {
       _coordinatorSuspect = false;
       log.info('session.coordinator', 'coordinator responsive again');
@@ -700,10 +615,6 @@ class ParticipantSession implements ClockSource {
     _hs = _Hs.active;
     _hadJoinedThisLink = true;
     _linkLostAtUs = null;
-    _lostBySilence = false;
-    _holdLogged = false;
-    _lastGoodTarget = _target;
-    _lastGoodBase = _targetBase;
     _candidateIndex = 0;
     _candidateAttempts = 0;
     _promoted = false;
@@ -734,26 +645,9 @@ class ParticipantSession implements ClockSource {
             },
           );
     if (_transfer != null) resolver.setTransferContext(_transfer);
-    resolver.setPeerContext(PeerContext(
-      selfId: options.deviceId,
-      peerKey: _roomKey!.peerKey(),
-      coordinatorNowMs: () {
-        final e = estimate;
-        final now = clock.nowMicros();
-        return (e == null ? now : e.toRemote(now)) ~/ 1000;
-      },
-      peers: _peerSources,
-    ));
     log.info('session.joined', 'joined room ${c.roomId} as ${w.role.name}', {'session': w.sessionId});
     _setPhase(SessionPhase.syncing);
     _lastHeardUs = clock.nowMicros();
-    final det = _coordDetector;
-    if (det == null || _coordDetectorConfig != _config.membership.toJson().toString()) {
-      _coordDetector = FailureDetector.forConfig(_config.membership, _lastHeardUs);
-      _coordDetectorConfig = _config.membership.toJson().toString();
-    } else {
-      det.traffic(_lastHeardUs);
-    }
     _startTimers();
     engine.onConnectionChanged(true);
     _applyState(w.state);
@@ -779,7 +673,7 @@ class ParticipantSession implements ClockSource {
         }
         engine.onClockUpdated();
       case HeartbeatMsg():
-        _coordDetector?.heartbeat(t4);
+        break;
       case ControlAckMsg():
         _pendingControls.remove(msg.requestId)?.complete(msg);
       case DiagnosticsMsg():
@@ -831,13 +725,10 @@ class ParticipantSession implements ClockSource {
     _heartbeatTimer = Timer.periodic(m.heartbeatInterval, (_) => _send(HeartbeatMsg(clock.nowMicros())));
     _livenessTimer?.cancel();
     _livenessTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      final now = clock.nowMicros();
-      final silent = now - _lastHeardUs;
-      final det = _coordDetector ?? FailureDetector.forConfig(m, _lastHeardUs);
-      if (det.isFailed(now)) {
-        _lostBySilence = true;
-        _linkDown('coordinator silent for ${silent ~/ 1000} ms (phi ${min(det.phi(now), 99).toStringAsFixed(1)})');
-      } else if (det.isSuspect(now) && !_coordinatorSuspect) {
+      final silent = clock.nowMicros() - _lastHeardUs;
+      if (silent >= m.failAfter.inMicroseconds) {
+        _linkDown('coordinator silent for ${silent ~/ 1000} ms');
+      } else if (silent >= m.suspectAfter.inMicroseconds && !_coordinatorSuspect) {
         _coordinatorSuspect = true;
         log.warn('session.coordinator', 'coordinator unresponsive for ${silent ~/ 1000} ms');
         _setPhase(_phase); // notify listeners
@@ -885,7 +776,6 @@ class ParticipantSession implements ClockSource {
     String? mode,
     int? offsetUs,
     TrackInfo? info,
-    int? toIndex,
     Duration timeout = const Duration(seconds: 5),
   }) {
     final version = _state?.version ?? 0;
@@ -908,7 +798,6 @@ class ParticipantSession implements ClockSource {
       mode: mode,
       offsetUs: offsetUs,
       info: info,
-      toIndex: toIndex,
     ));
     return c.future.timeout(timeout, onTimeout: () {
       _pendingControls.remove(rid);

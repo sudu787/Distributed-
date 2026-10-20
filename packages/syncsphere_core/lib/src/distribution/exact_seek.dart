@@ -20,7 +20,6 @@ import 'dart:typed_data';
 import '../audio/audio_backend.dart';
 import '../model/room_state.dart';
 import '../observability/event_log.dart';
-import 'swarm.dart' show PeerContext;
 import 'track_resolver.dart';
 
 /// Whether a file starting with [head] (its first bytes) is MPEG audio
@@ -48,9 +47,6 @@ class ConvertingTrackResolver extends TrackResolver {
 
   @override
   void setTransferContext(TransferContext? ctx) => inner.setTransferContext(ctx);
-
-  @override
-  void setPeerContext(PeerContext? ctx) => inner.setPeerContext(ctx);
 
   @override
   Future<TrackAvailability> availability(TrackInfo track) => inner.availability(track);

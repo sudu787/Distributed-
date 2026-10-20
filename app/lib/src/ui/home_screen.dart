@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,9 +10,6 @@ import '../data/models.dart';
 import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
-import 'add_music.dart';
-import 'catalog_browser.dart';
-import 'phone_library_screen.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'scan_screen.dart';
@@ -135,15 +131,6 @@ class HomeScreen extends ConsumerWidget {
                 subtitle: const Text('Buzz on taps and when the song changes'),
                 value: ref.watch(hapticsProvider),
                 onChanged: (v) => ref.read(hapticsProvider.notifier).set(v),
-              ),
-              SwitchListTile(
-                secondary: const Icon(Icons.mic_none),
-                title: const Text('Help measure the room'),
-                subtitle: const Text('For surround: let another phone in the party use this phone\'s microphone for '
-                    'about 30 seconds while it measures where the phones are. The recording stays on this phone; '
-                    'only click times and levels are shared.'),
-                value: ref.watch(roomMeasurementProvider),
-                onChanged: (v) => ref.read(roomMeasurementProvider.notifier).set(v),
               ),
             ]),
           ),
@@ -298,8 +285,6 @@ class _MainActions extends ConsumerWidget {
       showDragHandle: true,
       builder: (c) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // The camera scanner exists on phones only.
-          if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)
           ListTile(
             leading: const Icon(Icons.qr_code_scanner),
             title: const Text('Scan QR code'),
@@ -656,7 +641,7 @@ class _LibrarySection extends ConsumerWidget {
           trailing: TextButton.icon(
             icon: const Icon(Icons.add),
             label: const Text('Add'),
-            onPressed: () => _addMenu(context, ref),
+            onPressed: () => _import(context, ref),
           ),
         ),
         lib.when(
@@ -670,10 +655,9 @@ class _LibrarySection extends ConsumerWidget {
                   for (final t in tracks)
                     ListTile(
                       dense: true,
-                      leading: TrackArt(t.id, size: 40, url: t.artUrl),
+                      leading: TrackArt(t.id, size: 40),
                       title: Text(t.title, overflow: TextOverflow.ellipsis),
-                      subtitle: Text([t.artist ?? 'Unknown artist', fmtClock(t.durationUs), if (t.credit != null) t.credit!]
-                          .join(' · ')),
+                      subtitle: Text('${t.artist ?? 'Unknown artist'} · ${fmtClock(t.durationUs)}'),
                       trailing: IconButton(
                         tooltip: 'Remove',
                         icon: const Icon(Icons.delete_outline),
@@ -687,72 +671,6 @@ class _LibrarySection extends ConsumerWidget {
         ),
       ],
     );
-  }
-
-  Future<void> _addMenu(BuildContext context, WidgetRef ref) async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (c) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (ref.read(deviceMediaProvider).available)
-            ListTile(
-              leading: const Icon(Icons.library_music),
-              title: const Text('Music on this phone'),
-              subtitle: const Text('Songs, albums and artists on this phone'),
-              onTap: () => Navigator.pop(c, 'device'),
-            ),
-          ListTile(
-            leading: const Icon(Icons.folder_open),
-            title: const Text('Pick files…'),
-            subtitle: const Text('Any audio file, also from Drive, Dropbox or a USB stick'),
-            onTap: () => Navigator.pop(c, 'phone'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.travel_explore),
-            title: const Text('Search Audius'),
-            subtitle: const Text('Free music from independent artists'),
-            onTap: () => Navigator.pop(c, 'audius'),
-          ),
-          ...catalogMenuTiles(c),
-          ListTile(
-            leading: const Icon(Icons.link),
-            title: const Text('From a link'),
-            subtitle: const Text('Your own music server, a podcast or any audio file link'),
-            onTap: () => Navigator.pop(c, 'link'),
-          ),
-        ]),
-        ),
-      ),
-    );
-    if (!context.mounted) return;
-    final catalog = catalogFor(choice);
-    if (catalog != null) {
-      final added = await showCatalog(context, catalog);
-      if (added.isNotEmpty && context.mounted) {
-        showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
-      }
-      return;
-    }
-    switch (choice) {
-      case 'device':
-        final added = await showPhoneLibrary(context);
-        if (added.isNotEmpty && context.mounted) {
-          showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
-        }
-      case 'phone':
-        await _import(context, ref);
-      case 'audius':
-        final added = await showAudiusSearch(context);
-        if (added.isNotEmpty && context.mounted) {
-          showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
-        }
-      case 'link':
-        final t = await addFromLink(context, ref);
-        if (t != null && context.mounted) showMessage(context, 'Added "${t.title}" to My music.');
-    }
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {

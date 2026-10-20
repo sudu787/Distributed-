@@ -17,7 +17,6 @@ import 'dart:async';
 import 'dart:math';
 
 
-import '../calibration/layout.dart';
 import '../config/sync_config.dart';
 import '../calibration/calibration_analysis.dart';
 import '../model/calibration_plan.dart';
@@ -352,15 +351,6 @@ class RoomCoordinator {
     setPlaylist([..._state.playlist, t]);
   }
 
-  /// Publishes the chunk root of a playlist track (phone-to-phone sharing).
-  void setChunkRoot(String trackId, String root) {
-    final i = _state.playlist.indexWhere((t) => t.id == trackId);
-    if (i < 0 || _state.playlist[i].chunkRoot == root) return;
-    final list = [..._state.playlist];
-    list[i] = list[i].copyWith(chunkRoot: root);
-    _mutate(_state.copyWith(playlist: List.unmodifiable(list)));
-  }
-
   void removeTrack(String trackId) {
     if (_state.timeline.trackId == trackId && _state.timeline.isPlaying) {
       throw StateError('cannot remove the playing track');
@@ -544,8 +534,6 @@ class RoomCoordinator {
     }
     final fport = h.caps.failoverPort;
     m.endpoint = fport == null ? null : '${link.remoteHost}:$fport';
-    final pport = h.caps.peerPort;
-    m.peerEndpoint = pport == null ? null : '${link.remoteHost}:$pport';
     // The room becomes the source of truth for a device's calibration once
     // it joined; reconnects keep the room's value.
     if (existing == null) m.calibrationUs = h.caps.calibrationUs;
@@ -617,7 +605,7 @@ class RoomCoordinator {
   void _onActiveMessage(_PeerLink link, Member m, Message msg, int t2) {
     switch (msg) {
       case HeartbeatMsg():
-        _members.heartbeat(m, t2);
+        break;
       case ClockRequestMsg(:final id, :final t1):
         final t3 = clock.nowMicros();
         _send(link, ClockResponseMsg(id, t1, t2, t3));
@@ -730,29 +718,9 @@ class RoomCoordinator {
         final t = _members.byDevice(target);
         final role = _parseEnum(ChannelRole.values, c.mode);
         if (t == null || role == null) return const ControlOutcome.fail(ControlError.invalid);
-        // Older apps cannot parse the surround roles: only allow them when
-        // every connected phone understands them.
-        if (role.isSurroundRole && _members.connected.any((x) => !x.caps.surround)) {
-          return const ControlOutcome.fail(ControlError.invalid);
-        }
         t.channel = role;
         log.info('member.channel', '${t.displayName} plays ${role.name}');
         _mutate(_state);
-        return ok;
-      case ControlAction.identify:
-        final target = c.targetDevice ?? m.deviceId;
-        if (target != m.deviceId && !m.role.canControl) {
-          return const ControlOutcome.fail(ControlError.unauthorized);
-        }
-        final t = _members.byDevice(target);
-        if (t == null || !t.isConnected) return const ControlOutcome.fail(ControlError.invalid);
-        _mutate(_state.copyWith(
-          identify: IdentifyRequest(
-            deviceId: target,
-            seq: (_state.identify?.seq ?? 0) + 1,
-            untilUs: clock.nowMicros() + 3000000,
-          ),
-        ));
         return ok;
       case ControlAction.setCalibration:
         final target = c.targetDevice ?? m.deviceId;
@@ -795,76 +763,12 @@ class RoomCoordinator {
         if (_state.playlist.length >= options.limits.maxPlaylistLength) {
           return const ControlOutcome.fail(ControlError.invalid);
         }
-        // The chunk root is computed by this coordinator from its own copy
-        // (setChunkRoot), never taken from the member.
-        addTrack(TrackInfo.fromJson({...info.toJson(), 'serves': true, 'avail': 0}..remove('croot')));
+        addTrack(info.copyWith(hostServes: true, availableCount: 0));
         log.info('playlist.add', '${m.displayName} added "${info.title}"');
         return ok;
 
       case ControlAction.calibrate:
-        return _startCalibration(m, surround: c.mode == 'surround');
-
-      case ControlAction.removeTrack:
-        final id = c.trackId;
-        if (id == null || _state.trackById(id) == null || _state.isCalibrationTrack(id)) {
-          return const ControlOutcome.fail(ControlError.unknownTrack);
-        }
-        // The calibration restores the song it interrupted afterwards.
-        if (_state.calibration != null && _preCalibration?.$1 == id) {
-          return const ControlOutcome.fail(ControlError.busy);
-        }
-        final title = _state.trackById(id)!.title;
-        final pend = _state.pending;
-        if (pend != null && pend.trackId == id && tl.isPlaying && tl.trackId != null && tl.trackId != id) {
-          // The removed song was about to start (auto-advance or a switch):
-          // keep the current one playing; auto-advance picks the new next.
-          setPlaylist(_state.playlist.where((t) => t.id != id).toList());
-          _shuffleOrder = [for (final x in _shuffleOrder) if (x != id) x];
-          _barrier = null;
-          _autoAdvancedGeneration = null;
-          _mutate(_state.copyWith(clearPending: true), timeline: true);
-          log.info('playlist.remove', '${m.displayName} removed "$title"');
-          return ok;
-        }
-        final cur = pend?.trackId ?? tl.trackId;
-        final playing = tl.isPlaying || (pend?.autoPlay ?? false);
-        String? after;
-        if (cur == id) {
-          after = _neighbor(id, 1, wrap: _state.repeat != PlaylistRepeat.off);
-          if (after == id) after = null;
-        }
-        setPlaylist(_state.playlist.where((t) => t.id != id).toList());
-        _shuffleOrder = [for (final x in _shuffleOrder) if (x != id) x];
-        if (cur == id && _state.calibration == null) {
-          if (after != null && playing) {
-            _requestSegment(after, 0);
-          } else if (after != null) {
-            _setPaused(after, 0);
-          } else {
-            _stop();
-          }
-        }
-        log.info('playlist.remove', '${m.displayName} removed "$title"');
-        return ok;
-
-      case ControlAction.moveTrack:
-        final id = c.trackId;
-        final from = _state.indexOfTrack(id);
-        if (id == null || from < 0 || c.toIndex == null) return const ControlOutcome.fail(ControlError.unknownTrack);
-        final list = [..._state.playlist];
-        final t = list.removeAt(from);
-        final to = c.toIndex!.clamp(0, list.length);
-        list.insert(to, t);
-        if (to != from) setPlaylist(list);
-        // "Play next" while shuffling: also make it next in the shuffle order.
-        final cur = _state.pending?.trackId ?? tl.trackId;
-        if (_state.shuffle && cur != null && to > 0 && list[to - 1].id == cur) {
-          final order = _order()..remove(id);
-          order.insert(order.indexOf(cur) + 1, id);
-          _shuffleOrder = order;
-          _mutate(_state);
-        }
-        return ok;
+        return _startCalibration(m);
 
       case ControlAction.play:
         if (tl.isPlaying || (_state.pending?.autoPlay ?? false)) return ok; // idempotent
@@ -950,7 +854,7 @@ class RoomCoordinator {
   Timer? _calibrationTimer;
   (String, int)? _preCalibration;
 
-  ControlOutcome _startCalibration(Member listener, {bool surround = false}) {
+  ControlOutcome _startCalibration(Member listener) {
     if (!listener.caps.microphone) {
       log.warn('calibration.reject', '${listener.displayName} has no microphone for calibration');
       return const ControlOutcome.fail(ControlError.invalid);
@@ -966,22 +870,8 @@ class RoomCoordinator {
     _preCalibration = curTrack == null || _state.isCalibrationTrack(curTrack)
         ? null
         : (curTrack, _state.pending?.positionUs ?? tl.expectedPositionAt(now));
-    // Surround: every connected phone with a microphone records too, so
-    // the distances between phones can be measured.
-    final recorders = surround
-        ? [
-            for (final m in _members.all)
-              if (m.connection == ConnectionStatus.connected && m.caps.microphone) m.deviceId
-          ]
-        : const <String>[];
-    if (surround && recorders.length < 2) return const ControlOutcome.fail(ControlError.invalid);
-    final plan =
-        CalibrationPlan(id: ++_calibrationSeq, listener: listener.deviceId, order: order, recorders: recorders);
+    final plan = CalibrationPlan(id: ++_calibrationSeq, listener: listener.deviceId, order: order);
     _calibrationReports.clear();
-    _surroundObs.clear();
-    _surroundReplied.clear();
-    _surroundLevels = const {};
-    _listenerDone = false;
     log.info('calibration.start',
         'calibrating ${order.length} device(s) to ${listener.displayName}\'s position (plan ${plan.id})',
         {'devices': order.length, 'durationMs': plan.durationUs ~/ 1000});
@@ -998,34 +888,12 @@ class RoomCoordinator {
     return const ControlOutcome.ok();
   }
 
-  // Surround calibration: every recorder's click arrivals, and the click
-  // levels heard by the listener.
-  final Map<String, Map<String, Map<int, int>>> _surroundObs = {};
-  final Set<String> _surroundReplied = {};
-  Map<String, double> _surroundLevels = const {};
-  bool _listenerDone = false;
-  Timer? _surroundGrace;
-
   void _onCalibrationResult(Member from, CalibrationResultMsg r) {
     final plan = _state.calibration;
-    if (plan == null || r.calibrationId != plan.id) {
+    if (plan == null || r.calibrationId != plan.id || from.deviceId != plan.listener) {
       log.debug('calibration.stale', 'ignoring calibration result ${r.calibrationId} from ${from.deviceId}');
       return;
     }
-    if (plan.isSurround && plan.recorders.contains(from.deviceId)) {
-      _surroundReplied.add(from.deviceId);
-      if (r.error == null) {
-        _surroundObs[from.deviceId] = r.arrivals;
-      } else {
-        log.info('calibration.recorder', '${from.displayName} did not record: ${r.error}');
-      }
-    }
-    if (from.deviceId != plan.listener) {
-      if (!plan.recorders.contains(from.deviceId)) return;
-      if (_listenerDone && plan.recorders.every(_surroundReplied.contains)) _finishSurround(plan);
-      return;
-    }
-    _surroundLevels = r.levels;
     final tl = _state.timeline;
     if (r.error != null) {
       log.warn('calibration.failed', 'calibration failed on the listener: ${r.error}');
@@ -1050,49 +918,6 @@ class RoomCoordinator {
           'calibration applied to ${corrections.length} device(s)${r.undetected.isEmpty ? '' : '; not heard: ${r.undetected.join(', ')}'}',
           {for (final e in corrections.entries) e.key: e.value});
     }
-    if (!plan.isSurround || r.error != null) {
-      _endCalibration();
-      return;
-    }
-    // Wait (briefly) for the other phones' recordings.
-    _listenerDone = true;
-    if (plan.recorders.every(_surroundReplied.contains)) {
-      _finishSurround(plan);
-    } else {
-      _surroundGrace?.cancel();
-      _surroundGrace = Timer(const Duration(seconds: 6), () => _finishSurround(plan));
-    }
-  }
-
-  /// Distances between phones (two-way ranging), then positions (MDS);
-  /// published as the room's [SpeakerLayout].
-  void _finishSurround(CalibrationPlan plan) {
-    _surroundGrace?.cancel();
-    _surroundGrace = null;
-    if (_state.calibration?.id != plan.id) return;
-    final d = pairwiseDistances(plan: plan, arrivals: _surroundObs);
-    final ids = completeSubset([
-      for (final id in plan.recorders)
-        if (_surroundObs.containsKey(id)) id
-    ], d);
-    if (ids.length >= 3 && ids.contains(plan.listener)) {
-      final pos = classicalMds(ids, d);
-      final layout = SpeakerLayout(
-        id: plan.id,
-        listener: plan.listener,
-        positions: {for (final e in pos.entries) e.key: (e.value.x, e.value.y)},
-        levelsDb: _surroundLevels,
-        residualM: layoutResidual(pos, d),
-      );
-      log.info(
-          'calibration.layout',
-          'measured positions of ${ids.length} phones (fit residual ${(layout.residualM * 100).round()} cm)',
-          {for (final e in pos.entries) e.key: '${e.value.x.toStringAsFixed(2)},${e.value.y.toStringAsFixed(2)}'});
-      _mutate(_state.copyWith(layout: layout));
-    } else {
-      log.warn('calibration.layout',
-          'not enough phones heard each other to measure the layout (${ids.length}; need 3 including the listener)');
-    }
     _endCalibration();
   }
 
@@ -1114,8 +939,6 @@ class RoomCoordinator {
   }
 
   void _endCalibration() {
-    _surroundGrace?.cancel();
-    _surroundGrace = null;
     _calibrationTimer?.cancel();
     _calibrationTimer = null;
     if (_state.calibration == null) return;
@@ -1205,22 +1028,6 @@ class RoomCoordinator {
         {'gen': gen, 'waiting': waiting.length});
     _mutate(_state.copyWith(pending: pending), timeline: true);
     _checkBarrier();
-  }
-
-  /// Nothing loaded (the playing song was removed and nothing follows).
-  void _stop() {
-    _barrier = null;
-    _mutate(
-        _state.copyWith(
-          timeline: PlaybackTimeline(
-              generation: _nextGeneration(),
-              trackId: null,
-              status: PlaybackStatus.idle,
-              anchorPositionUs: 0,
-              anchorCoordUs: clock.nowMicros()),
-          clearPending: true,
-        ),
-        timeline: true);
   }
 
   void _setPaused(String trackId, int positionUs) {
@@ -1588,12 +1395,7 @@ class RoomCoordinator {
                 .where((m) => m.availability[t.id] == TrackAvailability.available)
                 .length)
     ];
-    final next = current == null || _state.isCalibrationTrack(current)
-        ? null
-        : (_state.repeat == PlaylistRepeat.one
-            ? current
-            : _neighbor(current, 1, wrap: _state.repeat == PlaylistRepeat.all));
-    _state = _state.copyWith(participants: summaries, playlist: playlist, upNext: next, clearUpNext: next == null);
+    _state = _state.copyWith(participants: summaries, playlist: playlist);
     if (!_stateCtl.isClosed) _stateCtl.add(_state);
     final msg = StateMsg(_state);
     for (final l in _links) {

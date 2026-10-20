@@ -88,19 +88,6 @@ void main() {
       expect(h.first.host, 'h2');
       await store.removeRoomHistory('R5');
       expect((await store.roomHistory()).map((e) => e.roomId), ['R2', 'R6', 'R4', 'R3']);
-      // v3: songs keep where they came from.
-      await store.upsertTrack(LibraryTrack(
-          id: 'b' * 64,
-          path: '/y.mp3',
-          title: 'Y',
-          sizeBytes: 3,
-          addedAt: DateTime(2026),
-          sourceUrl: 'https://api.audius.co/v1/tracks/abc/stream?app_name=SyncSphere',
-          artUrl: 'https://img.example/480.jpg',
-          credit: 'via Audius'));
-      final y = (await store.libraryTracks()).firstWhere((t) => t.id == 'b' * 64);
-      expect(y.sourceUrl, contains('audius'));
-      expect(y.toTrackInfo().credit, 'via Audius');
       await store.saveSetting('haptics', '0');
       expect(await store.setting('haptics'), '0');
       await store.close();
@@ -175,111 +162,9 @@ void main() {
     expect(allPlaying(), isTrue);
     expect(File('${tmp.path}/cache-other/tracks/${song.id}.audio').existsSync(), isTrue);
 
-    // The guest edits the queue: move its song to the top, remove the host's
-    // song, then undo (re-add from the host's copy, no upload).
-    expect((await guest.session!.control(ControlAction.moveTrack, trackId: song.id, toIndex: 0)).accepted, isTrue);
-    expect(coord.state.playlist.first.id, song.id);
-    final removed = coord.state.trackById(first.id)!;
-    expect((await guest.session!.control(ControlAction.removeTrack, trackId: first.id)).accepted, isTrue);
-    expect(coord.state.trackById(first.id), isNull);
-    expect(coord.state.timeline.trackId, song.id, reason: 'the playing song is untouched');
-    expect((await guest.session!.control(ControlAction.addTrack, info: removed)).accepted, isTrue);
-    expect([for (final t in coord.state.playlist) t.id], [song.id, first.id]);
-
     await other.leave();
     await guest.leave();
     await host.leave();
-  });
-
-  test('phone-to-phone sharing: a late guest gets the song from another guest, not only the host', () async {
-    final clock = SystemMonotonicClock.instance;
-    Future<RoomKey> fastKdf(String r, String k, int i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i);
-    Future<(RoomService, DeviceIdentity, MemoryAppStore)> device(String name) async {
-      final store = MemoryAppStore();
-      final svc = RoomService(
-        store: store,
-        cacheDir: Directory('${tmp.path}/cache-$name'),
-        backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
-        keyDeriver: fastKdf,
-        kdfIterations: 50,
-        watchForNewerCoordinator: false,
-      );
-      return (svc, await store.loadIdentity(defaultName: name), store);
-    }
-
-    final (host, hostId, hostStore) = await device('host');
-    final rnd = Random(77);
-    final big = File('${tmp.path}/big.mp3')..writeAsBytesSync(List<int>.generate(3 * 1024 * 1024 + 4321, (_) => rnd.nextInt(256)));
-    final song = await LibraryService(store: hostStore, libraryDir: Directory('${tmp.path}/hostlib'), log: EventLog(clock: clock))
-        .import(big);
-    final info = await host.host(identity: hostId, roomName: 'Share', tracks: [song], port: 0, openControl: true);
-    // The coordinator publishes the chunk root in the background.
-    final rootDeadline = DateTime.now().add(const Duration(seconds: 5));
-    while (host.coordinator!.state.playlist.single.chunkRoot == null && DateTime.now().isBefore(rootDeadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(host.coordinator!.state.playlist.single.chunkRoot, isNotNull);
-
-    final (first, firstId, _) = await device('first');
-    await first.join(identity: firstId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
-    Future<void> waitFile(String name) async {
-      final f = File('${tmp.path}/cache-$name/tracks/${song.id}.audio');
-      final deadline = DateTime.now().add(const Duration(seconds: 20));
-      while (!f.existsSync() && DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
-      expect(f.existsSync(), isTrue, reason: '$name has the song');
-    }
-
-    expect((await first.session!.control(ControlAction.play)).accepted, isTrue);
-    await waitFile('first');
-    expect(host.coordinator!.state.participants.firstWhere((p) => p.deviceId == firstId.deviceId).peer, isNotNull);
-
-    final (late, lateId, _) = await device('late');
-    // Joins while the song plays: it must fetch it now.
-    await late.join(identity: lateId, host: '127.0.0.1', port: info.port, joinKey: info.joinKey!);
-    await waitFile('late');
-    final done = late.log.recent(limit: 500, categoryPrefix: 'swarm.done').map((e) => e.message).join('\n');
-    expect(done, contains('from 1 phone(s)'), reason: done);
-    expect(first.bytesSharedWithPeers, greaterThan(0));
-
-    await late.leave();
-    await first.leave();
-    await host.leave();
-  });
-
-  test('chunk roots are computed only for the songs about to play, not the whole library', () async {
-    final clock = SystemMonotonicClock.instance;
-    final store = MemoryAppStore();
-    final lib = LibraryService(store: store, libraryDir: Directory('${tmp.path}/rootlib'), log: EventLog(clock: clock));
-    final songs = [for (var i = 0; i < 4; i++) await lib.import(await audioFile('r$i.mp3', 100 + i))];
-    final svc = RoomService(
-      store: store,
-      cacheDir: Directory('${tmp.path}/rootcache'),
-      backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
-      keyDeriver: (r, k, i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i),
-      kdfIterations: 50,
-      watchForNewerCoordinator: false,
-    );
-    await svc.host(identity: await store.loadIdentity(defaultName: 'H'), roomName: 'Roots', tracks: songs, port: 0, openControl: true);
-    Future<void> waitRoots(Set<int> expected) async {
-      final deadline = DateTime.now().add(const Duration(seconds: 5));
-      Set<int> have() => {
-            for (var i = 0; i < songs.length; i++)
-              if (svc.coordinator!.state.playlist[i].chunkRoot != null) i,
-          };
-      while (!have().containsAll(expected) && DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-      expect(have(), expected);
-    }
-
-    // Nothing playing yet: only the first song is prepared.
-    await waitRoots({0});
-    expect((await svc.session!.control(ControlAction.setTrack, trackId: songs[2].id)).accepted, isTrue);
-    // Now the current song (2) and the next one (3) as well.
-    await waitRoots({0, 2, 3});
-    await svc.leave();
   });
 
   test('library import deduplicates by content hash', () async {
@@ -598,16 +483,8 @@ void main() {
     await host.crashForTesting();
     await waitFor(() => b.coordinator != null && c.session!.state?.coordinatorEpoch == 2 && c.session!.isLive, 'takeover by b');
 
-    final bLog = b.log;
     await b.leave(); // temporary host leaves: c takes over (epoch 3), party continues
-    try {
-      await waitFor(() => c.coordinator != null && c.session!.isLive && c.session!.state?.coordinatorEpoch == 3, 'hand-off to c');
-    } catch (_) {
-      String dump(EventLog l) => l.recent(limit: 80, minLevel: EventLevel.info).map((e) => '  $e').join('\n');
-      // ignore: avoid_print
-      print('--- b\n${dump(bLog)}\n--- c (phase ${c.session?.phase}, epoch ${c.session?.state?.coordinatorEpoch})\n${dump(c.log)}');
-      rethrow;
-    }
+    await waitFor(() => c.coordinator != null && c.session!.isLive && c.session!.state?.coordinatorEpoch == 3, 'hand-off to c');
     expect(c.session!.phase, isNot(SessionPhase.failed));
     await c.leave();
   });

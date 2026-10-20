@@ -10,7 +10,7 @@ class SqfliteAppStore implements AppStore {
   final Database db;
   SqfliteAppStore._(this.db);
 
-  static const _version = 3;
+  static const _version = 2;
 
   /// Opens (and migrates) the database at [path]. Pass a
   /// [DatabaseFactory] in tests (e.g. `databaseFactoryFfi`).
@@ -33,10 +33,7 @@ class SqfliteAppStore implements AppStore {
                 size INTEGER NOT NULL,
                 duration_us INTEGER,
                 mime TEXT,
-                added_at INTEGER NOT NULL,
-                source_url TEXT,
-                art_url TEXT,
-                credit TEXT
+                added_at INTEGER NOT NULL
               )''')
             ..execute('''
               CREATE TABLE room_history (
@@ -55,12 +52,6 @@ class SqfliteAppStore implements AppStore {
           if (from < 2) {
             // v2: join key for one-tap rejoin from "Recent parties".
             await db.execute('ALTER TABLE room_history ADD COLUMN join_key TEXT');
-          }
-          if (from < 3) {
-            // v3: songs from open catalogs / links remember their source.
-            for (final c in ['source_url', 'art_url', 'credit']) {
-              await db.execute('ALTER TABLE library_tracks ADD COLUMN $c TEXT');
-            }
           }
         },
       ),

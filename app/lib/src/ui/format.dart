@@ -18,13 +18,6 @@ String fmtClock(int? us) {
   return '$m:${s.toString().padLeft(2, '0')}';
 }
 
-/// Total length for lists: "42 min", "1 h 05 min".
-String fmtLength(int us) {
-  final min = (us / 60000000).round();
-  if (min < 60) return '$min min';
-  return '${min ~/ 60} h ${(min % 60).toString().padLeft(2, '0')} min';
-}
-
 String fmtEstimate(num? valueUs, num? uncertaintyUs) {
   if (valueUs == null) return '—';
   final u = uncertaintyUs == null ? '' : ' ± ${fmtMs(uncertaintyUs)}';
@@ -80,12 +73,9 @@ String distributionLabel(DistributionMode m) => switch (m) {
 
 String channelLabel(ChannelRole c) => switch (c) {
       ChannelRole.stereo => 'Stereo',
-      ChannelRole.left => 'Left channel',
-      ChannelRole.right => 'Right channel',
+      ChannelRole.left => 'Left channel (experimental)',
+      ChannelRole.right => 'Right channel (experimental)',
       ChannelRole.mono => 'Mono mix',
-      ChannelRole.center => 'Center',
-      ChannelRole.surroundLeft => 'Surround left',
-      ChannelRole.surroundRight => 'Surround right',
     };
 
 /// Room-wide sync summary from the coordinator's diagnostics (estimate).

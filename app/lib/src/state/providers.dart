@@ -7,14 +7,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../data/app_store.dart';
 import '../data/models.dart';
 import '../services/artwork_service.dart';
-import '../services/archive_client.dart';
-import '../services/audius_client.dart';
-import '../services/catalogs.dart';
-import '../services/device_media.dart';
-import '../services/remote_source.dart';
 import '../services/library_service.dart';
-import '../services/openverse_client.dart';
-import '../services/podcast_client.dart';
 import '../services/network_info.dart';
 import '../services/room_service.dart';
 
@@ -23,38 +16,6 @@ final appStoreProvider = Provider<AppStore>((ref) => throw UnimplementedError('o
 final libraryServiceProvider =
     Provider<LibraryService>((ref) => throw UnimplementedError('override libraryServiceProvider'));
 final roomServiceProvider = Provider<RoomService>((ref) => throw UnimplementedError('override roomServiceProvider'));
-/// Open music sources: the Audius catalog and plain links.
-final audiusClientProvider = Provider<AudiusClient>((ref) {
-  final c = AudiusClient();
-  ref.onDispose(c.close);
-  return c;
-});
-/// The phone's music collection and "Share → SyncSphere"; overridden in
-/// `main()` on Android.
-final deviceMediaProvider = Provider<DeviceMedia>((ref) => DeviceMedia.none());
-
-/// Free online catalogs (see docs/research-next.md, "More music sources").
-final openverseProvider = Provider<MusicCatalog>((ref) {
-  final c = OpenverseClient();
-  ref.onDispose(c.close);
-  return c;
-});
-final archiveProvider = Provider<MusicCatalog>((ref) {
-  final c = ArchiveClient();
-  ref.onDispose(c.close);
-  return c;
-});
-final podcastProvider = Provider<MusicCatalog>((ref) {
-  final c = PodcastClient();
-  ref.onDispose(c.close);
-  return c;
-});
-final remoteSourceProvider = Provider<RemoteSource>((ref) {
-  final r = RemoteSource(library: ref.watch(libraryServiceProvider));
-  ref.onDispose(r.close);
-  return r;
-});
-
 /// Album art; overridden in `main()` (disabled in tests).
 final artworkServiceProvider = Provider<ArtworkService>((ref) => ArtworkService.disabled());
 
@@ -85,43 +46,6 @@ class IdentityNotifier extends Notifier<DeviceIdentity> {
 }
 
 final identityProvider = NotifierProvider<IdentityNotifier, DeviceIdentity>(IdentityNotifier.new);
-
-/// "Help measure the room": another phone's surround measurement may
-/// record ~30 s with this phone's microphone. Off by default; the recording
-/// never leaves the phone, only click times and levels are shared.
-class RoomMeasurementSetting extends Notifier<bool> {
-  static const key = 'roomMeasure';
-
-  @override
-  bool build() {
-    _load();
-    return false;
-  }
-
-  Future<void> _load() async {
-    try {
-      final v = await ref.read(appStoreProvider).setting(key);
-      if (v != null) state = v == '1';
-    } catch (_) {
-      // No store (tests): keep the default (off).
-    }
-  }
-
-  /// Turning it on asks for the microphone permission now, so the prompt
-  /// does not appear in the middle of someone else's measurement. Returns
-  /// the new value (still off when the permission was refused).
-  Future<bool> set(bool on) async {
-    if (on && !await ref.read(microphonePermissionProvider)()) on = false;
-    state = on;
-    await ref.read(appStoreProvider).saveSetting(key, on ? '1' : '0');
-    return on;
-  }
-}
-
-/// Asks for the microphone permission (Android); true when granted.
-final microphonePermissionProvider = Provider<Future<bool> Function()>((ref) => () async => true);
-
-final roomMeasurementProvider = NotifierProvider<RoomMeasurementSetting, bool>(RoomMeasurementSetting.new);
 
 /// The device's track library.
 class LibraryNotifier extends AsyncNotifier<List<LibraryTrack>> {
