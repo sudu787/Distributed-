@@ -4,11 +4,11 @@
 #include "audio_engine.h"
 
 #include <avrt.h>
-#include <functiondiscoverykeys_devpkey.h>
 #include <propvarutil.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <condition_variable>
 #include <cmath>
 
@@ -20,6 +20,9 @@ namespace {
 // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT (ksmedia.h), spelled out to keep the
 // header set small.
 const GUID kSubtypeFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+// PKEY_Device_FriendlyName (functiondiscoverykeys_devpkey.h).
+const PROPERTYKEY kDeviceFriendlyName = {
+    {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
 }  // namespace
 
 int64_t NowNanos() {
@@ -244,7 +247,7 @@ bool AudioEngine::OpenDevice(std::string* error) {
     if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &props))) {
       PROPVARIANT v;
       PropVariantInit(&v);
-      if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR) name = WideToUtf8(v.pwszVal);
+      if (SUCCEEDED(props->GetValue(kDeviceFriendlyName, &v)) && v.vt == VT_LPWSTR) name = WideToUtf8(v.pwszVal);
       PropVariantClear(&v);
     }
   }

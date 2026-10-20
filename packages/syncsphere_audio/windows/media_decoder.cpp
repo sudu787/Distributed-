@@ -2,7 +2,6 @@
 
 #include <mfapi.h>
 #include <mferror.h>
-#include <propkey.h>
 #include <propvarutil.h>
 #include <shobjidl.h>
 
@@ -205,10 +204,15 @@ std::map<std::string, std::string> ProbeFile(const std::string& path, int64_t* d
   ComPtr<IPropertyStore> store;
   const std::wstring wpath = Utf8ToWide(path);
   if (SUCCEEDED(SHGetPropertyStoreFromParsingName(wpath.c_str(), nullptr, GPS_DEFAULT, IID_PPV_ARGS(&store)))) {
+    // PKEY_Title, PKEY_Music_Artist, PKEY_Music_AlbumTitle (propkey.h),
+    // spelled out so no INITGUID translation unit is needed.
+    static const PROPERTYKEY kTitle = {{0xF29F85E0, 0x4FF9, 0x1068, {0xAB, 0x91, 0x08, 0x00, 0x2B, 0x27, 0xB3, 0xD9}}, 2};
+    static const PROPERTYKEY kArtist = {{0x56A3372E, 0xCE9C, 0x11D2, {0x9F, 0x0E, 0x00, 0x60, 0x97, 0xC6, 0x86, 0xF6}}, 2};
+    static const PROPERTYKEY kAlbum = {{0x56A3372E, 0xCE9C, 0x11D2, {0x9F, 0x0E, 0x00, 0x60, 0x97, 0xC6, 0x86, 0xF6}}, 4};
     const struct {
       const PROPERTYKEY* key;
       const char* name;
-    } keys[] = {{&PKEY_Title, "title"}, {&PKEY_Music_Artist, "artist"}, {&PKEY_Music_AlbumTitle, "album"}};
+    } keys[] = {{&kTitle, "title"}, {&kArtist, "artist"}, {&kAlbum, "album"}};
     for (const auto& k : keys) {
       PROPVARIANT v;
       PropVariantInit(&v);
