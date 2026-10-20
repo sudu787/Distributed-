@@ -20,6 +20,31 @@ Facts about third-party services come from their public documentation and polici
 
 **Decision (implemented):** SyncSphere adds *open music sources*: Audius search and "add from a link". When a song has a source URL, every phone downloads it from the source itself, so the catalog streams to each listener. The host and peers are only a fallback. Spotify and YouTube integration is not planned. Spotify Jam already offers a shared queue on one speaker.
 
+### More music sources (October 2026)
+
+**Can DRM be bypassed?** No. Spotify, Apple Music and YouTube Music use Widevine. On most phones the audio is
+decrypted inside the hardware-backed secure area, so neither the app nor a WebView ever sees it, and Android lets DRM
+players block playback capture. Circumventing it is also prohibited by anti-circumvention law (US DMCA §1201, EU
+Copyright Directive art. 6, India Copyright Act §65A) and by the services' terms. SyncSphere adds legal sources
+instead:
+
+| Source | Status | Notes |
+|---|---|---|
+| **Openverse** (WordPress) | **Implemented** | One search over openly licensed audio (Jamendo, Wikimedia Commons, ...), `category=music`, no key. The licence (e.g. "CC BY-SA 3.0") is stored as the song's credit. |
+| **Internet Archive** | **Implemented** | `advancedsearch` (mediatype audio), then `/metadata/<id>`; one file per song (MP3 preferred over Ogg, M4A, FLAC), in track order; downloads from `/download/<id>/<file>`. |
+| **Podcasts** | **Implemented** | iTunes Search API (`media=podcast`, no key) for shows, the show's own RSS feed for episodes (enclosures, `itunes:duration`). |
+| Phone music library + "Share to SyncSphere" | Next | MediaStore browser and SEND/SEND_MULTIPLE intents; also how Bandcamp/Qobuz purchases (DRM-free files) come in. |
+| Jamendo API directly | Possible | ~600k CC tracks, but needs a registered `client_id` (35k requests/month non-commercial) and respects a per-track `audiodownload_allowed` flag. Openverse covers most of it without a key. |
+| Navidrome / Jellyfin (Subsonic API) | Possible | `/rest/stream?id=…` with the user's server and login; "From a link" already works with direct links. |
+| Internet radio (Radio Browser, 50k stations) | Large | A live stream has no file to verify and share; it needs a live relay mode (host decodes and streams PCM with timestamps). |
+| YouTube | Not viable | The terms forbid downloading except through YouTube's own features; tools like yt-dlp breach them. |
+| SoundCloud | Not viable | API access by application only; streaming limited and controllable by rights holders. |
+| Free Music Archive | Not viable | No current public API. |
+
+All implemented catalogs add songs with `RemoteSource.fetchToLibrary`, which keeps the source URL, so every phone in a
+party downloads the file from the catalog and verifies it by SHA-256 (the host is only a fallback). Redirect chains
+of up to 10 hops are followed (archive.org and podcast CDNs).
+
 ## 2. Distributed-systems techniques
 
 Ranked by value for effort in this codebase:
@@ -84,6 +109,13 @@ How to read it:
 - "Host killed" closes the connection, so both detectors take the 2 s path.
 
 ## Sources
+
+- Openverse: https://make.wordpress.org/openverse/2022/11/16/openverse-now-includes-over-1-million-audio-records/
+- Jamendo API tracks: https://developer.jamendo.com/v3.0/tracks
+- Navidrome Subsonic API: https://www.navidrome.org/docs/developers/subsonic-api
+- Radio Browser API client: https://github.com/ivandotv/radio-browser-api
+- SoundCloud API terms: https://developers.soundcloud.com/docs/api/terms-of-use
+- Bandcamp downloads are DRM-free: https://get.bandcamp.help/en/articles/15263419-are-downloads-from-bandcamp-free-of-digital-rights-management-software
 
 - Spotify Developer Policy (non-interactive webcasting, synchronization): https://developer.spotify.com/policy/
 - Spotify Web API Development Mode changes, February 2026: https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide

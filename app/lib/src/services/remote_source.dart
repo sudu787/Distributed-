@@ -50,6 +50,9 @@ class RemoteSource {
       final HttpClientResponse res;
       try {
         final req = await _http.getUrl(uri);
+        // archive.org and podcast hosts chain several redirects (CDNs,
+        // analytics prefixes) before the file.
+        req.maxRedirects = 10;
         res = await req.close().timeout(const Duration(seconds: 20));
       } on SocketException {
         throw const RemoteSourceException('Could not reach that address. Check the link and the internet connection.');

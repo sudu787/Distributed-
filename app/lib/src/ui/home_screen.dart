@@ -11,6 +11,7 @@ import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'add_music.dart';
+import 'catalog_browser.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'scan_screen.dart';
@@ -688,8 +689,10 @@ class _LibrarySection extends ConsumerWidget {
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             leading: const Icon(Icons.phone_android),
             title: const Text('From this phone…'),
@@ -701,6 +704,7 @@ class _LibrarySection extends ConsumerWidget {
             subtitle: const Text('Free music from independent artists'),
             onTap: () => Navigator.pop(c, 'audius'),
           ),
+          ...catalogMenuTiles(c),
           ListTile(
             leading: const Icon(Icons.link),
             title: const Text('From a link'),
@@ -708,9 +712,18 @@ class _LibrarySection extends ConsumerWidget {
             onTap: () => Navigator.pop(c, 'link'),
           ),
         ]),
+        ),
       ),
     );
     if (!context.mounted) return;
+    final catalog = catalogFor(choice);
+    if (catalog != null) {
+      final added = await showCatalog(context, catalog);
+      if (added.isNotEmpty && context.mounted) {
+        showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
+      }
+      return;
+    }
     switch (choice) {
       case 'phone':
         await _import(context, ref);

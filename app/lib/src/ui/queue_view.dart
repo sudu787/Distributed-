@@ -9,6 +9,7 @@ import '../data/models.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'add_music.dart';
+import 'catalog_browser.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'widgets.dart';
@@ -296,8 +297,10 @@ class _QueueViewState extends ConsumerState<QueueView> {
     final choice = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
             leading: const Icon(Icons.phone_android),
             title: const Text('From this phone…'),
@@ -315,6 +318,7 @@ class _QueueViewState extends ConsumerState<QueueView> {
             subtitle: const Text('Free music from independent artists'),
             onTap: () => Navigator.pop(c, 'audius'),
           ),
+          ...catalogMenuTiles(c),
           ListTile(
             leading: const Icon(Icons.link),
             title: const Text('From a link'),
@@ -322,9 +326,16 @@ class _QueueViewState extends ConsumerState<QueueView> {
             onTap: () => Navigator.pop(c, 'link'),
           ),
         ]),
+        ),
       ),
     );
     if (!context.mounted || choice == null) return;
+    final catalog = catalogFor(choice);
+    if (catalog != null) {
+      final added = await showCatalog(context, catalog);
+      if (context.mounted) await _queue(context, ref, added);
+      return;
+    }
     switch (choice) {
       case 'phone':
         await _addFromPhone(context, ref);

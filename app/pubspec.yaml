@@ -21,6 +21,7 @@ dependencies:
     path: ../packages/syncsphere_audio
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
+  xml: ^7.0.0
 
 dev_dependencies:
   flutter_test:

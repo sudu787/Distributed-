@@ -7,9 +7,13 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import '../data/app_store.dart';
 import '../data/models.dart';
 import '../services/artwork_service.dart';
+import '../services/archive_client.dart';
 import '../services/audius_client.dart';
+import '../services/catalogs.dart';
 import '../services/remote_source.dart';
 import '../services/library_service.dart';
+import '../services/openverse_client.dart';
+import '../services/podcast_client.dart';
 import '../services/network_info.dart';
 import '../services/room_service.dart';
 
@@ -21,6 +25,22 @@ final roomServiceProvider = Provider<RoomService>((ref) => throw UnimplementedEr
 /// Open music sources: the Audius catalog and plain links.
 final audiusClientProvider = Provider<AudiusClient>((ref) {
   final c = AudiusClient();
+  ref.onDispose(c.close);
+  return c;
+});
+/// Free online catalogs (see docs/research-next.md, "More music sources").
+final openverseProvider = Provider<MusicCatalog>((ref) {
+  final c = OpenverseClient();
+  ref.onDispose(c.close);
+  return c;
+});
+final archiveProvider = Provider<MusicCatalog>((ref) {
+  final c = ArchiveClient();
+  ref.onDispose(c.close);
+  return c;
+});
+final podcastProvider = Provider<MusicCatalog>((ref) {
+  final c = PodcastClient();
   ref.onDispose(c.close);
   return c;
 });

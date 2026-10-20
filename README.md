@@ -60,8 +60,10 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
 - **Phone-to-phone sharing:** songs travel between guests in verified 512 KiB chunks (rarest first, BitTorrent-style).
   With many phones the host's Wi-Fi is no longer the bottleneck, and songs survive the host leaving.
-- **Open music sources:** **Search Audius** (free music from independent artists, credited) or **From a link** (your
-  own Navidrome or Jellyfin server, a podcast, any direct audio link). Every phone downloads the song from the source
+- **Open music sources:** **Search Audius** (free music from independent artists, credited), **Openverse**
+  (Creative Commons music, licence kept as the credit), **Internet Archive** (free concerts and albums; open an item,
+  add songs or **Add all**), **Podcasts** (iTunes search + the show's RSS feed), or **From a link** (your own
+  Navidrome or Jellyfin server, any direct audio link). Every phone downloads the song from the source
   itself, so sync stays sample-exact; the host is the fallback. Spotify and YouTube can't be used this way, because of
   DRM and their terms; see [research-next.md](docs/research-next.md).
 - **Recent parties:** the last 5 parties are listed on the home screen. A party that is still running shows **Online**
