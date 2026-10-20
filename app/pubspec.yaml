@@ -22,12 +22,13 @@ dependencies:
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
   xml: ^7.0.0
+  # SQLite on Windows (bundled by the sqlite3 package's build hook).
+  sqflite_common_ffi: ^2.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  sqflite_common_ffi: ^2.3.0
 
 flutter:
   uses-material-design: true

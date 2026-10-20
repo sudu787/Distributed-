@@ -1,8 +1,9 @@
 name: syncsphere_audio
 description: >-
-  Android audio backend for SyncSphere: Media3/ExoPlayer playback with
-  natively scheduled play calls, precise position sampling, playback-rate
-  control and network locks, exposed as a syncsphere_core AudioBackend.
+  Audio backend for SyncSphere: Media3/ExoPlayer on Android and WASAPI with
+  Media Foundation on Windows, with natively scheduled starts, precise
+  position sampling and playback-rate control, exposed as a syncsphere_core
+  AudioBackend.
 version: 0.1.0
 publish_to: none
 
@@ -27,3 +28,5 @@ flutter:
       android:
         package: dev.syncsphere.syncsphere_audio
         pluginClass: SyncsphereAudioPlugin
+      windows:
+        pluginClass: SyncsphereAudioPluginCApi

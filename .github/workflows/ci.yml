@@ -52,6 +52,11 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+      - name: Windows engine math (portable C++ tests)
+        working-directory: packages/syncsphere_audio/windows/test
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra render_math_test.cpp -o render_math_test
+          ./render_math_test
       - name: App
         working-directory: app
         run: |
@@ -100,3 +105,27 @@ jobs:
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$apksigner" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee cert.txt
           grep -q "SHA-256 digest: 2ccdc35abf37151daada9696cca6c15899337ac18e2c2a899bfedda2cecdee4a" cert.txt
+
+  windows:
+    name: Windows — build the desktop app (.exe)
+    runs-on: windows-latest
+    needs: [flutter]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Build Windows release
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --release
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath SyncSphere-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syncsphere-windows
+          path: SyncSphere-windows-x64.zip

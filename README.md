@@ -104,6 +104,8 @@ Simulated highlights: steady-state inter-device spread p95 of 5–20 ms across t
 - To build the APK: Android SDK with platform 36, and JDK 17+ (CI uses Temurin 21). Gradle and AGP come from the
   Flutter template (AGP 9.1, Gradle 9.3.1).
 - Phones: Android 7.0+ (API 24), all on the same Wi-Fi or one phone's hotspot.
+- Windows PCs: Windows 10 or 11 (x64). Building needs Visual Studio 2022 with "Desktop development with C++"; CI
+  builds it for you.
 
 ## Build and run
 
@@ -127,6 +129,25 @@ flutter install                    # or: adb install build/app/outputs/flutter-a
 **No Android SDK locally?** Every push runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It builds
 `app-debug.apk` and `app-release.apk` and uploads them as the `syncsphere-apks` artifact on the workflow run page.
 Download that artifact and install it with `adb install` or a file manager.
+
+### Windows app (beta)
+
+The same app runs on Windows 10/11, so a laptop can join a party or host it. Every push builds it in CI: download the
+`syncsphere-windows` artifact from the workflow run, unzip it anywhere and run `syncsphere.exe`. The app is not
+code-signed yet, so Windows SmartScreen asks once ("More info" → "Run anyway"), and Windows Firewall asks to allow
+private networks (needed for the party).
+
+- **Audio:** WASAPI shared mode with Media Foundation decoding (`packages/syncsphere_audio/windows`). Songs start at
+  an exact performance-counter instant, and the play position comes from the audio device clock, so the same sync
+  engine as on Android drives it (drift correction through a variable-rate resampler).
+- **Not on Windows yet:** microphone calibration (calibrate a PC from a phone instead), "Music on this phone" and
+  Share, background notification controls, QR scanning (use "Paste invite link" or the typed code).
+- **Status:** built and compile-checked in CI; not yet tested on real Windows hardware. Please report how it sounds
+  next to the phones.
+
+```bash
+cd app && flutter build windows --release   # on Windows with Visual Studio 2022
+```
 
 **Updates keep your calibration.** Since October 2026 every build is signed with the same development key
 (`app/android/app/syncsphere-dev.keystore`, intentionally public), so a new APK installs over the old one and keeps
