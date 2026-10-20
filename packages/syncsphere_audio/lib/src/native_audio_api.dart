@@ -24,7 +24,8 @@ abstract class NativeAudioApi {
   /// "stereo", "left", "right" or "mono"; applies to newly prepared segments.
   Future<void> setChannelRole(String role);
 
-  /// Runtime permission ("microphone" or "notifications"); true if granted.
+  /// Runtime permission ("microphone", "notifications" or "audio"); true if
+  /// granted.
   Future<bool> requestPermission(String name);
 
   /// Records mono PCM16 to a WAV file starting at `System.nanoTime() ==
@@ -46,6 +47,19 @@ abstract class NativeAudioApi {
 
   /// Sends the app to the background without closing it.
   Future<bool> moveToBack();
+
+  /// Songs in the phone's music collection (MediaStore); needs the "audio"
+  /// permission. Each: {uri, title, artist, album, albumId, durationMs,
+  /// size, mime, name}.
+  Future<List<Map<String, Object?>>> queryAudio();
+
+  /// Copies a content:// URI to [outPath]; returns the number of bytes.
+  Future<int> copyContent(String uri, String outPath);
+
+  /// Audio shared to the app ("Share → SyncSphere") since the last call:
+  /// [{uri, name, size, mime}]. A `{kind: "shared"}` event announces new
+  /// shares while the app runs.
+  Future<List<Map<String, Object?>>> takeSharedAudio();
 
   Stream<Map<String, Object?>> get events;
 }
@@ -110,6 +124,22 @@ class MethodChannelAudioApi implements NativeAudioApi {
 
   @override
   Future<bool> moveToBack() async => (await _channel.invokeMethod<bool>('moveToBack')) ?? false;
+
+  @override
+  Future<List<Map<String, Object?>>> queryAudio() async => [
+        for (final e in await _channel.invokeListMethod<Object?>('queryAudio') ?? const <Object?>[])
+          if (e is Map) e.cast<String, Object?>()
+      ];
+
+  @override
+  Future<int> copyContent(String uri, String outPath) async =>
+      (await _channel.invokeMethod<int>('copyContent', {'uri': uri, 'out': outPath})) ?? 0;
+
+  @override
+  Future<List<Map<String, Object?>>> takeSharedAudio() async => [
+        for (final e in await _channel.invokeListMethod<Object?>('takeSharedAudio') ?? const <Object?>[])
+          if (e is Map) e.cast<String, Object?>()
+      ];
 
   @override
   Future<bool> requestPermission(String name) async =>

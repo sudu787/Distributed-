@@ -11,6 +11,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 
 import 'src/app.dart';
 import 'src/data/sqflite_store.dart';
+import 'src/services/device_media.dart';
 import 'src/services/artwork_service.dart';
 import 'src/services/library_service.dart';
 import 'src/services/room_service.dart';
@@ -70,12 +71,25 @@ Future<void> main() async {
     trackCacheDir: Directory(p.join(cache.path, 'tracks')),
   );
 
+  final deviceMedia = native == null
+      ? DeviceMedia.none()
+      : DeviceMedia(
+          requestAccess: () => native.requestPermission('audio'),
+          query: native.queryAudio,
+          copy: native.copyContent,
+          takeShared: native.takeSharedAudio,
+          artwork: native.extractArtwork,
+          artDir: Directory(p.join(cache.path, 'device-art')),
+          shareArrived: native.events.where((e) => e['kind'] == 'shared').map((_) {}),
+        );
+
   runApp(ProviderScope(
     overrides: [
       artworkServiceProvider.overrideWithValue(artwork),
       appStoreProvider.overrideWithValue(store),
       libraryServiceProvider.overrideWithValue(library),
       roomServiceProvider.overrideWithValue(rooms),
+      deviceMediaProvider.overrideWithValue(deviceMedia),
       if (native != null) microphonePermissionProvider.overrideWithValue(() => native.requestPermission('microphone')),
       initialIdentityProvider.overrideWithValue(identity),
     ],

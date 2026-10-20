@@ -55,6 +55,10 @@ explicitly **not confidentiality**. The UI says to share the key only with peopl
 - **Microphone (acoustic calibration):** recording happens only on the listener's phone, only for the calibration
   segment (15–30 s), after an explicit confirmation and the Android permission prompt. The recording is analyzed on
   the phone and deleted; only per-click timing numbers (`cal.res`) are sent to the coordinator.
+- **Music on the phone:** read-only "Music and audio" access (READ_MEDIA_AUDIO; READ_EXTERNAL_STORAGE up to Android
+  12), requested only when "Music on this phone" is opened. Only the songs the user picks are copied into the app's
+  library. Audio shared to the app (SEND intents) is read once through the temporary URI grant and copied; the
+  app never keeps a content URI open.
 - **Microphone (surround measurement):** a measurement started on one phone records on *other* phones only if each
   owner turned on "Help measure the room" (off by default; turning it on asks for the Android permission). Otherwise
   the phone declines without recording and tells its owner who asked. The same limits apply: one click sequence,

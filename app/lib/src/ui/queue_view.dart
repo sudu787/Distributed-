@@ -10,6 +10,7 @@ import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'add_music.dart';
 import 'catalog_browser.dart';
+import 'phone_library_screen.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'widgets.dart';
@@ -301,10 +302,17 @@ class _QueueViewState extends ConsumerState<QueueView> {
       builder: (c) => SafeArea(
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (ref.read(deviceMediaProvider).available)
+            ListTile(
+              leading: const Icon(Icons.library_music),
+              title: const Text('Music on this phone'),
+              subtitle: const Text('Songs, albums and artists on this phone'),
+              onTap: () => Navigator.pop(c, 'device'),
+            ),
           ListTile(
-            leading: const Icon(Icons.phone_android),
-            title: const Text('From this phone…'),
-            subtitle: const Text('Pick audio files; they are added to My music and the queue'),
+            leading: const Icon(Icons.folder_open),
+            title: const Text('Pick files…'),
+            subtitle: const Text('Any audio file, also from Drive, Dropbox or a USB stick'),
             onTap: () => Navigator.pop(c, 'phone'),
           ),
           ListTile(
@@ -337,6 +345,9 @@ class _QueueViewState extends ConsumerState<QueueView> {
       return;
     }
     switch (choice) {
+      case 'device':
+        final added = await showPhoneLibrary(context);
+        if (context.mounted) await _queue(context, ref, added);
       case 'phone':
         await _addFromPhone(context, ref);
       case 'library':
@@ -398,7 +409,7 @@ class _QueueViewState extends ConsumerState<QueueView> {
     final candidates = lib.where((t) => !inRoom.contains(t.id)).toList();
     if (!context.mounted) return;
     if (candidates.isEmpty) {
-      showMessage(context, lib.isEmpty ? 'No songs in My music yet. Use "From this phone…".' : 'All your songs are already in the queue.');
+      showMessage(context, lib.isEmpty ? 'No songs in My music yet. Use "Music on this phone" or "Pick files…".' : 'All your songs are already in the queue.');
       return;
     }
     final chosen = <String>{};

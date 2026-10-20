@@ -31,6 +31,17 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="syncsphere" android:host="app" android:pathPrefix="/join"/>
             </intent-filter>
+            <!-- "Share → SyncSphere" from file managers, downloaders, messengers. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="audio/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="audio/*"/>
+            </intent-filter>
             <meta-data android:name="flutter_deeplinking_enabled" android:value="true"/>
         </activity>
         <!-- Don't delete the meta-data below.

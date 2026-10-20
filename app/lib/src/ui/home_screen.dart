@@ -12,6 +12,7 @@ import '../state/providers.dart';
 import '../state/room_controller.dart';
 import 'add_music.dart';
 import 'catalog_browser.dart';
+import 'phone_library_screen.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'scan_screen.dart';
@@ -693,9 +694,17 @@ class _LibrarySection extends ConsumerWidget {
       builder: (c) => SafeArea(
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (ref.read(deviceMediaProvider).available)
+            ListTile(
+              leading: const Icon(Icons.library_music),
+              title: const Text('Music on this phone'),
+              subtitle: const Text('Songs, albums and artists on this phone'),
+              onTap: () => Navigator.pop(c, 'device'),
+            ),
           ListTile(
-            leading: const Icon(Icons.phone_android),
-            title: const Text('From this phone…'),
+            leading: const Icon(Icons.folder_open),
+            title: const Text('Pick files…'),
+            subtitle: const Text('Any audio file, also from Drive, Dropbox or a USB stick'),
             onTap: () => Navigator.pop(c, 'phone'),
           ),
           ListTile(
@@ -725,6 +734,11 @@ class _LibrarySection extends ConsumerWidget {
       return;
     }
     switch (choice) {
+      case 'device':
+        final added = await showPhoneLibrary(context);
+        if (added.isNotEmpty && context.mounted) {
+          showMessage(context, 'Added ${added.length} song${added.length == 1 ? '' : 's'} to My music.');
+        }
       case 'phone':
         await _import(context, ref);
       case 'audius':

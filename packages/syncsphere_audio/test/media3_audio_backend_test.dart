@@ -108,6 +108,15 @@ class FakeNative implements NativeAudioApi {
   Future<bool> moveToBack() async => false;
 
   @override
+  Future<List<Map<String, Object?>>> queryAudio() async => const [];
+
+  @override
+  Future<int> copyContent(String uri, String outPath) async => 0;
+
+  @override
+  Future<List<Map<String, Object?>>> takeSharedAudio() async => const [];
+
+  @override
   Stream<Map<String, Object?>> get events => ev.stream;
 }
 

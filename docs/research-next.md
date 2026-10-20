@@ -33,7 +33,7 @@ instead:
 | **Openverse** (WordPress) | **Implemented** | One search over openly licensed audio (Jamendo, Wikimedia Commons, ...), `category=music`, no key. The licence (e.g. "CC BY-SA 3.0") is stored as the song's credit. |
 | **Internet Archive** | **Implemented** | `advancedsearch` (mediatype audio), then `/metadata/<id>`; one file per song (MP3 preferred over Ogg, M4A, FLAC), in track order; downloads from `/download/<id>/<file>`. |
 | **Podcasts** | **Implemented** | iTunes Search API (`media=podcast`, no key) for shows, the show's own RSS feed for episodes (enclosures, `itunes:duration`). |
-| Phone music library + "Share to SyncSphere" | Next | MediaStore browser and SEND/SEND_MULTIPLE intents; also how Bandcamp/Qobuz purchases (DRM-free files) come in. |
+| Phone music library + "Share to SyncSphere" | **Implemented** | MediaStore browser (songs, albums, artists, search, multi-select) and SEND/SEND_MULTIPLE audio intents; also how Bandcamp/Qobuz purchases (DRM-free files) come in. |
 | Jamendo API directly | Possible | ~600k CC tracks, but needs a registered `client_id` (35k requests/month non-commercial) and respects a per-track `audiodownload_allowed` flag. Openverse covers most of it without a key. |
 | Navidrome / Jellyfin (Subsonic API) | Possible | `/rest/stream?id=…` with the user's server and login; "From a link" already works with direct links. |
 | Internet radio (Radio Browser, 50k stations) | Large | A live stream has no file to verify and share; it needs a live relay mode (host decodes and streams PCM with timestamps). |

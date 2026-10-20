@@ -10,6 +10,7 @@ import '../services/artwork_service.dart';
 import '../services/archive_client.dart';
 import '../services/audius_client.dart';
 import '../services/catalogs.dart';
+import '../services/device_media.dart';
 import '../services/remote_source.dart';
 import '../services/library_service.dart';
 import '../services/openverse_client.dart';
@@ -28,6 +29,10 @@ final audiusClientProvider = Provider<AudiusClient>((ref) {
   ref.onDispose(c.close);
   return c;
 });
+/// The phone's music collection and "Share → SyncSphere"; overridden in
+/// `main()` on Android.
+final deviceMediaProvider = Provider<DeviceMedia>((ref) => DeviceMedia.none());
+
 /// Free online catalogs (see docs/research-next.md, "More music sources").
 final openverseProvider = Provider<MusicCatalog>((ref) {
   final c = OpenverseClient();

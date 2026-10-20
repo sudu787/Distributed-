@@ -5,6 +5,7 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import 'state/room_controller.dart';
 import 'ui/home_screen.dart';
 import 'ui/room_screen.dart';
+import 'ui/share_receiver.dart';
 import 'ui/widgets.dart';
 
 class SyncSphereApp extends StatelessWidget {
@@ -120,9 +121,11 @@ class _Root extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(roomControllerProvider.select((s) => s.status));
     final inRoom = status == RoomStatus.active || status == RoomStatus.leaving;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
-      child: inRoom ? const RoomScreen(key: ValueKey('room')) : const HomeScreen(key: ValueKey('home')),
+    return ShareReceiver(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: inRoom ? const RoomScreen(key: ValueKey('room')) : const HomeScreen(key: ValueKey('home')),
+      ),
     );
   }
 }

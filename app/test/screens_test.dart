@@ -201,7 +201,7 @@ void main() {
     expect(find.byType(TrackArt), findsOneWidget);
     await tester.tap(find.text('Add songs'));
     await tester.pumpAndSettle();
-    expect(find.text('From this phone…'), findsOneWidget);
+    expect(find.text('Pick files…'), findsOneWidget);
 
     await tester.pumpWidget(_wrap(const Scaffold(body: QueueView()), _overrides(guest(ParticipantRole.listener))));
     await tester.pumpAndSettle();
@@ -591,7 +591,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Add songs'));
     await tester.pumpAndSettle();
-    expect(find.text('From this phone…'), findsOneWidget);
+    expect(find.text('Pick files…'), findsOneWidget);
     expect(find.text('From My music'), findsOneWidget);
   });
 }

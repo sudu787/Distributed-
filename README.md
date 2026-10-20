@@ -60,6 +60,9 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
   phone on the Speakers tab) can add songs from their own phone; they are sent to the host and from there to everyone.
 - **Phone-to-phone sharing:** songs travel between guests in verified 512 KiB chunks (rarest first, BitTorrent-style).
   With many phones the host's Wi-Fi is no longer the bottleneck, and songs survive the host leaving.
+- **Music on this phone + Share:** browse the phone's songs, albums and artists (search, select many, add), or
+  **Share → SyncSphere** from a file manager, downloader or messenger; in a party, shared songs can go straight into
+  the queue. **Pick files…** still covers Drive, Dropbox and USB sticks.
 - **Open music sources:** **Search Audius** (free music from independent artists, credited), **Openverse**
   (Creative Commons music, licence kept as the credit), **Internet Archive** (free concerts and albums; open an item,
   add songs or **Add all**), **Podcasts** (iTunes search + the show's RSS feed), or **From a link** (your own
