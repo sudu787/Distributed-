@@ -29,6 +29,11 @@ jobs:
       - name: Quick simulated benchmark (labelled SIMULATED)
         working-directory: packages/syncsphere_core
         run: dart run bin/benchmark.dart --suite quick --out ../../benchmarks/out
+      - name: Sync engines comparison (labelled SIMULATED)
+        working-directory: packages/syncsphere_core
+        run: |
+          dart run bin/benchmark.dart --suite engines --out ../../benchmarks/out/engines
+          sed -n '/## Sync engines/,$p' ../../benchmarks/out/engines/summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Cross-check percentiles with the Python analyzer
         run: python3 tools/analyze_samples.py benchmarks/out/matrix-wifi-good-n5.samples.jsonl
       - uses: actions/upload-artifact@v4

@@ -17,6 +17,16 @@ bounds, natively scheduled play calls, and closed-loop drift correction.
 
 ## What works
 
+- **Three sync engines, chosen by the host** ([docs/sync-engines.md](docs/sync-engines.md)):
+  - **Classic** (the default) is the October 18 engine, unchanged.
+  - **Warm start** keeps the speaker output awake and measures each phone's start delay with a silent test start.
+  - **Precise** is the app's own PCM renderer: it places the first sample on the exact output frame and measures
+    at the speaker.
+
+  **Back to Classic** is one tap away, and a phone whose Precise renderer fails falls back to Classic by itself.
+- **Sync check:** one phone's microphone measures, in milliseconds, how far apart the phones *sound* at the start
+  and once settled. **Compare engines** runs it once per engine. **Export phone profile** feeds a real phone's
+  measured behaviour back into the simulator.
 - **Rooms:** create a room on one phone; others find it by UDP discovery or join by address. Joining needs a join key
   (HMAC challenge-response, PBKDF2-derived key, per-frame MACs, replay protection).
 - **Synchronized start:** a readiness barrier makes sure every phone has the track prepared. The coordinator then picks
@@ -94,6 +104,7 @@ cd packages/syncsphere_core
 dart pub get
 dart test
 dart run bin/benchmark.dart --suite quick --out ../../benchmarks/out
+dart run bin/benchmark.dart --suite engines --out ../../benchmarks/out/engines   # Classic vs warm vs Precise
 
 # Plugin (Dart side) and app tests
 cd ../syncsphere_audio && flutter pub get && flutter test
@@ -118,7 +129,10 @@ Download that artifact and install it with `adb install` or a file manager.
 5. The party has three tabs:
    - **Playing:** play/pause, seek, skip, shuffle, repeat, volume for everyone and for this phone.
    - **Queue:** the songs; the host, and guests allowed to control, add more with **Add songs**.
-   - **Speakers:** every phone and its sync state. **Calibrate to this spot** lines the sound up where you stand.
+   - **Speakers:** every phone and its sync state.
+     - **Sync engine** (the host chooses; **Back to Classic** undoes it).
+     - **Sync check** measures how far apart the phones sound.
+     - **Calibrate to this spot** lines the sound up where you stand.
      Tap a phone to set its volume, **timing** (fine-tune by ear: + plays earlier, − later) and channel.
 6. Something sounds off? On the Playing tab tap **This phone sounds early or late?**. For bug reports, open
    **⋮ → Diagnostics** on each phone and tap the copy icon.

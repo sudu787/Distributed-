@@ -69,6 +69,37 @@ Highlights (SIMULATED):
   conservative. Actual offset error p95 ranged from 0.1 ms (`lan-ideal`) to 8.5 ms (`wifi-congested`); median
   reported uncertainty ranged from 0.7 ms to 11 ms.
 
+### Sync engines on phone-like devices
+
+```bash
+cd packages/syncsphere_core
+dart run bin/benchmark.dart --suite engines --out ../../benchmarks/out/engines
+dart run bin/benchmark.dart --suite engines --profiles phones.json   # your phones (Diagnostics → Export phone profile)
+```
+
+**Model:** the phone-like profiles (`DeviceAudioProfile.phone*`) add two behaviours the original profiles leave out:
+- *output standby*: after 3 s of silence the next start pays a variable wake-up delay;
+- *ExoPlayer report smoothing*: right after a start the reported position is off by up to tens of ms, which decays
+  over 2 s.
+
+They are modelled assumptions, consistent with the real-phone report of an echo at the start. `--profiles` replaces
+them with profiles fitted from real phones.
+
+**Each scenario:** 3 or 5 phones, play, pause 8 s (so the speaker sleeps), resume, seek, next track.
+
+**Output:** a *Sync engines* table in `summary.md`:
+- spread in the first 3 s after each start, and afterwards;
+- start skew;
+- cold starts;
+- resyncs.
+
+Committed results: [benchmarks/results/simulated/engines/summary.md](../benchmarks/results/simulated/engines/summary.md).
+The same scenarios (four combinations, more seeds) are the regression gate in `test/sync_budget_test.dart`; see
+[sync-core.md](sync-core.md).
+
+**On the phones**, the app's **Sync check** (Speakers tab) measures the same quantity acoustically.
+**Compare engines** gives the real-phone version of this table.
+
 ## 2. Real-device protocol
 
 Equipment:
