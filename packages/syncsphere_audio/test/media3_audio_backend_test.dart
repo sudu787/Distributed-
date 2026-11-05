@@ -52,6 +52,12 @@ class FakeNative implements NativeAudioApi {
   Future<Map<String, Object?>?> sample() async => nextSample;
 
   @override
+  Future<String?> setKeepAwake(bool on) async {
+    calls['setKeepAwake'] = [on];
+    return null;
+  }
+
+  @override
   Future<Map<String, Object?>> acquireNetworkLocks() async => {};
 
   @override

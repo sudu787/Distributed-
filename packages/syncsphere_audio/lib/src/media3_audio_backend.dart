@@ -7,6 +7,14 @@ import 'package:syncsphere_core/syncsphere_core.dart';
 import 'android_calibration_recorder.dart';
 import 'native_audio_api.dart';
 
+/// The ExoPlayer backend inside [b], directly or behind the engine switch
+/// ([ModeSwitchingBackend]); null for other backends.
+Media3AudioBackend? exoPlayerOf(AudioBackend? b) => switch (b) {
+      Media3AudioBackend() => b,
+      ModeSwitchingBackend(:final classic) when classic is Media3AudioBackend => classic,
+      _ => null,
+    };
+
 /// [AudioBackend] backed by Media3/ExoPlayer on Android.
 ///
 /// The engine works in the Dart isolate's monotonic clock (µs); the native
@@ -65,6 +73,7 @@ class Media3AudioBackend implements AudioBackend {
   int _toLocalUs(int nativeNanos) => bridge.toLocal(nativeNanos ~/ 1000);
 
   void _onNativeEvent(Map<String, Object?> e) {
+    if (e['engine'] != null) return; // the precise engine's (PreciseAudioBackend)
     if (e['kind'] == 'command') {
       final cmd = e['message'];
       if (cmd is String) _commands.add(cmd);
@@ -91,6 +100,27 @@ class Media3AudioBackend implements AudioBackend {
 
   @override
   AudioCapabilities get capabilities => _caps;
+
+  @override
+  Set<SyncEngineMode> get supportedEngines => const {SyncEngineMode.classic, SyncEngineMode.warm};
+
+  bool _keptAwake = false;
+
+  /// Classic or warm start (warm keeps the output awake when
+  /// [FeatureFlags.keepAwake] allows). The precise engine is a separate
+  /// backend ([PreciseAudioBackend]); asked for it, this one runs Classic.
+  @override
+  Future<SyncEngineMode> useEngine(SyncEngineMode mode, FeatureFlags flags) async {
+    await api.stop();
+    final warm = mode == SyncEngineMode.warm;
+    final awake = warm && flags.keepAwake;
+    if (awake != _keptAwake) {
+      final err = await api.setKeepAwake(awake);
+      if (err != null) log?.warn('audio.keepAwake', err);
+      _keptAwake = awake && err == null;
+    }
+    return warm ? SyncEngineMode.warm : SyncEngineMode.classic;
+  }
 
   @override
   Future<void> prepare({required int segmentId, required TrackSource source, required int positionUs}) async {
@@ -147,10 +177,15 @@ class Media3AudioBackend implements AudioBackend {
   /// Converter for [ConvertingTrackResolver]: decodes MP3 / ADTS AAC files
   /// into PCM WAV copies under [dir] (sample-exact seeking), keeping at most
   /// [maxCacheBytes] of copies (least recently used are deleted first).
-  SourceConverter exactSeekConverter(Directory dir, {int maxCacheBytes = 2 * 1024 * 1024 * 1024}) =>
+  /// While [decodeEverything] says so (the precise engine, which plays only
+  /// 16-bit PCM WAV), every other format is decoded too.
+  SourceConverter exactSeekConverter(Directory dir,
+          {int maxCacheBytes = 2 * 1024 * 1024 * 1024, bool Function()? decodeEverything}) =>
       (track, src) async {
         if (src.uri.scheme != 'file') return null;
-        if (!needsExactSeekCopy(await readFileHead(File.fromUri(src.uri)))) return null;
+        final head = await readFileHead(File.fromUri(src.uri), 512);
+        final all = decodeEverything?.call() ?? false;
+        if (!needsExactSeekCopy(head) && !(all && !isPlayablePcmWav(head))) return null;
         final out = File('${dir.path}/${track.id}.wav');
         if (await out.exists()) {
           await out.setLastModified(DateTime.now());
@@ -195,6 +230,7 @@ class Media3AudioBackend implements AudioBackend {
   Future<void> dispose() async {
     _recalibrate?.cancel();
     await _nativeSub?.cancel();
+    if (_keptAwake) await api.setKeepAwake(false);
     await api.stop();
     await _events.close();
     await _commands.close();

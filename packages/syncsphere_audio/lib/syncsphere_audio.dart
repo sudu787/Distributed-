@@ -5,3 +5,4 @@ export 'src/android_calibration_recorder.dart';
 export 'src/background_playback.dart';
 export 'src/media3_audio_backend.dart';
 export 'src/native_audio_api.dart';
+export 'src/precise_audio_backend.dart';

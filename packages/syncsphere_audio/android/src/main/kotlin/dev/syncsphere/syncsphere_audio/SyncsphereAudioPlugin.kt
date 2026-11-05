@@ -39,8 +39,15 @@ import io.flutter.plugin.common.PluginRegistry
  *   exactCopy {uri, out} → {path, sampleRate, channels, durationUs, decoder} (decode to PCM WAV)
  *   extractArtwork {uri, out} → Boolean (embedded cover → JPEG at out)
  *   moveToBack → Boolean (app to background, keeps running)
- * Event channel `dev.syncsphere/audio_events`: {kind, segment, atNanos, message};
- * notification buttons arrive as {kind: "command", message: play|pause|next|previous}.
+ *   setKeepAwake {on} → String? (warm start: silent output keeps the speaker awake; error or null)
+ * Method channel `dev.syncsphere/precise_audio` (the precise engine, see PreciseAudioEngine):
+ *   start → {error?, outRate}, release,
+ *   prepare {segment, uri, positionUs} (16-bit PCM WAV), startAt {segment, atNanos} (audible time),
+ *   pauseAt {segment, atNanos, seekToUs?}, setRate {rate}, setVolume {volume},
+ *   setChannelRole {role}, stop, sample → Map | null
+ * Event channel `dev.syncsphere/audio_events`: {kind, segment, atNanos, message, engine?}
+ * (engine "precise" for the precise engine, absent for ExoPlayer); notification buttons
+ * arrive as {kind: "command", message: play|pause|next|previous}.
  */
 class SyncsphereAudioPlugin :
     FlutterPlugin,
@@ -53,11 +60,14 @@ class SyncsphereAudioPlugin :
     }
 
     private lateinit var channel: MethodChannel
+    private lateinit var preciseChannel: MethodChannel
     private lateinit var events: EventChannel
     private lateinit var context: Context
     private val main = Handler(Looper.getMainLooper())
     private var sink: EventChannel.EventSink? = null
     private var engine: SyncAudioEngine? = null
+    private var precise: PreciseAudioEngine? = null
+    private var keepAwake: KeepAwake? = null
     private var locks: NetworkLocks? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -67,6 +77,8 @@ class SyncsphereAudioPlugin :
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "dev.syncsphere/audio")
         channel.setMethodCallHandler(this)
+        preciseChannel = MethodChannel(binding.binaryMessenger, "dev.syncsphere/precise_audio")
+        preciseChannel.setMethodCallHandler { call, result -> onPreciseCall(call, result) }
         events = EventChannel(binding.binaryMessenger, "dev.syncsphere/audio_events")
         events.setStreamHandler(this)
         PlaybackService.commandListener = { cmd ->
@@ -76,9 +88,14 @@ class SyncsphereAudioPlugin :
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        preciseChannel.setMethodCallHandler(null)
         events.setStreamHandler(null)
         engine?.dispose()
         engine = null
+        precise?.dispose()
+        precise = null
+        keepAwake?.stop()
+        keepAwake = null
         locks?.release()
         locks = null
         PlaybackService.commandListener = null
@@ -87,6 +104,62 @@ class SyncsphereAudioPlugin :
 
     private fun engine(): SyncAudioEngine =
         engine ?: SyncAudioEngine(context) { ev -> main.post { sink?.success(ev) } }.also { engine = it }
+
+    // Precise engine events are already posted to the main thread.
+    private fun precise(): PreciseAudioEngine =
+        precise ?: PreciseAudioEngine(context) { ev -> sink?.success(ev) }.also { precise = it }
+
+    private fun onPreciseCall(call: MethodCall, result: Result) {
+        try {
+            when (call.method) {
+                "start" -> {
+                    val p = precise()
+                    result.success(mapOf("error" to p.start(), "outRate" to p.outRate))
+                }
+                "release" -> {
+                    precise?.release()
+                    result.success(null)
+                }
+                "prepare" -> {
+                    val uri = call.argument<String>("uri") ?: throw IllegalArgumentException("uri missing")
+                    precise().prepare(call.int("segment"), uri, call.long("positionUs")) { err ->
+                        if (err == null) result.success(null) else result.error("prepare_failed", err, null)
+                    }
+                }
+                "startAt" -> {
+                    precise().startAt(call.int("segment"), call.long("atNanos"))
+                    result.success(null)
+                }
+                "pauseAt" -> {
+                    precise().pauseAt(call.int("segment"), call.long("atNanos"), call.argument<Number>("seekToUs")?.toLong())
+                    result.success(null)
+                }
+                "setRate" -> {
+                    precise().setRate(call.double("rate"))
+                    result.success(null)
+                }
+                "setVolume" -> {
+                    precise().setVolume(call.double("volume").toFloat())
+                    result.success(null)
+                }
+                "setChannelRole" -> {
+                    val role = call.argument<String>("role") ?: throw IllegalArgumentException("role missing")
+                    precise().setChannelRole(role)
+                    result.success(null)
+                }
+                "stop" -> {
+                    precise?.stopPlayback()
+                    result.success(null)
+                }
+                "sample" -> result.success(precise?.sample())
+                else -> result.notImplemented()
+            }
+        } catch (e: IllegalArgumentException) {
+            result.error("bad_args", e.message, null)
+        } catch (e: Exception) {
+            result.error("native_error", e.message, null)
+        }
+    }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         try {
@@ -158,6 +231,16 @@ class SyncsphereAudioPlugin :
                     }.start()
                 }
                 "moveToBack" -> result.success(activity?.moveTaskToBack(true) ?: false)
+                "setKeepAwake" -> {
+                    val on = call.argument<Boolean>("on") ?: false
+                    if (on) {
+                        val k = keepAwake ?: KeepAwake(precise?.outRate ?: deviceRate()).also { keepAwake = it }
+                        result.success(k.start())
+                    } else {
+                        keepAwake?.stop()
+                        result.success(null)
+                    }
+                }
                 "keepScreenOn" -> {
                     val on = call.argument<Boolean>("on") ?: false
                     activity?.window?.let { w ->
@@ -221,6 +304,10 @@ class SyncsphereAudioPlugin :
             result.error("native_error", e.message, null)
         }
     }
+
+    private fun deviceRate(): Int =
+        (context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager)
+            .getProperty(android.media.AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 48000
 
     private fun MethodCall.int(name: String): Int =
         argument<Number>(name)?.toInt() ?: throw IllegalArgumentException("$name missing")

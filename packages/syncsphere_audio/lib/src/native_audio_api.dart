@@ -47,6 +47,12 @@ abstract class NativeAudioApi {
   /// Sends the app to the background without closing it.
   Future<bool> moveToBack();
 
+  /// Warm start: plays silence so the speaker output never sleeps. Returns
+  /// an error message, or null.
+  Future<String?> setKeepAwake(bool on);
+
+  /// Every native event (both engines; the precise engine's carry
+  /// `engine: "precise"`).
   Stream<Map<String, Object?>> get events;
 }
 
@@ -112,6 +118,9 @@ class MethodChannelAudioApi implements NativeAudioApi {
   Future<bool> moveToBack() async => (await _channel.invokeMethod<bool>('moveToBack')) ?? false;
 
   @override
+  Future<String?> setKeepAwake(bool on) => _channel.invokeMethod<String>('setKeepAwake', {'on': on});
+
+  @override
   Future<bool> requestPermission(String name) async =>
       (await _channel.invokeMethod<bool>('requestPermission', {'name': name})) ?? false;
 
@@ -140,4 +149,60 @@ class MethodChannelAudioApi implements NativeAudioApi {
   Stream<Map<String, Object?>> get events => _eventStream ??= _events
       .receiveBroadcastStream()
       .map((e) => (e as Map).cast<String, Object?>());
+}
+
+/// The precise engine's channel (`dev.syncsphere/precise_audio`, see
+/// `PreciseAudioEngine.kt`). Times are `System.nanoTime()`; a start time is
+/// the *audible* time of the segment's first frame.
+abstract class PreciseNativeApi {
+  /// Starts the output. Returns {error?, outRate}.
+  Future<Map<String, Object?>> start();
+  Future<void> release();
+
+  /// [uri] must be a `file://` 16-bit PCM WAV.
+  Future<void> prepare(int segment, String uri, int positionUs);
+  Future<void> startAt(int segment, int atNanos);
+  Future<void> pauseAt(int segment, int atNanos, int? seekToUs);
+  Future<void> setRate(double rate);
+  Future<void> setVolume(double volume);
+  Future<void> setChannelRole(String role);
+  Future<void> stop();
+  Future<Map<String, Object?>?> sample();
+}
+
+class MethodChannelPreciseApi implements PreciseNativeApi {
+  static const _channel = MethodChannel('dev.syncsphere/precise_audio');
+
+  @override
+  Future<Map<String, Object?>> start() async => (await _channel.invokeMapMethod<String, Object?>('start')) ?? const {};
+
+  @override
+  Future<void> release() => _channel.invokeMethod<void>('release');
+
+  @override
+  Future<void> prepare(int segment, String uri, int positionUs) =>
+      _channel.invokeMethod<void>('prepare', {'segment': segment, 'uri': uri, 'positionUs': positionUs});
+
+  @override
+  Future<void> startAt(int segment, int atNanos) =>
+      _channel.invokeMethod<void>('startAt', {'segment': segment, 'atNanos': atNanos});
+
+  @override
+  Future<void> pauseAt(int segment, int atNanos, int? seekToUs) => _channel.invokeMethod<void>(
+      'pauseAt', {'segment': segment, 'atNanos': atNanos, if (seekToUs != null) 'seekToUs': seekToUs});
+
+  @override
+  Future<void> setRate(double rate) => _channel.invokeMethod<void>('setRate', {'rate': rate});
+
+  @override
+  Future<void> setVolume(double volume) => _channel.invokeMethod<void>('setVolume', {'volume': volume});
+
+  @override
+  Future<void> setChannelRole(String role) => _channel.invokeMethod<void>('setChannelRole', {'role': role});
+
+  @override
+  Future<void> stop() => _channel.invokeMethod<void>('stop');
+
+  @override
+  Future<Map<String, Object?>?> sample() => _channel.invokeMapMethod<String, Object?>('sample');
 }
