@@ -2,6 +2,7 @@
 library;
 
 export 'src/config/sync_config.dart';
+export 'src/config/feature_flags.dart';
 export 'src/time/clock.dart';
 export 'src/time/clock_sync.dart';
 export 'src/time/clock_domain_bridge.dart';
@@ -18,14 +19,19 @@ export 'src/observability/stats.dart';
 export 'src/coordinator/lead_time.dart';
 export 'src/coordinator/membership.dart';
 export 'src/coordinator/room_coordinator.dart';
+export 'src/coordinator/calibration_coordinator.dart' show CalibrationCoordinator;
 export 'src/audio/audio_backend.dart';
+export 'src/audio/mode_switching_backend.dart';
 export 'src/distribution/exact_seek.dart';
 export 'src/distribution/track_resolver.dart';
 export 'src/participant/drift_controller.dart';
 export 'src/participant/playback_engine.dart';
+export 'src/participant/start_policy.dart';
+export 'src/participant/start_stats.dart';
 export 'src/participant/participant_session.dart';
 export 'src/simulation/sim_audio_backend.dart';
 export 'src/simulation/scenario.dart';
+export 'src/simulation/profile_fit.dart';
 export 'src/distribution/track_hasher.dart';
 export 'src/distribution/file_server.dart';
 export 'src/distribution/track_downloader.dart';

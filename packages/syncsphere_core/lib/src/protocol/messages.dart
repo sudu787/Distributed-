@@ -474,6 +474,13 @@ enum ControlAction {
   /// on the coordinator (uploaded with `PUT /uploads/<id>`, or in its
   /// library).
   addTrack,
+
+  /// Host only. `mode`: `classic|warm|precise` (see `SyncEngineMode`).
+  setSyncEngine,
+
+  /// Measures how far apart the phones sound at the sender's microphone
+  /// (a calibration that changes nothing; see `CalibrationPlan.measureOnly`).
+  syncCheck,
 }
 
 /// Controller → coordinator playback/room command. [baseVersion] is the
@@ -614,6 +621,10 @@ class SyncReportMsg extends Message {
   final CorrectionMode mode;
   final String playerState;
 
+  /// Set when the reporting phone runs another engine than the room asked
+  /// for (after a fallback); null when it follows the room.
+  final SyncEngineMode? engine;
+
   const SyncReportMsg({
     required this.generation,
     required this.coordTimeUs,
@@ -627,6 +638,7 @@ class SyncReportMsg extends Message {
     required this.rttP95Us,
     required this.mode,
     required this.playerState,
+    this.engine,
   });
 
   @override
@@ -643,6 +655,7 @@ class SyncReportMsg extends Message {
         'rtt': rttP95Us,
         'mode': mode.name,
         'ps': playerState,
+        if (engine != null) 'eng': engine!.name,
       };
 
   static SyncReportMsg read(Reader r) => SyncReportMsg(
@@ -658,6 +671,7 @@ class SyncReportMsg extends Message {
         rttP95Us: r.integer('rtt', min: 0),
         mode: r.enumValue('mode', CorrectionMode.values),
         playerState: r.string('ps', maxLength: 32),
+        engine: r.has('eng') ? SyncEngineMode.parse(r.optString('eng', maxLength: 40)) : null,
       );
 }
 

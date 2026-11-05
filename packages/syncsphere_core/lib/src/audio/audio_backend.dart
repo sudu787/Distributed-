@@ -22,11 +22,21 @@
 ///      from the platform's audio timestamps via [PositionSample].
 /// The engine schedules (2) early by a learned start-latency so that (3)
 /// lands on the target time, and corrects the remainder with drift control.
+/// A backend with [AudioCapabilities.schedulesOutput] (the precise renderer)
+/// instead schedules (3) directly: its `startAt` time is the audible time.
+///
+/// ## Engines
+/// A backend may run several sync engines ([SyncEngineMode]); the playback
+/// engine selects one with [AudioBackend.useEngine]. Classic is always
+/// supported, and a backend reports [AudioEventKind.engineFallback] when it
+/// had to give up on the selected engine.
 library;
 
 import 'dart:async';
 
+import '../config/feature_flags.dart';
 import '../model/room_state.dart' show ChannelRole;
+import '../model/sync_engine.dart';
 
 /// Where to read audio from.
 class TrackSource {
@@ -48,12 +58,17 @@ class AudioCapabilities {
   /// Native output latency hint (µs) if the platform exposes one.
   final int? outputLatencyHintUs;
 
+  /// `startAt` times are *audible* times (the backend places the first
+  /// frame itself) rather than play-call times.
+  final bool schedulesOutput;
+
   const AudioCapabilities({
     required this.backend,
     required this.rateControl,
     this.minRate = 1.0,
     this.maxRate = 1.0,
     this.outputLatencyHintUs,
+    this.schedulesOutput = false,
   });
 }
 
@@ -89,7 +104,18 @@ class PositionSample {
   });
 }
 
-enum AudioEventKind { playCalled, paused, stalled, resumedAfterStall, ended, error }
+enum AudioEventKind {
+  playCalled,
+  paused,
+  stalled,
+  resumedAfterStall,
+  ended,
+  error,
+
+  /// The selected engine failed and the backend now runs Classic; every
+  /// segment was dropped. `message` says why.
+  engineFallback,
+}
 
 class AudioBackendEvent {
   final AudioEventKind kind;
@@ -112,7 +138,16 @@ class AudioBackendException implements Exception {
 }
 
 abstract class AudioBackend {
+  /// Capabilities of the engine currently in use.
   AudioCapabilities get capabilities;
+
+  /// Engines this backend can run ([SyncEngineMode.classic] always).
+  Set<SyncEngineMode> get supportedEngines;
+
+  /// Switches to [mode] (or the closest supported engine), dropping every
+  /// segment, and returns the engine now in use. [flags] tune the engine
+  /// (e.g. keep-awake for warm start).
+  Future<SyncEngineMode> useEngine(SyncEngineMode mode, FeatureFlags flags);
 
   /// Prepares [source] as the standby segment, positioned at [positionUs],
   /// paused and buffered. Completes when a start would be low-latency.
@@ -170,6 +205,15 @@ class NullAudioBackend implements AudioBackend {
   @override
   AudioCapabilities get capabilities =>
       const AudioCapabilities(backend: 'null', rateControl: true, minRate: 0.5, maxRate: 2);
+
+  @override
+  Set<SyncEngineMode> get supportedEngines => SyncEngineMode.values.toSet();
+
+  @override
+  Future<SyncEngineMode> useEngine(SyncEngineMode mode, FeatureFlags flags) async {
+    await stop();
+    return mode;
+  }
 
   @override
   Future<void> prepare({required int segmentId, required TrackSource source, required int positionUs}) async {

@@ -50,6 +50,10 @@ class Member {
   int? lastReportAtUs;
   int startLatencyUs = 0;
   int rttP95Us = 0;
+
+  /// Engine the participant reports running when it differs from the
+  /// room's (null: it follows the room).
+  SyncEngineMode? engine;
   int uncertaintyUs = 0;
   final Map<String, TrackAvailability> availability = {};
 
@@ -70,7 +74,8 @@ class Member {
 
   bool get isConnected => connection != ConnectionStatus.disconnected;
 
-  ParticipantSummary summary(String? currentTrackId) => ParticipantSummary(
+  ParticipantSummary summary(String? currentTrackId, {SyncEngineMode roomEngine = SyncEngineMode.classic}) =>
+      ParticipantSummary(
         deviceId: deviceId,
         displayName: displayName,
         role: role,
@@ -83,6 +88,7 @@ class Member {
         endpoint: caps.canHost ? endpoint : null,
         channel: channel,
         calibrationUs: calibrationUs,
+        engine: engine == null || engine == roomEngine ? null : engine,
       );
 }
 

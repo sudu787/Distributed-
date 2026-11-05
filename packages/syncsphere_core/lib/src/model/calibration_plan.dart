@@ -9,6 +9,10 @@
 /// exactly what a person at the listener's position hears: they include
 /// unreported output latency (Bluetooth, DSP) *and* acoustic propagation.
 /// Only differences are used, so the recorder's own latency cancels.
+///
+/// A *Sync check* ([measureOnly]) uses the same clicks but only reports what
+/// it heard; it starts clicking one second after the start, so it also shows
+/// how well the phones start together.
 library;
 
 import 'dart:convert';
@@ -36,6 +40,9 @@ class CalibrationPlan {
   final int clickHz;
   final int clickMs;
 
+  /// Sync check: measure and report, do not change any calibration.
+  final bool measureOnly;
+
   const CalibrationPlan({
     required this.id,
     required this.listener,
@@ -45,10 +52,23 @@ class CalibrationPlan {
     this.rounds = 3,
     this.clickHz = 2000,
     this.clickMs = 4,
+    this.measureOnly = false,
   });
 
+  /// A Sync check: clicks from one second after the start (to catch a bad
+  /// start) for six rounds (the later rounds show the settled state).
+  const CalibrationPlan.syncCheck({required this.id, required this.listener, required this.order})
+      : leadInUs = 1000000,
+        intervalUs = 600000,
+        rounds = 6,
+        clickHz = 2000,
+        clickMs = 4,
+        measureOnly = true;
+
   /// Deterministic, well-formed track id for the calibration segment.
-  String get trackId => sha256.convert(utf8.encode('syncsphere-calibration-v1|$id|$listener')).toString();
+  String get trackId => sha256
+      .convert(utf8.encode('syncsphere-calibration-v1|$id|$listener${measureOnly ? '|check' : ''}'))
+      .toString();
 
   int get slotCount => rounds * order.length;
 
@@ -76,6 +96,7 @@ class CalibrationPlan {
         'rounds': rounds,
         'hz': clickHz,
         'ms': clickMs,
+        if (measureOnly) 'mo': true,
       };
 
   factory CalibrationPlan.fromJson(Map<String, Object?> j) {
@@ -89,6 +110,7 @@ class CalibrationPlan {
       rounds: r.integer('rounds', min: 1, max: 10),
       clickHz: r.integer('hz', min: 200, max: 8000),
       clickMs: r.integer('ms', min: 1, max: 50),
+      measureOnly: r.optBoolean('mo') ?? false,
     );
   }
 }

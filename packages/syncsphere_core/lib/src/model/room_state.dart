@@ -15,6 +15,11 @@ library;
 
 import '../protocol/reader.dart';
 import 'calibration_plan.dart';
+import 'sync_check.dart';
+import 'sync_engine.dart';
+
+export 'sync_check.dart';
+export 'sync_engine.dart';
 
 enum PlaybackStatus { idle, playing, paused }
 
@@ -296,6 +301,11 @@ class ParticipantSummary {
   /// or null if the device was not calibrated in this room.
   final int? calibrationUs;
 
+  /// The engine this phone actually runs, when it differs from the room's
+  /// (an older build, or a fallback after the chosen engine failed). Null
+  /// when unknown or the same as [RoomState.engine].
+  final SyncEngineMode? engine;
+
   const ParticipantSummary({
     required this.deviceId,
     required this.displayName,
@@ -307,6 +317,7 @@ class ParticipantSummary {
     this.endpoint,
     this.channel = ChannelRole.stereo,
     this.calibrationUs,
+    this.engine,
   });
 
   ParticipantSummary copyWith({
@@ -327,6 +338,7 @@ class ParticipantSummary {
         endpoint: endpoint,
         channel: channel,
         calibrationUs: calibrationUs,
+        engine: engine,
       );
 
   Map<String, Object?> toJson() => {
@@ -340,6 +352,7 @@ class ParticipantSummary {
         if (endpoint != null) 'ep': endpoint,
         if (channel != ChannelRole.stereo) 'ch': channel.name,
         if (calibrationUs != null) 'cal': calibrationUs,
+        if (engine != null) 'eng': engine!.name,
       };
 
   factory ParticipantSummary.fromJson(Map<String, Object?> j) {
@@ -355,6 +368,7 @@ class ParticipantSummary {
       endpoint: r.optString('ep', maxLength: 128),
       channel: r.optEnum('ch', ChannelRole.values) ?? ChannelRole.stereo,
       calibrationUs: r.optInteger('cal', min: -2000000, max: 2000000),
+      engine: r.has('eng') ? SyncEngineMode.parse(r.optString('eng', maxLength: 40)) : null,
     );
   }
 }
@@ -386,6 +400,13 @@ class RoomState {
   /// `participant/failover.dart`). Null: no preference.
   final String? preferredCoordinator;
 
+  /// How phones start and track playback (host's choice; see
+  /// `model/sync_engine.dart`).
+  final SyncEngineMode engine;
+
+  /// Recent Sync check results, newest last (at most [kMaxSyncChecks]).
+  final List<SyncCheckResult> syncChecks;
+
   const RoomState({
     required this.roomId,
     required this.roomName,
@@ -402,6 +423,8 @@ class RoomState {
     this.shuffle = false,
     this.calibration,
     this.preferredCoordinator,
+    this.engine = SyncEngineMode.classic,
+    this.syncChecks = const [],
   });
 
   TrackInfo? trackById(String? id) {
@@ -411,7 +434,12 @@ class RoomState {
     }
     final cal = calibration;
     if (cal != null && cal.trackId == id) {
-      return TrackInfo(id: id, title: 'Calibration', durationUs: cal.durationUs, sizeBytes: 0, hostServes: false);
+      return TrackInfo(
+          id: id,
+          title: cal.measureOnly ? 'Sync check' : 'Calibration',
+          durationUs: cal.durationUs,
+          sizeBytes: 0,
+          hostServes: false);
     }
     return null;
   }
@@ -444,6 +472,8 @@ class RoomState {
     CalibrationPlan? calibration,
     bool clearCalibration = false,
     String? preferredCoordinator,
+    SyncEngineMode? engine,
+    List<SyncCheckResult>? syncChecks,
   }) =>
       RoomState(
         roomId: roomId,
@@ -461,6 +491,8 @@ class RoomState {
         shuffle: shuffle ?? this.shuffle,
         calibration: clearCalibration ? null : (calibration ?? this.calibration),
         preferredCoordinator: preferredCoordinator ?? this.preferredCoordinator,
+        engine: engine ?? this.engine,
+        syncChecks: syncChecks ?? this.syncChecks,
       );
 
   Map<String, Object?> toJson() => {
@@ -479,6 +511,8 @@ class RoomState {
         if (shuffle) 'shuf': true,
         if (calibration != null) 'cal': calibration!.toJson(),
         if (preferredCoordinator != null) 'pref': preferredCoordinator,
+        if (engine != SyncEngineMode.classic) 'eng': engine.name,
+        if (syncChecks.isNotEmpty) 'checks': [for (final c in syncChecks) c.toJson()],
       };
 
   factory RoomState.fromJson(Map<String, Object?> j, {int maxPlaylist = 1000}) {
@@ -507,6 +541,10 @@ class RoomState {
       shuffle: r.optBoolean('shuf') ?? false,
       calibration: r.optMap('cal') == null ? null : CalibrationPlan.fromJson(r.optMap('cal')!),
       preferredCoordinator: r.optString('pref', maxLength: 64),
+      engine: SyncEngineMode.parse(r.optString('eng', maxLength: 40)),
+      syncChecks: r.has('checks')
+          ? [for (final m in r.mapList('checks', maxLength: kMaxSyncChecks)) SyncCheckResult.fromJson(m)]
+          : const [],
     );
   }
 }

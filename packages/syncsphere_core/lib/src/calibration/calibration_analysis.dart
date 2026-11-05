@@ -6,6 +6,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../model/calibration_plan.dart';
+import '../model/sync_check.dart';
+import '../model/sync_engine.dart';
 
 /// A mono microphone recording with the local monotonic time (µs) of its
 /// first sample. The timestamp only needs to be roughly right (tens of ms):
@@ -181,4 +183,54 @@ int _median(List<int> v) {
   final s = List.of(v)..sort();
   final n = s.length;
   return n.isOdd ? s[n ~/ 2] : ((s[n ~/ 2 - 1] + s[n ~/ 2]) / 2).round();
+}
+
+/// Turns a Sync check's raw arrivals into what the phones sound like at the
+/// listener (see `model/sync_check.dart`). Unlike [combineCalibration] the
+/// devices' own software errors are *not* added back: the check reports
+/// what a person hears, including a phone that is still converging.
+SyncCheckResult summarizeSyncCheck({
+  required int id,
+  required CalibrationPlan plan,
+  required SyncEngineMode engine,
+  required Map<String, Map<int, int>> arrivalsBySlot,
+  required String Function(String deviceId) nameOf,
+}) {
+  final n = plan.order.length;
+  final settledFrom = plan.rounds ~/ 2;
+  final starts = <String, int>{};
+  final settled = <String, int>{};
+  final jitter = <String, int>{};
+  for (var k = 0; k < n; k++) {
+    final id = plan.order[k];
+    final a = arrivalsBySlot[id];
+    if (a == null) continue;
+    final first = a[k];
+    if (first != null) starts[id] = first;
+    final late = [
+      for (var r = settledFrom; r < plan.rounds; r++)
+        if (a[r * n + k] != null) a[r * n + k]!
+    ];
+    if (late.isNotEmpty) {
+      settled[id] = _median(late);
+      jitter[id] = late.reduce(math.max) - late.reduce(math.min);
+    }
+  }
+  final startRef = starts.isEmpty ? 0 : _median(starts.values.toList());
+  final settledRef = settled.isEmpty ? 0 : _median(settled.values.toList());
+  return SyncCheckResult(
+    id: id,
+    engine: engine,
+    listener: plan.listener,
+    devices: [
+      for (final d in plan.order)
+        SyncCheckDevice(
+          deviceId: d,
+          name: nameOf(d),
+          startUs: starts[d] == null ? null : starts[d]! - startRef,
+          settledUs: settled[d] == null ? null : settled[d]! - settledRef,
+          jitterUs: jitter[d] ?? 0,
+        ),
+    ],
+  );
 }

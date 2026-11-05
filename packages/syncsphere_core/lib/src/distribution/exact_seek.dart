@@ -31,6 +31,30 @@ bool needsExactSeekCopy(List<int> head) {
   return head.length >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0;
 }
 
+/// Whether [head] (at least the first ~64 bytes of a file) is a WAV the
+/// precise renderer plays directly: 16-bit PCM, 1–8 channels. Anything
+/// else is decoded to such a WAV first.
+bool isPlayablePcmWav(List<int> head) {
+  String tag(int at) => at + 4 <= head.length ? String.fromCharCodes(head.sublist(at, at + 4)) : '';
+  int u16(int at) => head[at] | head[at + 1] << 8;
+  int u32(int at) => head[at] | head[at + 1] << 8 | head[at + 2] << 16 | head[at + 3] << 24;
+  if (tag(0) != 'RIFF' || tag(8) != 'WAVE') return false;
+  var at = 12;
+  while (at + 8 <= head.length) {
+    final size = u32(at + 4);
+    if (tag(at) == 'fmt ') {
+      if (at + 24 > head.length) return false;
+      var format = u16(at + 8);
+      final channels = u16(at + 10);
+      final bits = u16(at + 22);
+      if (format == 0xFFFE && at + 34 <= head.length) format = u16(at + 32); // extensible: sub-format
+      return format == 1 && bits == 16 && channels >= 1 && channels <= 8;
+    }
+    at += 8 + size + (size & 1);
+  }
+  return false;
+}
+
 /// Produces an exact-seek copy of [source], or null to play it as is.
 typedef SourceConverter = Future<Uri?> Function(TrackInfo track, TrackSource source);
 

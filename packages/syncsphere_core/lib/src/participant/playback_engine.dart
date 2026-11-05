@@ -16,6 +16,7 @@ import 'dart:math';
 
 import '../audio/audio_backend.dart';
 import '../calibration/calibration_runtime.dart';
+import '../config/feature_flags.dart';
 import '../config/sync_config.dart';
 import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
@@ -24,6 +25,9 @@ import '../protocol/messages.dart';
 import '../time/clock.dart';
 import '../time/clock_sync.dart';
 import 'drift_controller.dart';
+import 'start_policy.dart';
+import 'start_probe.dart';
+import 'start_stats.dart';
 
 enum SegmentStatus { preparing, prepared, scheduled, playing, pausing, paused }
 
@@ -42,6 +46,10 @@ class _Segment {
   int? playCallActualUs;
   bool firstMeasurementDone = false;
   final bool isResync;
+
+  /// When audio was last heard before this segment was activated (its
+  /// target time if it replaced a playing segment; null: never).
+  int? audibleBeforeUs;
 
   /// Position gained (+) or lost (−) through playback-rate corrections
   /// since the start, so start-latency learning can subtract it.
@@ -79,6 +87,9 @@ class EngineStatus {
   final int? positionUs;
   final String? lastError;
   final bool buffering;
+
+  /// The sync engine this phone is running.
+  final SyncEngineMode engine;
   const EngineStatus({
     required this.mode,
     this.lastErrorUs,
@@ -90,6 +101,7 @@ class EngineStatus {
     this.positionUs,
     this.lastError,
     this.buffering = false,
+    this.engine = SyncEngineMode.classic,
   });
 }
 
@@ -135,9 +147,19 @@ class PlaybackEngine {
   bool _disposed = false;
   ChannelRole _channel = ChannelRole.stereo;
 
-  /// Learned output start latency (µs): play calls are issued this much
-  /// before the target audible time.
-  int startLatencyUs;
+  /// Start rule and learned lead per sync engine (see start_policy.dart).
+  final Map<SyncEngineMode, StartPolicy> _policies;
+  StartPolicy _policy;
+
+  /// Engine the room asked for (the backend may run another after a
+  /// fallback); [_engineSwitch] counts selections so a slow one that was
+  /// overtaken is ignored.
+  SyncEngineMode _requestedEngine = SyncEngineMode.classic;
+  int _engineSwitch = 0;
+  bool _switchingEngine = false;
+
+  /// Per-phone feature switches.
+  FeatureFlags _flags;
 
   /// Per-device acoustic calibration (µs): how much later sound leaves the
   /// speaker than the backend's reported position implies (e.g. Bluetooth
@@ -148,8 +170,22 @@ class PlaybackEngine {
   /// Source of personalized click tracks during room calibration.
   final CalibrationTrackFactory? calibrationTracks;
 
+  /// Silent clip for warm start's test start (null: no probe).
+  final Future<TrackSource> Function()? probeTrack;
+  StartProbe? _probe;
+  bool _probeDone = false;
+  int _probeFailures = 0;
+
   /// EWMA of how long prepare() takes (µs), used to size late joins.
   int _prepareEstimateUs = 300000;
+
+  /// What this phone measured about its starts (for the phone profile).
+  final StartStats stats = StartStats();
+
+  /// Local time of the last measurement that found audio playing.
+  int? _lastAudibleAtUs;
+
+  int get prepareEstimateUs => _prepareEstimateUs;
 
   final StreamController<EngineStatus> _statusCtl = StreamController.broadcast();
 
@@ -162,18 +198,46 @@ class PlaybackEngine {
     required this.deviceId,
     required this.send,
     this.config = const SyncConfig(),
-    this.startLatencyUs = 0,
+    int startLatencyUs = 0,
+    Map<String, int> learnedLeads = const {},
     this.outputCalibrationUs = 0,
     this.calibrationTracks,
-  }) {
-    _drift = DriftController(config.drift, rateSupported: backend.capabilities.rateControl);
-    // Without a learned value, seed the start-latency compensation from the
-    // platform's own output-latency estimate (if any); learning refines it
-    // after the first start.
-    final hint = backend.capabilities.outputLatencyHintUs;
-    if (startLatencyUs == 0 && hint != null && hint > 0) startLatencyUs = hint;
+    this.probeTrack,
+    FeatureFlags flags = const FeatureFlags(),
+  })  : _flags = flags,
+        _policies = StartPolicy.forAllEngines(
+          // Without a learned value, seed the start-latency compensation
+          // from the platform's own output-latency estimate (if any);
+          // learning refines it after the first start.
+          classicLeadUs: startLatencyUs == 0 && (backend.capabilities.outputLatencyHintUs ?? 0) > 0
+              ? backend.capabilities.outputLatencyHintUs!
+              : startLatencyUs,
+          learned: learnedLeads,
+          outputCalibrationUs: outputCalibrationUs,
+        ),
+        _policy = ClassicStartPolicy(0) {
+    _policy = _policies[SyncEngineMode.classic]!;
+    _drift = DriftController(_policy.drift(config.drift), rateSupported: backend.capabilities.rateControl);
     _eventSub = backend.events.listen(_onBackendEvent);
   }
+
+  /// Current start-latency compensation (µs): backend start calls are
+  /// issued this much before the target audible time.
+  int get startLatencyUs => _policy.leadUs;
+
+  /// The learned ExoPlayer start latency (what the app persists).
+  int get classicStartLatencyUs => _policies[SyncEngineMode.classic]!.leadUs;
+
+  /// Learned leads of the other engines, by engine name (persisted too).
+  Map<String, int> get learnedLeads => {
+        for (final e in _policies.entries)
+          if (e.key != SyncEngineMode.classic) e.key.name: e.value.leadUs,
+      };
+
+  /// The sync engine this phone is running.
+  SyncEngineMode get engine => _policy.mode;
+
+  FeatureFlags get flags => _flags;
 
   Stream<EngineStatus> get statusStream => _statusCtl.stream;
   EngineStatus get status => EngineStatus(
@@ -187,12 +251,26 @@ class PlaybackEngine {
         positionUs: _lastPositionUs,
         lastError: _lastError,
         buffering: _buffering,
+        engine: _policy.mode,
       );
   DriftController get drift => _drift;
 
   void updateConfig(SyncConfig c) {
     config = c;
-    _drift.config = c.drift;
+    _drift.config = _policy.drift(c.drift);
+  }
+
+  /// Applies changed feature switches; the running engine is re-selected
+  /// when they affect it.
+  void updateFlags(FeatureFlags f) {
+    if (f == _flags) return;
+    final old = _flags;
+    _flags = f;
+    if (old.channelRoles != f.channelRoles && _state != null) _applyVolume(_state!);
+    if (_requestedEngine != SyncEngineMode.classic &&
+        (old.keepAwake != f.keepAwake || old.preciseFallback != f.preciseFallback)) {
+      _selectEngine(_requestedEngine, force: true);
+    }
   }
 
   // ----------------------------------------------------------- inputs
@@ -238,9 +316,12 @@ class PlaybackEngine {
       log.info('engine.calibration', 'room calibration offset ${outputCalibrationUs ~/ 1000} → ${roomCal ~/ 1000} ms');
       // The learned start latency aligned the *calibrated* position; a
       // calibration change of Δ means play calls must move Δ earlier.
-      startLatencyUs = (startLatencyUs + roomCal - outputCalibrationUs).clamp(-500000, 1000000);
+      for (final p in _policies.values) {
+        p.onCalibrationChanged(roomCal - outputCalibrationUs);
+      }
       outputCalibrationUs = roomCal;
     }
+    if (s.engine != _requestedEngine) _selectEngine(s.engine);
     final sig = s.playlist.map((t) => t.id).join(',');
     if (sig != _playlistSignature) {
       _playlistSignature = sig;
@@ -263,9 +344,16 @@ class PlaybackEngine {
   }
 
   void _reconcile() {
-    if (_disposed) return;
+    if (_disposed || _switchingEngine) return;
     final s = _state;
     if (s == null) return;
+    if (_probe != null) {
+      // The probe owns the backend; hand it back as soon as the room needs it.
+      if (_roomNeedsPlayer(s)) _cancelProbe();
+      return;
+    }
+    _maybeProbe(s);
+    if (_probe != null) return;
     final pending = s.pending;
     if (pending != null && _readySentGen != pending.generation && _preparingPendingGen != pending.generation) {
       unawaited(_preparePending(pending, s));
@@ -324,7 +412,7 @@ class PlaybackEngine {
       if (sb.status == SegmentStatus.preparing) return; // continue when ready
       if (sb.status == SegmentStatus.prepared && sb.positionUs == tl.anchorPositionUs) {
         final targetOut = est.toLocal(tl.anchorCoordUs);
-        final playAt = targetOut - startLatencyUs;
+        final playAt = _policy.startCallAt(targetOut);
         final ahead = playAt - clock.nowMicros();
         if (ahead >= config.scheduler.minScheduleAhead.inMicroseconds) {
           _activate(sb, targetOut, playAt);
@@ -416,7 +504,7 @@ class PlaybackEngine {
       trackId: p.trackId,
       ok: ok,
       error: error,
-      startLatencyUs: startLatencyUs,
+      startLatencyUs: _policy.leadUs,
       rttP95Us: clockSource.rttP95Us,
       uncertaintyUs: est == null ? 0 : est.uncertaintyAt(clock.nowMicros()).round(),
     ));
@@ -436,13 +524,14 @@ class PlaybackEngine {
     if (track == null) return;
     _lateJoinInFlight = true;
     final attempt = ++_lateJoinAttempts;
+    final engineAtStart = _engineSwitch;
     var succeeded = false;
     () async {
       try {
         final est = clockSource.estimate!;
         final lead = config.scheduler.lateJoinLead.inMicroseconds + _prepareEstimateUs * (1 << min(attempt - 1, 3));
         final now = clock.nowMicros();
-        final outLocal = now + lead + startLatencyUs;
+        final outLocal = now + lead + _policy.leadUs;
         final pos = tl.expectedPositionAt(est.toRemote(outLocal));
         final dur = track.durationUs;
         if (dur != null && pos >= dur) {
@@ -457,11 +546,12 @@ class PlaybackEngine {
         if (!resync) _standby = seg;
         await backend.prepare(segmentId: seg.id, source: src, positionUs: pos);
         _updatePrepareEstimate(clock.nowMicros() - t0);
+        if (engineAtStart != _engineSwitch) return; // prepared on an engine that is gone
         if (_state?.timeline.generation != tl.generation || !_state!.timeline.isPlaying) return;
         seg.status = SegmentStatus.prepared;
         final est2 = clockSource.estimate!;
         final targetOut = est2.toLocal(tl.coordTimeForPosition(pos));
-        final playAt = targetOut - startLatencyUs;
+        final playAt = _policy.startCallAt(targetOut);
         if (playAt - clock.nowMicros() < config.scheduler.minScheduleAhead.inMicroseconds) {
           log.warn('engine.lateJoin.retry', 'prepare took too long (attempt $attempt); retrying further ahead');
           if (identical(_standby, seg)) _standby = null;
@@ -501,6 +591,8 @@ class PlaybackEngine {
   }
 
   void _activate(_Segment seg, int targetOutLocal, int playAtLocal) {
+    // A segment that replaces a playing one starts on a busy output.
+    seg.audibleBeforeUs = _active?.status == SegmentStatus.playing ? targetOutLocal : _lastAudibleAtUs;
     seg
       ..status = SegmentStatus.scheduled
       ..targetOutLocalUs = targetOutLocal
@@ -508,7 +600,7 @@ class PlaybackEngine {
     _active = seg;
     if (identical(_standby, seg)) _standby = null;
     _drift.reset();
-    log.debug('engine.schedule', 'play call for g${seg.generation} scheduled in ${(playAtLocal - clock.nowMicros()) ~/ 1000} ms (latency comp ${startLatencyUs ~/ 1000} ms)');
+    log.debug('engine.schedule', 'play call for g${seg.generation} scheduled in ${(playAtLocal - clock.nowMicros()) ~/ 1000} ms (latency comp ${_policy.leadUs ~/ 1000} ms)');
     unawaited(backend
         .startAt(segmentId: seg.id, atLocalUs: playAtLocal)
         .catchError((Object e) => _fail('start failed: $e')));
@@ -526,8 +618,8 @@ class PlaybackEngine {
   Duration _nextDriftInterval() {
     final m = _drift.mode;
     return (m == CorrectionMode.inSync || m == CorrectionMode.idle)
-        ? config.drift.reportIntervalIdle
-        : config.drift.reportIntervalActive;
+        ? _drift.config.reportIntervalIdle
+        : _drift.config.reportIntervalActive;
   }
 
   Future<void> _driftTick() async {
@@ -548,10 +640,14 @@ class PlaybackEngine {
     if (s == null || a == null) return;
     final tl = s.timeline;
     final now = clock.nowMicros();
+    if (a.status == SegmentStatus.scheduled && now - (a.playCallPlannedUs ?? now) > _startWatchdogUs) {
+      _startFailed(a); // the play call never happened (lost event, dropped segment)
+      return;
+    }
     if (!tl.isPlaying || a.generation != tl.generation || a.status != SegmentStatus.playing) {
       return;
     }
-    final settleAt = (a.targetOutLocalUs ?? now) + config.drift.settleTime.inMicroseconds;
+    final settleAt = (a.targetOutLocalUs ?? now) + _drift.config.settleTime.inMicroseconds;
     if (now < settleAt) return;
     final est = clockSource.estimate;
     if (est == null) return;
@@ -573,8 +669,9 @@ class PlaybackEngine {
     final rendered = sample.positionUs - outputCalibrationUs;
     final error = rendered - expected;
     _lastErrorUs = error;
+    if (sample.playing) _lastAudibleAtUs = sample.atLocalUs;
 
-    final learnAt = (a.targetOutLocalUs ?? now) + config.drift.latencyLearnDelay.inMicroseconds;
+    final learnAt = (a.targetOutLocalUs ?? now) + _drift.config.latencyLearnDelay.inMicroseconds;
     if (!a.firstMeasurementDone && now >= learnAt) {
       a.firstMeasurementDone = true;
       _learnStartLatency(a, error - a.rateCorrectionAt(sample.atLocalUs).round());
@@ -582,6 +679,7 @@ class PlaybackEngine {
 
     final unc = est.uncertaintyAt(now);
     final d = _drift.onMeasurement(errorUs: error.toDouble(), uncertaintyUs: unc, nowUs: now);
+    if (d.mode == CorrectionMode.inSync) stats.addSteady(_policy.mode, error);
     if (d.newRate != null) {
       log.debug('drift.rate', 'rate → ${d.newRate!.toStringAsFixed(4)} (error ${(d.filteredErrorUs / 1000).toStringAsFixed(1)} ms)');
       a.noteRate(now, d.newRate!);
@@ -602,14 +700,37 @@ class PlaybackEngine {
     _emit();
   }
 
+  /// How long a scheduled segment may wait for its play call.
+  static const _startWatchdogUs = 2000000;
+
+  /// The backend could not start the segment it was told to (e.g. a
+  /// concurrent prepare replaced its standby player). Without this the
+  /// engine would wait for that start forever and never correct again;
+  /// instead it forgets the segment and re-joins the running timeline.
+  void _startFailed(_Segment a) {
+    if (!identical(_active, a)) return;
+    log.warn('engine.startFailed', 'segment for g${a.generation} did not start; re-joining the timeline');
+    _active = null;
+    _drift.reset();
+    _scheduleReconcile();
+  }
+
   void _learnStartLatency(_Segment a, int errorUs) {
     // error < 0: audio started late → issue play calls earlier next time.
-    if (errorUs.abs() > 500000) return; // implausible; something else is wrong
-    final before = startLatencyUs;
-    // Negative values are allowed: an uncalibrated device whose reported
-    // position runs ahead of its sound (Bluetooth) learns to play "late".
-    startLatencyUs = (startLatencyUs - 0.6 * errorUs).round().clamp(-500000, 1000000);
-    log.info('engine.started', 'g${a.generation} start error ${(errorUs / 1000).toStringAsFixed(1)} ms (est.); latency comp ${before ~/ 1000} → ${startLatencyUs ~/ 1000} ms');
+    final before = _policy.leadUs;
+    if (errorUs.abs() <= 500000) {
+      final idleFrom = a.audibleBeforeUs;
+      stats.addStart(StartRecord(
+        engine: _policy.mode,
+        leadUs: before,
+        calibrationUs: outputCalibrationUs,
+        errorUs: errorUs,
+        idleBeforeUs: idleFrom == null ? null : max(0, (a.targetOutLocalUs ?? 0) - idleFrom),
+        resync: a.isResync,
+      ));
+    }
+    if (!_policy.learn(errorUs)) return; // implausible; something else is wrong
+    log.info('engine.started', 'g${a.generation} start error ${(errorUs / 1000).toStringAsFixed(1)} ms (est.); latency comp ${before ~/ 1000} → ${_policy.leadUs ~/ 1000} ms');
     send(PlaybackEventMsg(
       kind: PlaybackEventKind.started,
       generation: a.generation,
@@ -643,6 +764,7 @@ class PlaybackEngine {
       rttP95Us: clockSource.rttP95Us,
       mode: _drift.mode,
       playerState: sample.state,
+      engine: _policy.mode == _requestedEngine ? null : _policy.mode,
     ));
   }
 
@@ -669,14 +791,131 @@ class PlaybackEngine {
         _buffering = false;
       case AudioEventKind.ended:
         _playerState = 'ended';
+      case AudioEventKind.engineFallback:
+        _onEngineFallback(e.message);
       case AudioEventKind.error:
         _fail('audio backend error: ${e.message}');
         send(PlaybackEventMsg(
             kind: PlaybackEventKind.error,
             generation: a?.generation ?? 0,
             detail: e.message == null || e.message!.length <= 200 ? e.message : e.message!.substring(0, 200)));
+        if (a != null && a.id == e.segmentId && a.status == SegmentStatus.scheduled) _startFailed(a);
     }
     _emit();
+  }
+
+  // ------------------------------------------------------ start probe
+
+  bool _roomNeedsPlayer(RoomState s) => s.pending != null || s.timeline.isPlaying;
+
+  /// Warm start: measures the start delay with a silent test start when the
+  /// room is idle and nothing is prepared (see start_probe.dart).
+  void _maybeProbe(RoomState s) {
+    final source = probeTrack;
+    if (source == null || _probeDone || _probeFailures >= 3) return;
+    if (_policy.mode != SyncEngineMode.warm || !_flags.startProbe) return;
+    if (_roomNeedsPlayer(s) || _active != null || _standby != null || _lateJoinInFlight) return;
+    final probe = StartProbe(backend: backend, clock: clock, log: log, settle: _drift.config.latencyLearnDelay);
+    _probe = probe;
+    final policy = _policy;
+    log.info('engine.probe', 'measuring this phone\'s start delay with a silent test start');
+    () async {
+      int? latency;
+      try {
+        latency = await probe.run(segmentId: ++_segSeq, source: await source());
+      } catch (e) {
+        log.warn('engine.probe', 'test start failed: $e');
+      }
+      if (!identical(_probe, probe)) return;
+      _probe = null;
+      if (latency != null && identical(_policy, policy)) {
+        final before = policy.leadUs;
+        // The lead aligns the *calibrated* position (see learnStartLatency).
+        policy.leadUs = (latency + outputCalibrationUs).clamp(StartPolicy.minLeadUs, StartPolicy.maxLeadUs);
+        _probeDone = true;
+        stats.addProbe(latency);
+        log.info('engine.probe', 'start delay ${latency ~/ 1000} ms; latency comp ${before ~/ 1000} → ${policy.leadUs ~/ 1000} ms');
+        send(PlaybackEventMsg(
+            kind: PlaybackEventKind.started, generation: 0, data: {'probeUs': latency, 'latencyCompUs': before}));
+      } else if (!probe.cancelled) {
+        _probeFailures++;
+      }
+      _emit();
+      if (!_disposed) _scheduleReconcile();
+    }();
+  }
+
+  void _cancelProbe() {
+    final p = _probe;
+    if (p == null || p.cancelled) return;
+    log.debug('engine.probe', 'test start cancelled: the room needs the player');
+    unawaited(p.cancel().whenComplete(() {
+      if (identical(_probe, p)) _probe = null;
+      _scheduleReconcile();
+    }));
+  }
+
+  // ---------------------------------------------------------- engines
+
+  /// Switches the backend to [mode]. Everything prepared on the old engine
+  /// is dropped; the next reconcile re-prepares the pending segment and
+  /// joins the running timeline on the new one.
+  void _selectEngine(SyncEngineMode mode, {bool force = false}) {
+    if (mode == _requestedEngine && !force) return;
+    _requestedEngine = mode;
+    final seq = ++_engineSwitch;
+    _switchingEngine = true;
+    _dropSegments();
+    final probe = _probe;
+    _probe = null;
+    if (probe != null) unawaited(probe.cancel());
+    _probeDone = false;
+    _probeFailures = 0;
+    log.info('engine.select', 'switching to the ${mode.label} engine');
+    () async {
+      var effective = SyncEngineMode.classic;
+      try {
+        effective = await backend.useEngine(mode, _flags);
+      } catch (e) {
+        _fail('could not start the ${mode.label} engine: $e');
+      }
+      if (seq != _engineSwitch || _disposed) return; // overtaken
+      _usePolicy(effective);
+      if (effective != mode) {
+        log.warn('engine.fallback', '${mode.label} engine unavailable here; using ${effective.label}');
+      }
+      _switchingEngine = false;
+      _reconcile();
+    }();
+  }
+
+  void _onEngineFallback(String? why) {
+    if (_policy.mode == SyncEngineMode.classic) return;
+    log.warn('engine.fallback', '${_policy.mode.label} engine failed (${why ?? 'unknown'}); using Classic');
+    _lastError = 'sync engine fell back to Classic: ${why ?? 'unknown error'}';
+    _dropSegments();
+    _usePolicy(SyncEngineMode.classic);
+    _scheduleReconcile();
+  }
+
+  void _usePolicy(SyncEngineMode mode) {
+    _policy = _policies[mode]!;
+    // Rate support belongs to the engine (the precise renderer resamples
+    // even where ExoPlayer cannot change speed).
+    final old = _drift;
+    _drift = DriftController(_policy.drift(config.drift), rateSupported: backend.capabilities.rateControl)
+      ..seekCount = old.seekCount
+      ..rateChangeCount = old.rateChangeCount;
+    _emit();
+  }
+
+  /// Forgets every segment (the backend already stopped them).
+  void _dropSegments() {
+    _active = null;
+    _standby = null;
+    _readySentGen = null;
+    _preparingPendingGen = null;
+    _lateJoinAttempts = 0;
   }
 
   // ------------------------------------------------------------ misc
@@ -685,7 +924,7 @@ class PlaybackEngine {
     final me = s.participant(deviceId);
     final v = (s.masterVolume * (me?.volume ?? 1.0)).clamp(0.0, 1.0);
     unawaited(backend.setVolume(v).catchError((Object e) => _fail('setVolume failed: $e')));
-    final ch = me?.channel ?? ChannelRole.stereo;
+    final ch = _flags.channelRoles ? (me?.channel ?? ChannelRole.stereo) : ChannelRole.stereo;
     if (ch != _channel) {
       _channel = ch;
       log.info('engine.channel', 'channel role → ${ch.name}');
@@ -757,7 +996,17 @@ class PlaybackEngine {
     _disposed = true;
     _driftTimer?.cancel();
     _reconcileTimer?.cancel();
+    await _probe?.cancel();
     await _eventSub?.cancel();
+    if (_requestedEngine != SyncEngineMode.classic) {
+      // Leaving the party: stop warm start's keep-awake output and release
+      // the precise renderer (this also stops playback).
+      try {
+        await backend.useEngine(SyncEngineMode.classic, _flags);
+      } catch (e) {
+        log.warn('engine.dispose', 'could not release the ${_requestedEngine.label} engine: $e');
+      }
+    }
     await backend.stop();
     await _statusCtl.close();
   }

@@ -19,6 +19,7 @@ import 'dart:io';
 import 'dart:math';
 
 import '../audio/audio_backend.dart';
+import '../config/feature_flags.dart';
 import '../config/sync_config.dart';
 import '../distribution/track_resolver.dart';
 import '../model/room_state.dart';
@@ -31,6 +32,7 @@ import '../time/clock.dart';
 import '../time/clock_sync.dart';
 import '../transport/transport.dart';
 import '../calibration/calibration_runtime.dart';
+import 'clock_prober.dart';
 import 'failover.dart';
 import 'playback_engine.dart';
 
@@ -71,6 +73,12 @@ class ParticipantOptions {
   /// Initial start-latency compensation (persisted from earlier sessions).
   final int initialStartLatencyUs;
 
+  /// Learned leads of the non-classic engines, by engine name (persisted).
+  final Map<String, int> learnedLeads;
+
+  /// Per-phone feature switches (see `config/feature_flags.dart`).
+  final FeatureFlags flags;
+
   /// Acoustic output calibration (see [PlaybackEngine.outputCalibrationUs]).
   final int outputCalibrationUs;
 
@@ -83,6 +91,9 @@ class ParticipantOptions {
 
   /// Where calibration click tracks are written (default: a temp folder).
   final CalibrationTrackFactory? calibrationTracks;
+
+  /// Silent clip for warm start's test start (null: no test start).
+  final Future<TrackSource> Function()? probeTrack;
 
   /// Enables coordinator failover by succession (see `failover.dart`).
   /// Null keeps the conservative behaviour: report that the room is gone.
@@ -100,12 +111,15 @@ class ParticipantOptions {
     this.reconnect = const ReconnectConfig(),
     this.limits = const ProtocolLimits(),
     this.initialStartLatencyUs = 0,
+    this.learnedLeads = const {},
+    this.flags = const FeatureFlags(),
     this.outputCalibrationUs = 0,
     this.keyDeriver,
     this.failover,
     this.failoverPolicy = const FailoverPolicy(),
     this.recorder,
     this.calibrationTracks,
+    this.probeTrack,
   });
 }
 
@@ -141,12 +155,15 @@ class ParticipantSession implements ClockSource {
   Timer? _handshakeTimer;
   Timer? _heartbeatTimer;
   Timer? _livenessTimer;
-  Timer? _probeTimer;
+  late final ClockProber _prober = ClockProber(
+    clock: clock,
+    config: () => _config.clock,
+    estimate: () => _estimator.estimate,
+    active: () => _hs == _Hs.active,
+    send: _send,
+  );
   int _lastHeardUs = 0;
   bool _coordinatorSuspect = false;
-  int _probeId = 0;
-  int _burstRemaining = 0;
-  final Map<int, int> _outstandingProbes = {};
   int _requestId = 0;
   final Map<int, Completer<ControlAckMsg>> _pendingControls = {};
   bool _closed = false;
@@ -202,7 +219,10 @@ class ParticipantSession implements ClockSource {
       deviceId: options.deviceId,
       send: _sendIfActive,
       startLatencyUs: options.initialStartLatencyUs,
+      learnedLeads: options.learnedLeads,
+      flags: options.flags,
       outputCalibrationUs: options.outputCalibrationUs,
+      probeTrack: options.probeTrack,
       calibrationTracks: options.calibrationTracks ??
           FileCalibrationTrackFactory(Directory('${Directory.systemTemp.path}/syncsphere-calibration')),
     );
@@ -499,8 +519,7 @@ class ParticipantSession implements ClockSource {
     _handshakeTimer?.cancel();
     _heartbeatTimer?.cancel();
     _livenessTimer?.cancel();
-    _probeTimer?.cancel();
-    _outstandingProbes.clear();
+    _prober.stop();
     _sub?.cancel();
     _sub = null;
     _conn?.close();
@@ -658,8 +677,7 @@ class ParticipantSession implements ClockSource {
       case StateMsg(:final state):
         _applyState(state);
       case ClockResponseMsg(:final id, :final t1, :final t2, :final t3):
-        final sent = _outstandingProbes.remove(id);
-        if (sent == null || sent != t1) {
+        if (_prober.answered(id, t1) == null) {
           log.debug('clock.unexpected', 'unexpected/duplicate clock response $id');
           return;
         }
@@ -733,34 +751,9 @@ class ParticipantSession implements ClockSource {
         log.warn('session.coordinator', 'coordinator unresponsive for ${silent ~/ 1000} ms');
         _setPhase(_phase); // notify listeners
       }
-      final timeout = _config.clock.probeTimeout.inMicroseconds;
-      _outstandingProbes.removeWhere((_, t1) => clock.nowMicros() - t1 > timeout);
+      _prober.expire();
     });
-    _burstRemaining = _config.clock.burstSamples;
-    _scheduleProbe(Duration.zero);
-  }
-
-  void _scheduleProbe(Duration delay) {
-    _probeTimer?.cancel();
-    _probeTimer = Timer(delay, () {
-      if (_hs != _Hs.active) return;
-      final id = ++_probeId;
-      final t1 = clock.nowMicros();
-      _outstandingProbes[id] = t1;
-      _send(ClockRequestMsg(id, t1));
-      Duration next;
-      if (_burstRemaining > 0) {
-        _burstRemaining--;
-        next = _config.clock.burstSpacing;
-      } else {
-        final e = _estimator.estimate;
-        final stable = e != null &&
-            e.uncertaintyMicros <= _config.clock.stableUncertainty.inMicroseconds &&
-            e.samplesInWindow >= 8;
-        next = stable ? _config.clock.slowInterval : _config.clock.fastInterval;
-      }
-      _scheduleProbe(next);
-    });
+    _prober.start();
   }
 
   // ------------------------------------------------------------ control

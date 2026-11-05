@@ -2,6 +2,14 @@
 ///
 ///     dart run bin/benchmark.dart --suite quick --out ../../benchmarks/out
 ///     dart run bin/benchmark.dart --suite full  --out ../../benchmarks/results/simulated
+///     dart run bin/benchmark.dart --suite engines --out ../../benchmarks/out/engines
+///     dart run bin/benchmark.dart --suite engines --profiles phones.json
+///
+/// `engines` compares the three sync engines on phone-like devices (output
+/// standby, ExoPlayer report smoothing). `--profiles` replaces those
+/// modelled phones with profiles exported from real phones (Diagnostics →
+/// Export phone profile; a single export, a list of them, or diagnostics
+/// reports that contain one).
 ///
 /// Writes, per scenario, `<name>.json` (scenario + metrics) and
 /// `<name>.samples.jsonl` (ground-truth error samples, subsampled), plus
@@ -25,7 +33,53 @@ const _controls = [
   ScheduledAction(Duration(seconds: 95), NextTrackAction()),
 ];
 
-List<Scenario> _suite(String name, int seed) {
+/// Play, pause long enough for the output to sleep, resume, seek, next.
+const _engineControls = [
+  ScheduledAction(Duration(seconds: 3), PlayAction()),
+  ScheduledAction(Duration(seconds: 30), PauseAction()),
+  ScheduledAction(Duration(seconds: 38), PlayAction()),
+  ScheduledAction(Duration(seconds: 60), SeekAction(Duration(minutes: 2))),
+  ScheduledAction(Duration(seconds: 80), NextTrackAction()),
+];
+
+List<Scenario> _engineSuite(int seed, List<DeviceAudioProfile>? measured) {
+  final profiles = measured ??
+      const [DeviceAudioProfile.phoneFlagship, DeviceAudioProfile.phoneMidrange, DeviceAudioProfile.phoneLowEnd];
+  final set = measured == null ? 'phones' : 'measured';
+  return [
+    for (final engine in SyncEngineMode.values)
+      for (final net in [NetworkCondition.wifiGood, NetworkCondition.wifiTypical])
+        for (final n in [3, 5])
+          Scenario(
+            name: 'engines-${engine.name}-$set-${net.name}-n$n',
+            participants: n,
+            network: net,
+            duration: const Duration(seconds: 110),
+            profiles: profiles,
+            engine: engine,
+            actions: _engineControls,
+            seed: seed + n,
+          ),
+  ];
+}
+
+/// Profiles from a file written by Diagnostics → Export phone profile.
+List<DeviceAudioProfile> _loadProfiles(String path) {
+  final Object? json = jsonDecode(File(path).readAsStringSync());
+  final items = json is List ? json : [json];
+  final out = <DeviceAudioProfile>[];
+  for (final it in items) {
+    if (it is! Map) continue;
+    final m = it.cast<String, Object?>();
+    final p = m['phoneProfile'] ?? m['profile'] ?? m;
+    if (p is Map) out.add(DeviceAudioProfile.fromJson(p.cast<String, Object?>()));
+  }
+  if (out.isEmpty) throw FormatException('no phone profiles in $path');
+  return out;
+}
+
+List<Scenario> _suite(String name, int seed, {List<DeviceAudioProfile>? measured}) {
+  if (name == 'engines') return _engineSuite(seed, measured);
   final out = <Scenario>[];
   final counts = name == 'quick' ? [2, 5] : [2, 3, 5, 10];
   final nets = name == 'quick'
@@ -192,7 +246,8 @@ List<Scenario> _suite(String name, int seed) {
 
 Future<void> main(List<String> argv) async {
   final p = ArgParser()
-    ..addOption('suite', allowed: ['quick', 'full'], defaultsTo: 'quick')
+    ..addOption('suite', allowed: ['quick', 'full', 'engines'], defaultsTo: 'quick')
+    ..addOption('profiles', help: 'engines suite: phone profiles exported from real phones (JSON)')
     ..addOption('out', defaultsTo: '../../benchmarks/out')
     ..addOption('seed', defaultsTo: '42')
     ..addOption('only', help: 'Run only scenarios whose name contains this')
@@ -201,7 +256,8 @@ Future<void> main(List<String> argv) async {
   final outDir = Directory(a['out'] as String)..createSync(recursive: true);
   final seed = int.parse(a['seed'] as String);
   final every = int.parse(a['sample-every'] as String);
-  var scenarios = _suite(a['suite'] as String, seed);
+  final measured = a['profiles'] == null ? null : _loadProfiles(a['profiles'] as String);
+  var scenarios = _suite(a['suite'] as String, seed, measured: measured);
   if (a['only'] != null) scenarios = scenarios.where((s) => s.name.contains(a['only'] as String)).toList();
 
   final summary = <Map<String, Object?>>[];
@@ -224,6 +280,9 @@ Future<void> main(List<String> argv) async {
       'network': sc.network.name,
       'durationS': sc.duration.inSeconds,
       'spreadSteady': q('interDeviceSpreadMs_steady'),
+      'spreadFirst3s': q('interDeviceSpreadMs_first3s'),
+      'engine': sc.engine.name,
+      'coldStarts': m['coldStarts'],
       'spreadAll': q('interDeviceSpreadMs_all'),
       'startSkew': q('startSkewMs'),
       'driftLastMinute': q('driftSpreadLastMinuteMs'),
@@ -246,6 +305,7 @@ Future<void> main(List<String> argv) async {
   final meta = {
     'environment': 'SIMULATED — virtual time, modelled clocks/network/audio devices. NOT hardware measurements.',
     'suite': a['suite'],
+    if (measured != null) 'profiles': [for (final p in measured) p.name],
     'seed': seed,
     'dart': Platform.version,
     'generatedAt': DateTime.now().toUtc().toIso8601String(),
@@ -279,6 +339,24 @@ String _markdown(Map<String, Object?> meta, List<Map<String, Object?>> rows) {
         '${_f(m('startSkew'), 'median')} | ${_f(m('startSkew'), 'max')} | ${_f(m('driftLastMinute'), 'p95')} | '
         '${_f(m('commandLatency'), 'median')} | ${_f(m('clockErrUs'), 'p95')} | ${r['coverage'] ?? '–'} | '
         '${_f(m('recovery'), 'max')} | ${r['resyncs']} | ${r['failed']} |');
+  }
+  final eng = rows.where((r) => (r['scenario'] as String).startsWith('engines-')).toList();
+  if (eng.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('## Sync engines (SIMULATED)')
+      ..writeln()
+      ..writeln('First 3 s = the spread right after each start, resume, seek and track change (where an echo is '
+          'heard); steady = afterwards. Cold starts = starts that found the speaker output asleep.')
+      ..writeln()
+      ..writeln('| scenario | engine | first 3 s p50 | first 3 s p95 | steady p95 | start skew p50 | start skew max | cold starts | resyncs |')
+      ..writeln('|---|---|---|---|---|---|---|---|---|');
+    for (final r in eng) {
+      Map<String, Object?> m(String k) => r[k] as Map<String, Object?>;
+      b.writeln('| ${r['scenario']} | ${r['engine']} | ${_f(m('spreadFirst3s'), 'median')} | ${_f(m('spreadFirst3s'), 'p95')} | '
+          '${_f(m('spreadSteady'), 'p95')} | ${_f(m('startSkew'), 'median')} | ${_f(m('startSkew'), 'max')} | '
+          '${r['coldStarts']} | ${r['resyncs']} |');
+    }
   }
   final fo = rows.where((r) => r['failover'] != null).toList();
   if (fo.isNotEmpty) {

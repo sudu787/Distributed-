@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../audio/audio_backend.dart';
 import '../model/calibration_plan.dart';
@@ -36,6 +37,19 @@ class FileCalibrationTrackFactory implements CalibrationTrackFactory {
     }
     return TrackSource(uri: f.uri, trackId: plan.trackId);
   }
+}
+
+/// Warm start's test clip (see `participant/start_probe.dart`): silence,
+/// written once into [dir] and reused.
+Future<TrackSource> silentProbeTrack(Directory dir,
+    {int sampleRate = 48000, Duration length = const Duration(milliseconds: 3500)}) async {
+  final f = File('${dir.path}/probe-silence-$sampleRate.wav');
+  if (!await f.exists()) {
+    await dir.create(recursive: true);
+    final frames = sampleRate * length.inMilliseconds ~/ 1000;
+    await f.writeAsBytes(encodeWav(Int16List(frames), sampleRate: sampleRate), flush: true);
+  }
+  return TrackSource(uri: f.uri, trackId: 'probe-silence');
 }
 
 /// Microphone access for the calibration listener.

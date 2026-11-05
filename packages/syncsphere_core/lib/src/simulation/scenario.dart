@@ -22,6 +22,7 @@ import '../audio/audio_backend.dart';
 import '../calibration/calibration_analysis.dart';
 import '../calibration/calibration_runtime.dart';
 import '../calibration/click_track.dart';
+import '../config/feature_flags.dart';
 import '../config/sync_config.dart';
 import '../model/calibration_plan.dart';
 import '../coordinator/room_coordinator.dart';
@@ -35,6 +36,7 @@ import '../transport/transport.dart';
 import '../protocol/messages.dart';
 import '../time/clock.dart';
 import '../transport/memory_transport.dart';
+import 'profile_fit.dart';
 import 'sim_audio_backend.dart';
 
 /// Named network conditions (per-direction delay models).
@@ -134,6 +136,30 @@ class ChannelRoleAction extends SimAction {
 
 /// The killed original host (device 0) comes back and rejoins as a guest; with
 /// failover enabled the current coordinator hands the role back to it.
+/// The host switches the room's sync engine.
+class SetEngineAction extends SimAction {
+  final SyncEngineMode engine;
+  const SetEngineAction(this.engine);
+  @override
+  String get label => 'engine(${engine.name})';
+}
+
+/// Participant [participant]'s selected engine breaks (it falls back to
+/// Classic).
+class EngineFailureAction extends SimAction {
+  final int participant;
+  const EngineFailureAction(this.participant);
+  @override
+  String get label => 'engineFailure(p$participant)';
+}
+
+/// The listener phone runs a Sync check (needs [Scenario.listenerIndex]).
+class SyncCheckAction extends SimAction {
+  const SyncCheckAction();
+  @override
+  String get label => 'syncCheck';
+}
+
 class ReviveCoordinatorAction extends SimAction {
   const ReviveCoordinatorAction();
   @override
@@ -188,6 +214,12 @@ class Scenario {
   /// Distance (m) from each device to the listener, cycled like [profiles].
   final List<double> distancesM;
 
+  /// The room's sync engine from the start.
+  final SyncEngineMode engine;
+
+  /// Every phone's feature switches.
+  final FeatureFlags flags;
+
   const Scenario({
     required this.name,
     required this.participants,
@@ -206,6 +238,8 @@ class Scenario {
     this.handback = const HandbackPolicy(),
     this.listenerIndex,
     this.distancesM = const [1.0],
+    this.engine = SyncEngineMode.classic,
+    this.flags = const FeatureFlags(),
   });
 
   Map<String, Object?> toJson() => {
@@ -222,6 +256,8 @@ class Scenario {
         if (failover) 'handbackStableForS': handback.stableFor.inSeconds,
         if (listenerIndex != null) 'listener': listenerIndex,
         if (listenerIndex != null) 'distancesM': distancesM,
+        if (engine != SyncEngineMode.classic) 'engine': engine.name,
+        if (flags != const FeatureFlags()) 'flags': flags.toJson(),
       };
 }
 
@@ -323,6 +359,7 @@ class SimulationRunner {
       log: coordLog,
     );
     coordinator.setPlaylist(tracks);
+    coordinator.setSyncEngine(sc.engine);
     coordinator.serve(net.listen('coordinator'));
     coordinator.start();
 
@@ -413,6 +450,7 @@ class SimulationRunner {
           deviceId: id,
           displayName: 'Device $i',
           joinKey: 'SIMKEY01',
+          flags: sc.flags,
           outputCalibrationUs: sc.outputCalibrationUs[i % sc.outputCalibrationUs.length],
           failover: failover,
           recorder: sc.listenerIndex == i
@@ -427,6 +465,7 @@ class SimulationRunner {
                 )
               : null,
           calibrationTracks: const _SimCalibrationTracks(),
+          probeTrack: () async => TrackSource(uri: Uri.parse('sim:///probe'), trackId: 'probe'),
         ),
         connector: net.connector(id, address, link),
         clock: clk,
@@ -598,6 +637,18 @@ class SimulationRunner {
           unawaited(devices[li].session.control(ControlAction.calibrate).then((ack) {
             logEvent(ack.accepted ? 'calibration-started' : 'calibration-rejected', {'error': ack.error});
           }));
+        case SetEngineAction(:final engine):
+          unawaited(devices[coordDeviceIndex].session.control(ControlAction.setSyncEngine, mode: engine.name).then((ack) {
+            if (!ack.accepted) logEvent('control-rejected', {'action': 'setSyncEngine', 'error': ack.error});
+          }));
+        case EngineFailureAction(:final participant):
+          devices[participant].backend.failEngine('simulated renderer failure');
+        case SyncCheckAction():
+          final li = sc.listenerIndex;
+          if (li == null) throw StateError('SyncCheckAction needs Scenario.listenerIndex');
+          unawaited(devices[li].session.control(ControlAction.syncCheck).then((ack) {
+            logEvent(ack.accepted ? 'synccheck-started' : 'synccheck-rejected', {'error': ack.error});
+          }));
         case ChannelRoleAction(:final participant, :final role):
           unawaited(devices[participant].session.control(ControlAction.setChannelRole, mode: role.name).then((ack) {
             if (!ack.accepted) logEvent('control-rejected', {'action': 'setChannelRole', 'error': ack.error});
@@ -648,6 +699,8 @@ class SimulationRunner {
     // ------------------------------------------------------- metrics
     final spread = SampleStats();
     final spreadSteady = SampleStats();
+    // The first 3 s of every generation: what an "echo at the start" is.
+    final spreadEarly = SampleStats();
     final absErr = SampleStats();
     final pairwise = SampleStats();
     // Exclude 3 s after every generation change for "steady state".
@@ -668,7 +721,11 @@ class SimulationRunner {
       }
       if (sp != null) {
         spread.add(sp / 1000);
-        if (s.trueUs - genStart[s.generation]! > 3000000) spreadSteady.add(sp / 1000);
+        if (s.trueUs - genStart[s.generation]! > 3000000) {
+          spreadSteady.add(sp / 1000);
+        } else {
+          spreadEarly.add(sp / 1000);
+        }
       }
     }
 
@@ -713,12 +770,13 @@ class SimulationRunner {
       if (errs.length >= 2) startSkews.add((errs.reduce(max) - errs.reduce(min)) / 1000);
     }
 
-    var resyncs = 0, rateChanges = 0, stalls = 0, playCalls = 0;
+    var resyncs = 0, rateChanges = 0, stalls = 0, playCalls = 0, coldStarts = 0;
     for (final d in devices) {
       resyncs += d.session.engine.drift.seekCount;
       rateChanges += d.backend.rateChanges;
       stalls += d.backend.stallCount;
       playCalls += d.backend.playCalls;
+      coldStarts += d.backend.coldStarts;
     }
 
     // Drift: mean |error| in the first vs last minute of steady playback.
@@ -766,6 +824,7 @@ class SimulationRunner {
       'interDeviceSpreadMs_all': spread.summary(),
       if (sc.listenerIndex != null) 'listenerSpreadMs_steady': listenerSpread.summary(),
       'interDeviceSpreadMs_steady': spreadSteady.summary(),
+      'interDeviceSpreadMs_first3s': spreadEarly.summary(),
       'pairwiseErrorMs': pairwise.summary(),
       'absErrorVsTimelineMs': absErr.summary(),
       'startSkewMs': startSkews.summary(),
@@ -784,6 +843,36 @@ class SimulationRunner {
       'rateChanges': rateChanges,
       'bufferingStalls': stalls,
       'playCalls': playCalls,
+      'coldStarts': coldStarts,
+      'engines': [for (final d in devices) d.session.engine.engine.name],
+      // What "Export phone profile" would give for each simulated phone.
+      'fittedProfiles': [
+        for (final d in devices)
+          () {
+            final f = fitDeviceProfile(
+              name: d.id,
+              stats: d.session.engine.stats,
+              rateControl: d.backend.capabilities.rateControl,
+              prepareUs: d.session.engine.prepareEstimateUs,
+            );
+            return {'profile': f.profile.toJson(), 'basis': f.basis};
+          }()
+      ],
+      // What the room shows: phones running another engine than the room's.
+      'engineOverrides': {
+        for (final p in coordinator.state.participants)
+          if (p.engine != null) p.deviceId: p.engine!.name
+      },
+      if (coordinator.state.syncChecks.isNotEmpty)
+        'syncChecks': [
+          for (final c in coordinator.state.syncChecks)
+            {
+              'engine': c.engine.name,
+              if (c.error != null) 'error': c.error,
+              'startSpreadMs': c.startSpreadUs == null ? null : c.startSpreadUs! / 1000,
+              'settledSpreadMs': c.settledSpreadUs == null ? null : c.settledSpreadUs! / 1000,
+            }
+        ],
       'networkFrames': net.framesSent,
       'networkBytes': net.bytesSent,
       'networkBytesPerDevicePerSecond': sc.participants == 0

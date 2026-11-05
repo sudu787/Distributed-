@@ -229,6 +229,28 @@ class DriftConfig {
     this.minRateStep = 0.0005,
   });
 
+  /// Parameters for the precise renderer, whose positions come from the
+  /// speaker's frame timestamps (no ExoPlayer smoothing to wait out) and
+  /// whose rate changes shift pitch (it resamples): measure soon after a
+  /// start, correct small errors gently, and resync (which is exact there)
+  /// rather than bend the pitch for long.
+  DriftConfig forPreciseRenderer() => DriftConfig(
+        reportIntervalActive: reportIntervalActive,
+        reportIntervalIdle: reportIntervalIdle,
+        settleTime: const Duration(milliseconds: 300),
+        latencyLearnDelay: const Duration(milliseconds: 400),
+        medianWindow: 3,
+        rateEnterThreshold: const Duration(milliseconds: 3),
+        rateExitThreshold: const Duration(microseconds: 1000),
+        seekThreshold: const Duration(milliseconds: 60),
+        seekThresholdNoRate: const Duration(milliseconds: 20),
+        seekConfirmations: 2,
+        seekCooldown: const Duration(seconds: 3),
+        correctionHorizon: correctionHorizon,
+        maxRateDelta: 0.003,
+        minRateStep: 0.0002,
+      );
+
   Map<String, Object?> toJson() => {
         'reportIntervalActiveMs': reportIntervalActive.inMilliseconds,
         'reportIntervalIdleMs': reportIntervalIdle.inMilliseconds,
