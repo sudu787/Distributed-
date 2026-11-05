@@ -88,6 +88,12 @@ class RoomService {
   /// When a temporary host hands the role back to the original host.
   final HandbackPolicy handbackPolicy;
 
+  /// Per-phone feature switches (Settings → Sync engine); applied live.
+  FeatureFlags flags;
+
+  /// Sync engine of the parties this phone hosts (the host's choice).
+  SyncEngineMode hostEngine;
+
   final EventLog log;
   RoomCoordinator? coordinator;
   ParticipantSession? session;
@@ -119,6 +125,8 @@ class RoomService {
     this.failoverPort = kDefaultRoomPort,
     this.watchForNewerCoordinator = true,
     this.handbackPolicy = const HandbackPolicy(),
+    this.flags = const FeatureFlags(),
+    this.hostEngine = SyncEngineMode.classic,
     EventLog? log,
   })  : clock = clock ?? SystemMonotonicClock.instance,
         log = log ?? EventLog(clock: clock ?? SystemMonotonicClock.instance, source: 'room', capacity: 3000);
@@ -160,6 +168,7 @@ class RoomService {
         ..clear()
         ..addEntries(tracks.map((t) => MapEntry(t.id, File(t.path))));
       coord.setPlaylist([for (final t in tracks) t.toTrackInfo()]);
+      coord.setSyncEngine(hostEngine);
       _files = _fileServerFor(coord);
       _server = await _bind(port);
       coord.serve(_server!);
@@ -425,6 +434,9 @@ class RoomService {
         roomId: roomId,
         transferBase: Uri.parse('http://$host:$port'),
         initialStartLatencyUs: identity.startLatencyUs,
+        learnedLeads: identity.engineLeadsUs,
+        flags: flags,
+        probeTrack: () => silentProbeTrack(Directory('${cacheDir.path}/calibration')),
         outputCalibrationUs: identity.outputCalibrationUs,
         keyDeriver: (r, k, i) => key != null && key.roomId == r && key.iterations == i
             ? Future.value(key)
@@ -450,7 +462,8 @@ class RoomService {
       // first play or seek does not wait for it.
       String? warmed;
       _subs.add(s.stateStream.listen((r) {
-        final sig = r.playlist.map((t) => t.id).join(',');
+        // The precise engine needs every track decoded: re-warm on a switch.
+        final sig = '${r.engine.name}|${r.playlist.map((t) => t.id).join(',')}';
         if (sig == warmed) return;
         warmed = sig;
         unawaited(warmer.warm(r.playlist, r.distribution));
@@ -547,13 +560,43 @@ class RoomService {
     final s = session;
     final id = _identity;
     if (s == null || id == null) return id;
-    final learned = s.engine.startLatencyUs;
+    final learned = s.engine.classicStartLatencyUs;
     final cal = s.engine.outputCalibrationUs;
-    if (learned != id.startLatencyUs || cal != id.outputCalibrationUs) {
-      _identity = id.copyWith(startLatencyUs: learned, outputCalibrationUs: cal);
+    final leads = s.engine.learnedLeads;
+    if (learned != id.startLatencyUs || cal != id.outputCalibrationUs || !_sameLeads(leads, id.engineLeadsUs)) {
+      _identity = id.copyWith(startLatencyUs: learned, outputCalibrationUs: cal, engineLeadsUs: leads);
       await store.saveIdentity(_identity!);
     }
     return _identity;
+  }
+
+  static bool _sameLeads(Map<String, int> a, Map<String, int> b) =>
+      a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
+
+  /// Applies changed feature switches to this phone, now.
+  void updateFlags(FeatureFlags f) {
+    flags = f;
+    session?.engine.updateFlags(f);
+  }
+
+  /// Remembers [mode] for the parties this phone hosts and, when this phone
+  /// is hosting now, switches the running party. Returns null on success,
+  /// else the error.
+  Future<String?> setSyncEngine(SyncEngineMode mode) async {
+    hostEngine = mode;
+    final s = session;
+    if (s == null || coordinator == null) return null; // not hosting: just the default
+    final ack = await s.control(ControlAction.setSyncEngine, mode: mode.name);
+    return ack.accepted ? null : (ack.error ?? 'failed');
+  }
+
+  /// Measures how far apart the phones sound at this phone's microphone
+  /// (see `CalibrationPlan.measureOnly`). Returns null on success.
+  Future<String?> syncCheck() async {
+    final s = session;
+    if (s == null) return 'not in a party';
+    final ack = await s.control(ControlAction.syncCheck);
+    return ack.accepted ? null : (ack.error ?? 'failed');
   }
 
   /// Leaves the party. The original host ends it for everyone ([endParty]);

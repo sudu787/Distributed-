@@ -71,18 +71,26 @@ class DeviceIdentity {
   /// Acoustic calibration offset (µs), see PlaybackEngine.outputCalibrationUs.
   final int outputCalibrationUs;
 
+  /// Learned start leads of the warm and precise engines (µs, by engine
+  /// name); [startLatencyUs] is Classic's.
+  final Map<String, int> engineLeadsUs;
+
   const DeviceIdentity({
     required this.deviceId,
     required this.displayName,
     this.startLatencyUs = 0,
     this.outputCalibrationUs = 0,
+    this.engineLeadsUs = const {},
   });
 
-  DeviceIdentity copyWith({String? displayName, int? startLatencyUs, int? outputCalibrationUs}) => DeviceIdentity(
+  DeviceIdentity copyWith(
+          {String? displayName, int? startLatencyUs, int? outputCalibrationUs, Map<String, int>? engineLeadsUs}) =>
+      DeviceIdentity(
         deviceId: deviceId,
         displayName: displayName ?? this.displayName,
         startLatencyUs: startLatencyUs ?? this.startLatencyUs,
         outputCalibrationUs: outputCalibrationUs ?? this.outputCalibrationUs,
+        engineLeadsUs: engineLeadsUs ?? this.engineLeadsUs,
       );
 }
 

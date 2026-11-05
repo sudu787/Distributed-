@@ -10,9 +10,11 @@ import '../data/models.dart';
 import '../services/room_service.dart';
 import '../state/providers.dart';
 import '../state/room_controller.dart';
+import '../state/sync_settings.dart';
 import 'format.dart';
 import 'haptics.dart';
 import 'scan_screen.dart';
+import 'sync_engine_view.dart';
 import 'widgets.dart';
 
 /// Start screen: host or join a party, nearby parties, and this phone's music.
@@ -123,6 +125,20 @@ class HomeScreen extends ConsumerWidget {
                 onTap: () {
                   Navigator.pop(c);
                   _editName(context, ref);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('Sync engine'),
+                subtitle: Text(ref.watch(hostEngineProvider).label),
+                onTap: () {
+                  Navigator.pop(c);
+                  showModalBottomSheet<void>(
+                    context: context,
+                    showDragHandle: true,
+                    isScrollControlled: true,
+                    builder: (_) => const SyncOptionsSheet(),
+                  );
                 },
               ),
               SwitchListTile(

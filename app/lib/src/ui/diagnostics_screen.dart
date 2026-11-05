@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +24,19 @@ class DiagnosticsScreen extends ConsumerWidget {
     final t = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Diagnostics'), actions: [
+        IconButton(
+          tooltip: 'Export phone profile',
+          icon: const Icon(Icons.science_outlined),
+          onPressed: () {
+            final p = ref.read(roomControllerProvider.notifier).phoneProfile();
+            if (p == null) {
+              showMessage(context, 'Join a party first.', error: true);
+              return;
+            }
+            Clipboard.setData(ClipboardData(text: const JsonEncoder.withIndent(' ').convert(p)));
+            showMessage(context, 'Phone profile copied. Save it as a .json file to compare the engines in simulation.');
+          },
+        ),
         IconButton(
           tooltip: 'Copy diagnostics report',
           icon: const Icon(Icons.copy_all),
@@ -56,6 +71,7 @@ class DiagnosticsScreen extends ConsumerWidget {
             child: Column(children: [
               InfoRow('Device ID', me.deviceId),
               InfoRow('Session', s.phase?.name ?? '—'),
+              InfoRow('Sync engine', s.engine?.engine.label ?? '—'),
               InfoRow('Clock offset to coordinator', fmtEstimate(s.clock?.offsetMicros, s.clock?.uncertaintyMicros), estimate: true),
               InfoRow('Relative clock skew', s.clock == null ? '—' : '${s.clock!.skewPpm.toStringAsFixed(1)} ppm', estimate: true),
               InfoRow('Clock samples (used / window)', s.clock == null ? '—' : '${s.clock!.samplesUsed} / ${s.clock!.samplesInWindow}'),

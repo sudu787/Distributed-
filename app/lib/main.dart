@@ -15,6 +15,7 @@ import 'src/services/artwork_service.dart';
 import 'src/services/library_service.dart';
 import 'src/services/room_service.dart';
 import 'src/state/providers.dart';
+import 'src/state/sync_settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,15 +39,20 @@ Future<void> main() async {
     prober: native?.probe,
     log: log,
   );
+  final pcmDir = Directory(p.join(cache.path, 'pcm'));
   final rooms = RoomService(
     store: store,
     cacheDir: cache,
     clock: clock,
     log: log,
     hooks: hooks ?? const NoopPlatformHooks(),
-    recorderFor: (b) => b is Media3AudioBackend ? b.calibrationRecorder() : null,
-    // VBR MP3 seeks are approximate in ExoPlayer; play exact PCM copies.
-    converterFor: (b) => b is Media3AudioBackend ? b.exactSeekConverter(Directory(p.join(cache.path, 'pcm'))) : null,
+    flags: await loadFeatureFlags(store),
+    hostEngine: await loadHostEngine(store),
+    recorderFor: (b) => exoPlayerOf(b)?.calibrationRecorder(),
+    // VBR MP3 seeks are approximate in ExoPlayer; play exact PCM copies. The
+    // precise engine plays only PCM WAV: then every track is decoded.
+    converterFor: (b) => exoPlayerOf(b)?.exactSeekConverter(pcmDir,
+        decodeEverything: () => b is ModeSwitchingBackend && b.requested == SyncEngineMode.precise),
     backendFactory: (log) async {
       if (native == null) {
         // Desktop/dev builds: follow the timeline without rendering audio.
@@ -59,7 +65,15 @@ Future<void> main() async {
         log.warn('audio.bluetooth',
             'Bluetooth output detected: its latency is not visible to sync estimates; calibrate acoustically.');
       }
-      return b;
+      final precise = PreciseAudioBackend(
+        api: MethodChannelPreciseApi(),
+        nativeEvents: native.events,
+        bridge: b.bridge,
+        clock: clock,
+        log: log,
+        convert: b.exactSeekConverter(pcmDir, decodeEverything: () => true),
+      );
+      return ModeSwitchingBackend(classic: b, precise: precise);
     },
   );
 

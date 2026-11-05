@@ -9,6 +9,7 @@ import '../data/models.dart';
 import '../services/network_info.dart';
 import '../services/room_service.dart';
 import 'providers.dart';
+import 'sync_settings.dart';
 
 enum RoomStatus { none, starting, active, leaving }
 
@@ -325,11 +326,86 @@ class RoomController extends Notifier<RoomViewState> {
   /// Starts an acoustic calibration measured by this device's microphone.
   Future<String?> calibrateHere() => control(ControlAction.calibrate);
 
+  /// Sync check: measures how far apart the phones sound at this phone's
+  /// microphone. The result appears in [RoomState.syncChecks].
+  Future<String?> syncCheck() => control(ControlAction.syncCheck);
+
+  /// Host: switches the party's sync engine (remembered for next time).
+  Future<String?> setSyncEngine(SyncEngineMode mode) => ref.read(hostEngineProvider.notifier).set(mode);
+
+  /// Host: runs a Sync check with every engine in turn, then returns to the
+  /// engine that was in use. [progress] gets a line per step. Returns null
+  /// on success, else the error.
+  Future<String?> compareEngines({void Function(String)? progress}) async {
+    final room = state.room;
+    if (room == null) return 'Not in a room';
+    final original = room.engine;
+    try {
+      for (final mode in SyncEngineMode.values) {
+        progress?.call('Testing ${mode.label}…');
+        final err = await _svc.setSyncEngine(mode);
+        if (err != null) return describeControlError(err, ControlAction.setSyncEngine);
+        // Let every phone switch (warm start also measures its start delay).
+        await Future<void>.delayed(Duration(seconds: mode == SyncEngineMode.warm ? 5 : 2));
+        final lastId = state.room?.syncChecks.lastOrNull?.id ?? -1;
+        final checkErr = await syncCheck();
+        if (checkErr != null) return checkErr;
+        final done = await _waitFor(() => (state.room?.syncChecks.lastOrNull?.id ?? -1) > lastId,
+            const Duration(seconds: 90));
+        if (!done) return 'The ${mode.label} check did not finish';
+      }
+      return null;
+    } finally {
+      await _svc.setSyncEngine(original);
+      progress?.call('');
+    }
+  }
+
+  Future<bool> _waitFor(bool Function() test, Duration timeout) async {
+    final until = DateTime.now().add(timeout);
+    while (!test()) {
+      if (DateTime.now().isAfter(until) || state.room == null) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return true;
+  }
+
   /// Whether this device can take part as the calibration listener.
   bool get hasMicrophone => _svc.session?.calibrationListener != null;
 
   /// Last calibration measured by this device's microphone.
   CalibrationOutcome? get lastCalibration => _svc.session?.calibrationListener?.lastOutcome;
+
+  /// This phone as a simulator profile, fitted from what it measured about
+  /// its own starts (plus its offset in the last Sync check). Feed it to
+  /// `dart run bin/benchmark.dart --suite engines --profiles <file>` to
+  /// compare the engines on this phone in simulation. Null outside a party.
+  Map<String, Object?>? phoneProfile() {
+    final s = _svc.session;
+    if (s == null) return null;
+    final me = ref.read(identityProvider);
+    final exo = exoPlayerOf(s.backend);
+    final check = state.room?.syncChecks.lastOrNull;
+    SyncCheckDevice? mine;
+    for (final d in check?.devices ?? const <SyncCheckDevice>[]) {
+      if (d.deviceId == me.deviceId) mine = d;
+    }
+    final fit = fitDeviceProfile(
+      name: (exo?.deviceInfo['model'] as String?) ?? me.displayName,
+      stats: s.engine.stats,
+      rateControl: exo?.capabilities.rateControl ?? s.backend.capabilities.rateControl,
+      prepareUs: s.engine.prepareEstimateUs,
+      acousticOffsetUs: mine?.settledUs,
+    );
+    return {
+      'kind': 'syncsphere-phone-profile-v1',
+      'generatedAt': DateTime.now().toIso8601String(),
+      'engine': s.engine.engine.name,
+      'profile': fit.profile.toJson(),
+      'basis': fit.basis,
+      'starts': [for (final r in s.engine.stats.starts) r.toJson()],
+    };
+  }
 
   /// A JSON report of this device's sync state and recent events, for
   /// troubleshooting. Contains no join key and no audio.
@@ -338,7 +414,7 @@ class RoomController extends Notifier<RoomViewState> {
     final id = ref.read(identityProvider);
     final c = s?.estimate;
     final e = s?.engine.status;
-    final backend = s?.backend;
+    final backend = exoPlayerOf(s?.backend);
     final cal = lastCalibration;
     final report = <String, Object?>{
       'kind': 'syncsphere-diagnostics-v1',
@@ -348,8 +424,9 @@ class RoomController extends Notifier<RoomViewState> {
         'name': id.displayName,
         'savedOutputCalibrationUs': id.outputCalibrationUs,
         'savedStartLatencyUs': id.startLatencyUs,
-        if (backend is Media3AudioBackend) 'audio': backend.deviceInfo,
-        if (backend is Media3AudioBackend) 'bridgeUncertaintyUs': backend.bridge.estimate?.uncertaintyMicros.round(),
+        if (backend != null) 'audio': backend.deviceInfo,
+        if (backend != null) 'bridgeUncertaintyUs': backend.bridge.estimate?.uncertaintyMicros.round(),
+        'engine': s?.engine.engine.name,
       },
       'session': {
         'phase': s?.phase.name,
@@ -390,6 +467,7 @@ class RoomController extends Notifier<RoomViewState> {
               'localCorrectionUs': d.correctionUs,
             }
         ],
+      if (phoneProfile() case final p?) 'phoneProfile': p['profile'],
       if (state.room != null) 'room': state.room!.toJson(),
       if (state.diagnostics != null) 'roomDiagnostics': state.diagnostics!.toBody(),
       'events': [for (final ev in _svc.log.recent(limit: maxEvents, minLevel: EventLevel.debug)) ev.toJson()],
@@ -444,10 +522,13 @@ final roomControllerProvider = NotifierProvider<RoomController, RoomViewState>(R
 String describeControlError(String? error, ControlAction action) => switch (error) {
       ControlError.unauthorized when action == ControlAction.addTrack =>
         'Only the host and phones allowed to control the music can add songs.',
+      ControlError.unauthorized when action == ControlAction.setSyncEngine => 'Only the host can change the sync engine.',
       ControlError.unauthorized => 'You are a listener in this room. Ask the host for control.',
       ControlError.busy => 'The room is calibrating. Try again in a few seconds.',
       ControlError.invalid when action == ControlAction.calibrate =>
         'Calibration needs microphone access and at least one connected device.',
+      ControlError.invalid when action == ControlAction.syncCheck =>
+        'The sync check needs microphone access and at least one connected device.',
       ControlError.invalid when action == ControlAction.addTrack => 'The host could not add that song.',
       ControlError.staleVersion => 'The room changed meanwhile — try again.',
       ControlError.notConnected => 'Not connected to the room coordinator.',

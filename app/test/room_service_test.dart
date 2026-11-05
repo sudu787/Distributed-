@@ -32,7 +32,8 @@ void main() {
     var store = await SqfliteAppStore.open(path, factory: databaseFactoryFfi);
     final id = await store.loadIdentity(defaultName: 'Phone');
     expect(isValidDeviceId(id.deviceId), isTrue);
-    await store.saveIdentity(id.copyWith(displayName: 'Kitchen', startLatencyUs: 61000));
+    await store.saveIdentity(
+        id.copyWith(displayName: 'Kitchen', startLatencyUs: 61000, engineLeadsUs: const {'warm': 43000, 'precise': -2000}));
     await store.upsertTrack(LibraryTrack(
         id: 'a' * 64, path: '/x.mp3', title: 'X', sizeBytes: 10, addedAt: DateTime(2026)));
     await store.addRoomHistory(RoomHistoryEntry(
@@ -43,6 +44,7 @@ void main() {
     expect(again.deviceId, id.deviceId);
     expect(again.displayName, 'Kitchen');
     expect(again.startLatencyUs, 61000);
+    expect(again.engineLeadsUs, {'warm': 43000, 'precise': -2000});
     expect((await store.libraryTracks()).single.title, 'X');
     expect((await store.roomHistory()).single.roomName, 'Party');
     await store.close();
@@ -92,6 +94,45 @@ void main() {
       expect(await store.setting('haptics'), '0');
       await store.close();
     }
+  });
+
+  test('sync engine: the host\'s choice reaches the party; switches, flags and learned leads apply', () async {
+    final clock = SystemMonotonicClock.instance;
+    final store = MemoryAppStore();
+    final svc = RoomService(
+      store: store,
+      cacheDir: Directory('${tmp.path}/cache-engine'),
+      backendFactory: (log) async => NullAudioBackend(clock.nowMicros),
+      keyDeriver: (r, k, i) async => RoomKey.derive(roomId: r, joinKey: k, iterations: i),
+      kdfIterations: 50,
+      watchForNewerCoordinator: false,
+      hostEngine: SyncEngineMode.warm,
+    );
+    Future<void> waitFor(bool Function() cond, String what) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (!cond()) {
+        if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+
+    final id = await store.loadIdentity(defaultName: 'Host');
+    final lib = LibraryService(store: store, libraryDir: Directory('${tmp.path}/englib'), log: EventLog(clock: clock));
+    final song = await lib.import(await audioFile('engine.mp3', 7));
+    await svc.host(identity: id, roomName: 'Engines', tracks: [song], port: 0);
+    expect(svc.coordinator!.state.engine, SyncEngineMode.warm);
+    await waitFor(() => svc.session!.engine.engine == SyncEngineMode.warm, 'the phone running warm start');
+
+    expect(await svc.setSyncEngine(SyncEngineMode.precise), isNull);
+    await waitFor(() => svc.session!.engine.engine == SyncEngineMode.precise, 'switch to precise');
+    expect(svc.hostEngine, SyncEngineMode.precise);
+
+    svc.updateFlags(const FeatureFlags(channelRoles: false));
+    expect(svc.session!.engine.flags.channelRoles, isFalse);
+
+    await svc.leave();
+    final saved = await store.loadIdentity(defaultName: 'x');
+    expect(saved.engineLeadsUs.keys, containsAll(['warm', 'precise']));
   });
 
   test('a guest allowed to control adds songs from their phone; the host and others get them', () async {

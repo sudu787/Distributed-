@@ -79,7 +79,19 @@ class SqfliteAppStore implements AppStore {
       displayName: await _get('display_name') ?? defaultName,
       startLatencyUs: int.tryParse(await _get('start_latency_us') ?? '') ?? 0,
       outputCalibrationUs: int.tryParse(await _get('output_calibration_us') ?? '') ?? 0,
+      engineLeadsUs: _leads(await _get('engine_leads_us')),
     );
+  }
+
+  static Map<String, int> _leads(String? json) {
+    if (json == null) return const {};
+    try {
+      final m = jsonDecode(json);
+      if (m is! Map) return const {};
+      return {for (final e in m.entries) if (e.key is String && e.value is int) e.key as String: e.value as int};
+    } on FormatException {
+      return const {};
+    }
   }
 
   @override
@@ -87,6 +99,7 @@ class SqfliteAppStore implements AppStore {
     await _set('display_name', i.displayName);
     await _set('start_latency_us', '${i.startLatencyUs}');
     await _set('output_calibration_us', '${i.outputCalibrationUs}');
+    await _set('engine_leads_us', jsonEncode(i.engineLeadsUs));
   }
 
   @override

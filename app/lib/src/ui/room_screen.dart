@@ -11,6 +11,7 @@ import 'format.dart';
 import 'haptics.dart';
 import 'player_screen.dart';
 import 'queue_view.dart';
+import 'sync_engine_view.dart';
 import 'widgets.dart';
 
 /// The room: three tabs (Playing, Queue, Speakers). Technical details live
@@ -244,6 +245,8 @@ class SpeakersView extends ConsumerWidget {
             hostName: room.participant(room.coordinatorId)?.displayName ?? 'Another phone',
             ownerName: room.participant(room.preferredCoordinator!)?.displayName,
           ),
+        const SyncEngineCard(),
+        const SyncCheckCard(),
         const _ListeningSpot(),
         const SectionHeader('Phones'),
         for (final p in room.participants) _DeviceTile(p: p, d: diag[p.deviceId], isMe: p.deviceId == me),
